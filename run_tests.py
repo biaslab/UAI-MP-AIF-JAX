@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+"""Run all JAX implementation tests."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+
+def run_minigrid_tests():
+    from tests.test_minigrid import (
+        TestIndexMappingFunctions,
+        TestGetNextOrientation,
+        TestGetNextDoorKeyState,
+        TestCoordinateFunctions,
+        TestRelativeCoords,
+        TestGetNextAgentPosition,
+        TestFOV,
+        TestTensorGeneration,
+    )
+
+    print("=" * 60)
+    print("MINIGRID ENVIRONMENT TESTS")
+    print("=" * 60)
+
+    print("Running index mapping tests...")
+    t = TestIndexMappingFunctions()
+    t.test_flatten_unflatten_state_index_roundtrip()
+    t.test_flatten_state_index_unique()
+    t.test_flatten_state_index_boundary()
+    t.test_flatten_unflatten_position_index_roundtrip()
+    t.test_flatten_position_index_unique()
+    t.test_flatten_position_index_boundary()
+    t.test_integration_realistic_grid_sizes()
+    print("  Index mapping: PASSED")
+
+    print("Running orientation tests...")
+    t = TestGetNextOrientation()
+    t.test_turn_left_rotates_counter_clockwise()
+    t.test_turn_right_rotates_clockwise()
+    t.test_other_actions_dont_change_orientation()
+    print("  Orientation: PASSED")
+
+    print("Running door key state tests...")
+    t = TestGetNextDoorKeyState()
+    t.test_pickup_when_facing_key()
+    t.test_pickup_when_not_facing_key()
+    t.test_pickup_when_key_already_held()
+    t.test_toggle_when_facing_door_with_key()
+    t.test_toggle_when_not_facing_door()
+    t.test_toggle_without_key()
+    t.test_toggle_when_door_already_open()
+    t.test_other_actions_dont_change_door_key_state()
+    print("  Door key state: PASSED")
+
+    print("Running coordinate tests...")
+    t = TestCoordinateFunctions()
+    t.test_state_to_coords_roundtrip()
+    t.test_state_to_coords_specific()
+    t.test_key_position()
+    t.test_door_position()
+    print("  Coordinates: PASSED")
+
+    print("Running relative coords tests...")
+    t = TestRelativeCoords()
+    t.test_get_relative_coords_facing_right()
+    t.test_get_relative_coords_facing_up()
+    t.test_in_fov()
+    t.test_relative_to_fov_coords()
+    print("  Relative coords: PASSED")
+
+    print("Running agent position tests...")
+    t = TestGetNextAgentPosition()
+    t.test_forward_open_space()
+    t.test_forward_into_wall()
+    t.test_forward_into_closed_door()
+    t.test_forward_through_open_door()
+    t.test_turn_doesnt_move()
+    print("  Agent position: PASSED")
+
+    print("Running FOV tests...")
+    t = TestFOV()
+    t.test_fov_basic_shape()
+    t.test_fov_contains_door_when_visible()
+    t.test_fov_contains_key_when_visible()
+    t.test_fov_key_at_agent_when_held()
+    print("  FOV: PASSED")
+
+    print("Running tensor generation tests (may take a moment)...")
+    t = TestTensorGeneration()
+    t.test_observation_tensor_shape()
+    t.test_observation_tensor_is_onehot()
+    t.test_orientation_observation_tensor_shape()
+    t.test_orientation_observation_tensor_is_onehot()
+    t.test_transition_tensor_shape()
+    t.test_transition_tensor_is_stochastic()
+    print("  Tensor generation: PASSED")
+
+
+def run_inference_tests():
+    from tests.test_inference import (
+        TestMessages,
+        TestStateInference,
+        TestPlanning,
+        TestAgentIntegration,
+    )
+
+    print()
+    print("=" * 60)
+    print("INFERENCE TESTS")
+    print("=" * 60)
+
+    print("Running message tests...")
+    t = TestMessages()
+    t.test_forward_message_2d_shape()
+    t.test_forward_message_2d_normalized()
+    t.test_forward_message_2d_deterministic()
+    t.test_forward_message_4d_shape()
+    t.test_backward_message_2d_shape()
+    t.test_backward_message_2d_onehot_observation()
+    t.test_combine_messages_normalized()
+    t.test_combine_messages_single()
+    print("  Messages: PASSED")
+
+    print("Running state inference tests (generating tensors)...")
+    t = TestStateInference()
+    t.setup_method()
+    t.test_state_inference_shapes()
+    t.test_state_inference_converges()
+    print("  State inference: PASSED")
+
+    print("Running planning tests...")
+    t = TestPlanning()
+    t.setup_method()
+    t.test_planning_output_shape()
+    t.test_planning_respects_action_mask()
+    t.test_marginalize_static_shape()
+    t.test_marginalize_static_is_stochastic()
+    print("  Planning: PASSED")
+
+    print("Running agent integration tests...")
+    t = TestAgentIntegration()
+    t.test_agent_creation()
+    t.test_agent_step()
+    t.test_agent_reset()
+    print("  Agent integration: PASSED")
+
+
+def main():
+    run_minigrid_tests()
+    run_inference_tests()
+
+    print()
+    print("=" * 60)
+    print("ALL TESTS PASSED!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

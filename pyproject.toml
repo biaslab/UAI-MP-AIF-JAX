@@ -1,0 +1,11 @@
+[project]
+name = "minigridmp-aif-jax"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gymnasium>=1.2.3",
+    "jax>=0.6.2",
+    "minigrid>=3.0.0",
+]

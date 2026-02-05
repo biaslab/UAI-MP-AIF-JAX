@@ -1,0 +1,583 @@
+import numpy as np
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from environments.minigrid import (
+    flatten_state_index,
+    unflatten_state_index,
+    flatten_position_index,
+    unflatten_position_index,
+    get_next_orientation,
+    get_next_door_key_state,
+    get_next_agent_position,
+    state_to_coords,
+    coords_to_state,
+    key_position,
+    door_position,
+    get_relative_coords,
+    in_fov,
+    relative_to_fov_coords,
+    get_fov,
+    ActionType,
+    Orientation,
+    CellType,
+)
+
+
+class TestIndexMappingFunctions:
+    def test_flatten_unflatten_state_index_roundtrip(self):
+        n_states = 4
+        n_orientations = 4
+        n_door_key_states = 3
+
+        for state in range(n_states):
+            for orientation in range(n_orientations):
+                for door_key_state in range(n_door_key_states):
+                    flat_idx = flatten_state_index(
+                        state,
+                        orientation,
+                        door_key_state,
+                        n_states,
+                        n_orientations,
+                        n_door_key_states,
+                    )
+                    assert flat_idx >= 0
+                    assert flat_idx < n_states * n_orientations * n_door_key_states
+
+                    state_out, orientation_out, door_key_state_out = (
+                        unflatten_state_index(
+                            flat_idx, n_states, n_orientations, n_door_key_states
+                        )
+                    )
+                    assert state_out == state
+                    assert orientation_out == orientation
+                    assert door_key_state_out == door_key_state
+
+    def test_flatten_state_index_unique(self):
+        n_states = 4
+        n_orientations = 4
+        n_door_key_states = 3
+
+        all_indices = set()
+        for state in range(n_states):
+            for orientation in range(n_orientations):
+                for door_key_state in range(n_door_key_states):
+                    flat_idx = flatten_state_index(
+                        state,
+                        orientation,
+                        door_key_state,
+                        n_states,
+                        n_orientations,
+                        n_door_key_states,
+                    )
+                    assert flat_idx not in all_indices
+                    all_indices.add(flat_idx)
+
+        assert len(all_indices) == n_states * n_orientations * n_door_key_states
+
+    def test_flatten_state_index_boundary(self):
+        n_states = 4
+        n_orientations = 4
+        n_door_key_states = 3
+
+        assert (
+            flatten_state_index(0, 0, 0, n_states, n_orientations, n_door_key_states)
+            == 0
+        )
+        max_flat = flatten_state_index(
+            n_states - 1,
+            n_orientations - 1,
+            n_door_key_states - 1,
+            n_states,
+            n_orientations,
+            n_door_key_states,
+        )
+        assert max_flat == n_states * n_orientations * n_door_key_states - 1
+
+    def test_flatten_unflatten_position_index_roundtrip(self):
+        n_key_positions = 5
+        n_door_positions = 6
+
+        for key_pos in range(n_key_positions):
+            for door_pos in range(n_door_positions):
+                flat_idx = flatten_position_index(
+                    key_pos, door_pos, n_key_positions, n_door_positions
+                )
+                assert flat_idx >= 0
+                assert flat_idx < n_key_positions * n_door_positions
+
+                key_pos_out, door_pos_out = unflatten_position_index(
+                    flat_idx, n_key_positions, n_door_positions
+                )
+                assert key_pos_out == key_pos
+                assert door_pos_out == door_pos
+
+    def test_flatten_position_index_unique(self):
+        n_key_positions = 5
+        n_door_positions = 6
+
+        all_indices = set()
+        for key_pos in range(n_key_positions):
+            for door_pos in range(n_door_positions):
+                flat_idx = flatten_position_index(
+                    key_pos, door_pos, n_key_positions, n_door_positions
+                )
+                assert flat_idx not in all_indices
+                all_indices.add(flat_idx)
+
+        assert len(all_indices) == n_key_positions * n_door_positions
+
+    def test_flatten_position_index_boundary(self):
+        n_key_positions = 5
+        n_door_positions = 6
+
+        assert flatten_position_index(0, 0, n_key_positions, n_door_positions) == 0
+        max_flat = flatten_position_index(
+            n_key_positions - 1,
+            n_door_positions - 1,
+            n_key_positions,
+            n_door_positions,
+        )
+        assert max_flat == n_key_positions * n_door_positions - 1
+
+    def test_integration_realistic_grid_sizes(self):
+        n = 5
+        n_states = n * n  # 25
+        n_orientations = 4
+        n_door_key_states = 3
+        n_key_positions = n_states - 2 * n  # 15
+        n_door_positions = n_states - 2 * n  # 15
+
+        for state in range(n_states):
+            for orientation in range(n_orientations):
+                for door_key_state in range(n_door_key_states):
+                    flat_idx = flatten_state_index(
+                        state,
+                        orientation,
+                        door_key_state,
+                        n_states,
+                        n_orientations,
+                        n_door_key_states,
+                    )
+                    state_out, orientation_out, door_key_state_out = (
+                        unflatten_state_index(
+                            flat_idx, n_states, n_orientations, n_door_key_states
+                        )
+                    )
+                    assert state_out == state
+                    assert orientation_out == orientation
+                    assert door_key_state_out == door_key_state
+
+        for key_pos in range(n_key_positions):
+            for door_pos in range(n_door_positions):
+                flat_idx = flatten_position_index(
+                    key_pos, door_pos, n_key_positions, n_door_positions
+                )
+                key_pos_out, door_pos_out = unflatten_position_index(
+                    flat_idx, n_key_positions, n_door_positions
+                )
+                assert key_pos_out == key_pos
+                assert door_pos_out == door_pos
+
+
+class TestGetNextOrientation:
+    def test_turn_left_rotates_counter_clockwise(self):
+        assert (
+            get_next_orientation(Orientation.RIGHT, ActionType.TURN_LEFT)
+            == Orientation.UP
+        )
+        assert (
+            get_next_orientation(Orientation.UP, ActionType.TURN_LEFT)
+            == Orientation.LEFT
+        )
+        assert (
+            get_next_orientation(Orientation.LEFT, ActionType.TURN_LEFT)
+            == Orientation.DOWN
+        )
+        assert (
+            get_next_orientation(Orientation.DOWN, ActionType.TURN_LEFT)
+            == Orientation.RIGHT
+        )
+
+    def test_turn_right_rotates_clockwise(self):
+        assert (
+            get_next_orientation(Orientation.RIGHT, ActionType.TURN_RIGHT)
+            == Orientation.DOWN
+        )
+        assert (
+            get_next_orientation(Orientation.DOWN, ActionType.TURN_RIGHT)
+            == Orientation.LEFT
+        )
+        assert (
+            get_next_orientation(Orientation.LEFT, ActionType.TURN_RIGHT)
+            == Orientation.UP
+        )
+        assert (
+            get_next_orientation(Orientation.UP, ActionType.TURN_RIGHT)
+            == Orientation.RIGHT
+        )
+
+    def test_other_actions_dont_change_orientation(self):
+        for orientation in [
+            Orientation.RIGHT,
+            Orientation.DOWN,
+            Orientation.LEFT,
+            Orientation.UP,
+        ]:
+            assert get_next_orientation(orientation, ActionType.FORWARD) == orientation
+            assert get_next_orientation(orientation, ActionType.PICKUP) == orientation
+            assert get_next_orientation(orientation, ActionType.TOGGLE) == orientation
+
+
+class TestGetNextDoorKeyState:
+    # door_key_state: 0 = key on ground, 1 = key held, 2 = door open
+
+    def test_pickup_when_facing_key(self):
+        # Agent at (1,1), facing RIGHT, key at (2,1) - key is directly in front
+        # Note: coordinates are 0-indexed now
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.PICKUP, 0
+            )
+            == 1
+        )
+
+        # Agent at (1,1), facing UP, key at (1,2) - key is directly in front
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.UP, 1, 2, 3, 1, ActionType.PICKUP, 0
+            )
+            == 1
+        )
+
+        # Agent at (1,1), facing DOWN, key at (1,0) - key is directly in front
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.DOWN, 1, 0, 3, 1, ActionType.PICKUP, 0
+            )
+            == 1
+        )
+
+        # Agent at (1,1), facing LEFT, key at (0,1) - key is directly in front
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.LEFT, 0, 1, 3, 1, ActionType.PICKUP, 0
+            )
+            == 1
+        )
+
+    def test_pickup_when_not_facing_key(self):
+        # Agent at (1,1), facing RIGHT, key at (1,2) - key is not in front
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.RIGHT, 1, 2, 3, 1, ActionType.PICKUP, 0
+            )
+            == 0
+        )
+
+        # Agent at (1,1), facing RIGHT, key at (3,1) - key is 2 cells away, not adjacent
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.RIGHT, 3, 1, 4, 1, ActionType.PICKUP, 0
+            )
+            == 0
+        )
+
+    def test_pickup_when_key_already_held(self):
+        # Even if facing key position, state stays at 1
+        assert (
+            get_next_door_key_state(
+                1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.PICKUP, 1
+            )
+            == 1
+        )
+
+    def test_toggle_when_facing_door_with_key(self):
+        # Agent at (2,1), facing RIGHT, door at (3,1), has key (state=1)
+        assert (
+            get_next_door_key_state(
+                2, 1, Orientation.RIGHT, 0, 0, 3, 1, ActionType.TOGGLE, 1
+            )
+            == 2
+        )
+
+        # Agent at (2,1), facing UP, door at (2,2), has key (state=1)
+        assert (
+            get_next_door_key_state(
+                2, 1, Orientation.UP, 0, 0, 2, 2, ActionType.TOGGLE, 1
+            )
+            == 2
+        )
+
+    def test_toggle_when_not_facing_door(self):
+        # Agent at (2,1), facing RIGHT, door at (2,2) - not facing door
+        assert (
+            get_next_door_key_state(
+                2, 1, Orientation.RIGHT, 0, 0, 2, 2, ActionType.TOGGLE, 1
+            )
+            == 1
+        )
+
+    def test_toggle_without_key(self):
+        # Agent at (2,1), facing RIGHT, door at (3,1), no key (state=0)
+        assert (
+            get_next_door_key_state(
+                2, 1, Orientation.RIGHT, 3, 1, 3, 1, ActionType.TOGGLE, 0
+            )
+            == 0
+        )
+
+    def test_toggle_when_door_already_open(self):
+        # Door already open, stays open
+        assert (
+            get_next_door_key_state(
+                2, 1, Orientation.RIGHT, 0, 0, 3, 1, ActionType.TOGGLE, 2
+            )
+            == 2
+        )
+
+    def test_other_actions_dont_change_door_key_state(self):
+        for state in [0, 1, 2]:
+            assert (
+                get_next_door_key_state(
+                    1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.TURN_LEFT, state
+                )
+                == state
+            )
+            assert (
+                get_next_door_key_state(
+                    1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.TURN_RIGHT, state
+                )
+                == state
+            )
+            assert (
+                get_next_door_key_state(
+                    1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.FORWARD, state
+                )
+                == state
+            )
+
+
+class TestCoordinateFunctions:
+    def test_state_to_coords_roundtrip(self):
+        n = 5
+        for s in range(n * n):
+            x, y = state_to_coords(s, n)
+            assert coords_to_state(x, y, n) == s
+
+    def test_state_to_coords_specific(self):
+        n = 5
+        assert state_to_coords(0, n) == (0, 0)
+        assert state_to_coords(1, n) == (0, 1)
+        assert state_to_coords(n, n) == (1, 0)
+        assert state_to_coords(n * n - 1, n) == (n - 1, n - 1)
+
+    def test_key_position(self):
+        n = 5
+        assert key_position(0, n) == (0, 0)
+        assert key_position(1, n) == (0, 1)
+        assert key_position(n, n) == (1, 0)
+
+    def test_door_position(self):
+        n = 5
+        # Door positions start in column 1 (0-indexed), not column 0
+        assert door_position(0, n) == (1, 0)
+        assert door_position(1, n) == (1, 1)
+        assert door_position(n, n) == (2, 0)
+
+
+class TestRelativeCoords:
+    def test_get_relative_coords_facing_right(self):
+        # Agent at (2,2) facing RIGHT
+        # Target at (3,2) should be (0, 1) - directly in front
+        assert get_relative_coords(2, 2, Orientation.RIGHT, 3, 2) == (0, 1)
+        # Target at (2,3) should be (-1, 0) - to the left
+        assert get_relative_coords(2, 2, Orientation.RIGHT, 2, 3) == (-1, 0)
+        # Target at (2,1) should be (1, 0) - to the right
+        assert get_relative_coords(2, 2, Orientation.RIGHT, 2, 1) == (1, 0)
+
+    def test_get_relative_coords_facing_up(self):
+        # Agent at (2,2) facing UP
+        # Target at (2,3) should be (0, 1) - directly in front
+        assert get_relative_coords(2, 2, Orientation.UP, 2, 3) == (0, 1)
+
+    def test_in_fov(self):
+        assert in_fov(0, 0) == True
+        assert in_fov(0, 6) == True
+        assert in_fov(-3, 0) == True
+        assert in_fov(3, 0) == True
+        assert in_fov(-4, 0) == False
+        assert in_fov(4, 0) == False
+        assert in_fov(0, -1) == False
+        assert in_fov(0, 7) == False
+
+    def test_relative_to_fov_coords(self):
+        # Agent is at (3, 6) in FOV coordinates (0-indexed)
+        assert relative_to_fov_coords(0, 0) == (3, 6)  # Agent position
+        assert relative_to_fov_coords(0, 1) == (3, 5)  # One step forward
+        assert relative_to_fov_coords(-1, 0) == (2, 6)  # One step left
+        assert relative_to_fov_coords(1, 0) == (4, 6)  # One step right
+
+
+class TestGetNextAgentPosition:
+    def test_forward_open_space(self):
+        n = 5
+        # Agent at (2,2), facing RIGHT, no obstacles in the way
+        new_state = get_next_agent_position(
+            2, 2, Orientation.RIGHT, 4, 2, 0, 0, 2, ActionType.FORWARD, n
+        )
+        assert state_to_coords(new_state, n) == (3, 2)
+
+    def test_forward_into_wall(self):
+        n = 5
+        # Agent at (4,2), facing RIGHT, would go out of bounds
+        new_state = get_next_agent_position(
+            4, 2, Orientation.RIGHT, 3, 2, 0, 0, 2, ActionType.FORWARD, n
+        )
+        assert state_to_coords(new_state, n) == (4, 2)  # Stays in place
+
+    def test_forward_into_closed_door(self):
+        n = 5
+        # Agent at (2,2), facing RIGHT, door at (3,2), door not open
+        new_state = get_next_agent_position(
+            2, 2, Orientation.RIGHT, 3, 2, 0, 0, 0, ActionType.FORWARD, n
+        )
+        assert state_to_coords(new_state, n) == (2, 2)  # Stays in place
+
+    def test_forward_through_open_door(self):
+        n = 5
+        # Agent at (2,2), facing RIGHT, door at (3,2), door open (state=2)
+        new_state = get_next_agent_position(
+            2, 2, Orientation.RIGHT, 3, 2, 0, 0, 2, ActionType.FORWARD, n
+        )
+        assert state_to_coords(new_state, n) == (3, 2)
+
+    def test_turn_doesnt_move(self):
+        n = 5
+        for action in [ActionType.TURN_LEFT, ActionType.TURN_RIGHT]:
+            new_state = get_next_agent_position(
+                2, 2, Orientation.RIGHT, 4, 2, 0, 0, 0, action, n
+            )
+            assert state_to_coords(new_state, n) == (2, 2)
+
+
+class TestFOV:
+    def test_fov_basic_shape(self):
+        n = 5
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n)
+        assert fov.shape == (7, 7)
+
+    def test_fov_contains_door_when_visible(self):
+        n = 5
+        # Agent at (2,2), facing RIGHT, door at (3,2) - should be visible
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n)
+        # Door should be at relative (0,1), which is FOV (3, 5)
+        assert fov[3, 5] == CellType.DOOR
+
+    def test_fov_contains_key_when_visible(self):
+        n = 5
+        # Agent at (2,2), facing UP, key at (2,3) - should be visible (one step forward)
+        fov = get_fov(2, 2, Orientation.UP, 2, 3, 3, 2, 0, n)
+        # Key should be at relative (0,1), which is FOV (3, 5)
+        assert fov[3, 5] == CellType.KEY
+
+    def test_fov_key_at_agent_when_held(self):
+        n = 5
+        # Agent has key (door_key_state=1), key should appear at agent position
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 1, n)
+        # Agent is at FOV (3, 6)
+        assert fov[3, 6] == CellType.KEY
+
+
+class TestTensorGeneration:
+    def test_observation_tensor_shape(self):
+        from environments.minigrid import (
+            generate_observation_tensor,
+            N_CELL_TYPES,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        n = 5
+        n_location_states = n * n  # 25
+        n_key_positions = n_location_states - 2 * n  # 15
+        n_door_positions = n_location_states - 2 * n  # 15
+        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES  # 300
+        n_static_states = n_key_positions * n_door_positions  # 225
+
+        B = generate_observation_tensor(n)
+        assert B.shape == (7, 7, N_CELL_TYPES, n_total_states, n_static_states)
+
+    def test_observation_tensor_is_onehot(self):
+        from environments.minigrid import generate_observation_tensor
+
+        n = 4  # Use smaller grid for speed
+        B = generate_observation_tensor(n)
+
+        # For each (fov_x, fov_y, state, static_state), exactly one cell type should be 1
+        for state_idx in range(B.shape[3]):
+            for static_idx in range(B.shape[4]):
+                for x in range(7):
+                    for y in range(7):
+                        cell_probs = B[x, y, :, state_idx, static_idx]
+                        assert np.sum(cell_probs) == 1.0, f"Not one-hot at ({x},{y},{state_idx},{static_idx})"
+                        assert np.max(cell_probs) == 1.0
+
+    def test_orientation_observation_tensor_shape(self):
+        from environments.minigrid import (
+            generate_orientation_observation_tensor,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        n = 5
+        n_location_states = n * n
+        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+
+        B = generate_orientation_observation_tensor(n)
+        assert B.shape == (N_ORIENTATIONS, n_total_states)
+
+    def test_orientation_observation_tensor_is_onehot(self):
+        from environments.minigrid import generate_orientation_observation_tensor
+
+        n = 5
+        B = generate_orientation_observation_tensor(n)
+
+        # Each column should be one-hot
+        for state_idx in range(B.shape[1]):
+            assert np.sum(B[:, state_idx]) == 1.0
+            assert np.max(B[:, state_idx]) == 1.0
+
+    def test_transition_tensor_shape(self):
+        from environments.minigrid import (
+            generate_transition_tensor,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+            N_ACTIONS,
+        )
+
+        n = 5
+        n_location_states = n * n
+        n_key_positions = n_location_states - 2 * n
+        n_door_positions = n_location_states - 2 * n
+        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        n_static_states = n_key_positions * n_door_positions
+
+        T = generate_transition_tensor(n)
+        assert T.shape == (n_total_states, n_total_states, n_static_states, N_ACTIONS)
+
+    def test_transition_tensor_is_stochastic(self):
+        from environments.minigrid import generate_transition_tensor
+
+        n = 4  # Use smaller grid for speed
+        T = generate_transition_tensor(n)
+
+        # For each (old_state, static_state, action), probabilities over new_state should sum to 1
+        for old_idx in range(T.shape[1]):
+            for static_idx in range(T.shape[2]):
+                for action in range(T.shape[3]):
+                    prob_sum = np.sum(T[:, old_idx, static_idx, action])
+                    assert np.isclose(
+                        prob_sum, 1.0
+                    ), f"Transition probs don't sum to 1: {prob_sum} at ({old_idx},{static_idx},{action})"
