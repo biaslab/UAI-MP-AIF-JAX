@@ -22,7 +22,7 @@ from environments.minigrid import (
     generate_orientation_indices,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent
+from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, AIFIndexedTensorAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -73,7 +73,9 @@ def main():
     parser.add_argument("--record", type=str, default=None, 
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--full-tensors", action="store_true", 
+    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "aif"],
+                        help="Planning method: 'bp' (standard Bethe BP) or 'aif' (Active Inference with dynamics channel)")
+    parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation (memory-intensive, for testing)")
     args = parser.parse_args()
     
@@ -157,6 +159,17 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
         )
+    elif args.planning_method == "aif":
+        agent = AIFIndexedTensorAgent.create(
+            grid_size=grid_size,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
     else:
         agent = IndexedTensorAgent.create(
             grid_size=grid_size,
@@ -168,6 +181,7 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
         )
+    print(f"  Planning method: {args.planning_method}")
     print(f"  Max steps: {args.max_steps}")
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Inference iterations: {args.inference_iterations}")
@@ -209,6 +223,7 @@ def main():
             "config": {
                 "grid_size": grid_size,
                 "env_name": env_name,
+                "planning_method": args.planning_method,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,
                 "planning_horizon": args.planning_horizon,

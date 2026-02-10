@@ -101,6 +101,7 @@ def run_inference_tests():
         TestMessages,
         TestStateInference,
         TestPlanning,
+        TestAIFPlanning,
         TestAgentIntegration,
     )
 
@@ -136,6 +137,21 @@ def run_inference_tests():
     t.test_marginalize_static_shape()
     t.test_marginalize_static_is_stochastic()
     print("  Planning: PASSED")
+
+    print("Running AIF planning tests...")
+    t = TestAIFPlanning()
+    t.setup_method()
+    t.test_aif_output_shape()
+    t.test_single_iter_matches_standard_bp()
+    t.test_aif_respects_action_mask()
+    t.test_channel_is_normalized()
+    t.test_backward_pass_with_messages_shape()
+    t.test_theta_updates_across_iterations()
+    t.test_obs_channel_normalized()
+    t.test_obs_messages_shape()
+    t.test_theta_message_computation()
+    t.test_dyn_channel_normalized()
+    print("  AIF Planning: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()

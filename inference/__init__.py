@@ -11,3 +11,10 @@ from .messages import (
 )
 from .state_inference import state_inference_step
 from .planning import planning, marginalize_static
+from .aif_planning import aif_planning_indexed, compute_all_obs_msgs_to_x, compute_cavities
+from .diagnostic_planning import (
+    BPDiagnostics,
+    AIFDiagnostics,
+    diagnostic_planning_indexed,
+    diagnostic_aif_planning_indexed,
+)

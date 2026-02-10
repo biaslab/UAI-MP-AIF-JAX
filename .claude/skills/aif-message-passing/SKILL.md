@@ -1,56 +1,172 @@
 ---
 name: active-inference-bethe-passer
-description: Implements region-extended Bethe approximation schemes for Active Inference. Specializes in degree-weighted singleton updates, region-to-region consistency, and fractional-power belief stationary conditions.
-allowed-tools: Read, Write, Edit
+description: Converts a standard Bethe BP implementation to the Active Inference message-passing scheme. Specifies channel reparameterization, modified factor kernels, region beliefs, and correct fixed-point equations as derived in the paper.
 ---
 
-# Active Inference: Region-Based Message Passing Protocol
+# Active Inference: Converting Standard BP to the AIF Scheme
 
-You are an expert in implementing stationary conditions for the **Bethe Free Energy** using the region-extended coordinate system. Your objective is to map LaTeX theorems defining belief forms (e.g., $q_{y,t}$, $q_{\mathrm{sep},t}$) into iterative JAX/NumPy update loops.
+You are an expert in converting a **standard Bethe Belief Propagation** implementation into the **Active Inference message-passing scheme** as derived in the paper (Appendix, Section "Generic Message-Passing Scheme for Arbitrary Time Steps"). The AIF scheme is standard Bethe BP with two modifications: (1) entropy corrections to the objective, and (2) channel reparameterization of those corrections into modified factor kernels.
 
-## 1. The Region-Extended Coordinate System
-You must maintain and update the following belief objects:
+## 1. What AIF Changes vs Standard Bethe BP
 
-| LaTeX Symbol | Domain / Scope | Implementation Context |
+The Active Inference objective is:
+$$F_{\mathrm{AIF}}[q, r] = F_{\mathrm{Bethe}}[q] + \Delta F_{\mathrm{AIF}}$$
+
+where the entropic correction is:
+$$\Delta F_{\mathrm{AIF}} = \sum_{t=1}^{T} \Bigl[\underbrace{H(q(x_{t-1}, u_t)) - H(q(x_t, x_{t-1}, u_t))}_{= -H(q(x_t \mid x_{t-1}, u_t))} + \underbrace{H(q(y_t, x_t, \theta)) - H(q(x_t, \theta))}_{= H(q(y_t \mid x_t, \theta))}\Bigr]$$
+
+**Net effect**: AIF adds observation ambiguity penalty ($+H[y|x,\theta]$) and dynamics certainty reward ($-H[x|x_{t-1},u]$).
+
+## 2. The Conversion Rule: Channel Reparameterization
+
+To make the entropy corrections tractable, introduce **time-local channel variables** as free variational parameters. Each time step $t$ has its own pair of channels:
+
+| Channel | Symbol | Normalization | Recovers at fixed point |
+| :--- | :--- | :--- | :--- |
+| Observation (time $t$) | $r_{y \mid x\theta,t}(y_t \mid x_t, \theta)$ | $\sum_{y_t} r = 1\;\forall\,(x_t,\theta)$ | $q_t(y_t \mid x_t, \theta)$ |
+| Dynamics (time $t$) | $r_{x \mid xu,t}(x_t \mid x_{t-1}, u_t)$ | $\sum_{x_t} r = 1\;\forall\,(x_{t-1},u_t)$ | $q_t(x_t \mid x_{t-1}, u_t)$ |
+
+**Key identity**: $H[q(y|x,\theta)] = \min_r \mathbb{E}_q[-\log r(y|x,\theta)]$, achieved when $r = q(y|x,\theta)$. The channel variables make this a well-posed variational problem.
+
+**Why time-local?** The entropy corrections in $\Delta F_{\mathrm{AIF}}$ decompose as a sum over time steps. Each term involves the conditional under the factor belief *at that specific time step*. The channel at time $t$ re-localizes the entropy correction by recovering the conditional $q_t(y_t|x_t,\theta)$ or $q_t(x_t|x_{t-1},u_t)$ from the factor belief at time $t$. This per-factor locality is what makes the scheme amenable to message passing.
+
+### The Central Modification
+
+Replace the factor kernels used in standard BP **at each time step $t$**:
+
+| Factor | Standard BP kernel | AIF kernel |
 | :--- | :--- | :--- |
-| $q_{y,t}$ | $(y_t, x_t, \theta)$ | **Observation Factor:** Likelihood and state-map coupling. |
-| $q_{\mathrm{dyn},t}$ | $(x_t, x_{t-1}, \theta, u_t)$ | **Dynamics Factor:** Transition dynamics and action selection. |
-| $q_{\mathrm{sep},t}$ | $(x_t, \theta)$ | **Separator:** The joint belief of state and static map. |
-| $q_{\mathrm{trip},t}$ | $(x_t, x_{t-1}, u_t)$ | **Triplet:** Temporal state-action transition. |
-| $q_{\mathrm{pair},t}$ | $(x_{t-1}, u_t)$ | **Pair:** Predictive action-state coupling. |
+| $f_{\mathrm{obs}_t}$ | $p(y_t \mid x_t, \theta)$ | $p(y_t \mid x_t, \theta) \cdot r_{y \mid x\theta,t}(y_t \mid x_t, \theta)$ |
+| $f_{\mathrm{dyn}_t}$ | $p(x_t \mid x_{t-1}, \theta, u_t)$ | $\displaystyle\frac{p(x_t \mid x_{t-1}, \theta, u_t)}{r_{x \mid xu,t}(x_t \mid x_{t-1}, u_t)}$ |
 
-## 2. Stationary Condition Mechanics (Fractional Updates)
-Unlike standard Belief Propagation, the singleton beliefs ($q_{x_t}, q_\theta, \dots$) in this scheme are **degree-weighted**. You MUST implement the following pattern:
+**Setting $r_{y|x\theta,t} \equiv 1$ and $r_{x|xu,t} \equiv 1$ for all $t$ recovers standard Bethe BP exactly.** All other BP mechanics (variable-to-factor messages, belief updates, convergence) remain unchanged.
 
-### Degree-Weighted Singleton Pattern
-For a variable $i$ with degree $d_i$:
-$$q_i \propto \left[ \text{Prior}(i) \cdot \prod_{A \in \text{ne}(i)} m_{A \to i} \right]^{1/d_i}$$
+## 3. Generic Message Equations (Time Step $t$)
 
-**Implementation:**
-1. Compute `log_prior = jnp.log(prior + EPSILON)`.
-2. Compute `log_messages = sum(jnp.log(m + EPSILON) for m in incoming_messages)`.
-3. Compute `combined = (log_prior + log_messages) / d_i`.
-4. Apply `jax.nn.softmax(combined)`.
+Using $\mu_{a \to i}$ for factor-to-variable and $\mu_{i \to a}$ for variable-to-factor messages, where:
+$$\mu_{i \to a}(s_i) \propto \prod_{b \in \partial i \setminus a} \mu_{b \to i}(s_i)$$
 
-## 3. Primal Feasibility & Message Flow
-At each iteration, messages $\mu_{A \to B}$ are derived to satisfy **Primal Feasibility** (marginalization consistency). 
+### Messages from Observation Factor $f_{\mathrm{obs}_t}$
 
-1. **Factor to Region:** Marginalize factor beliefs ($q_{y,t}, q_{\mathrm{dyn},t}$) to obtain region beliefs ($q_{\mathrm{sep}}, q_{\mathrm{trip}}, \dots$).
-2. **Region to Singleton:** Marginalize region beliefs to update singleton beliefs ($q_x, q_\theta, q_u$).
-3. **Consistency:** If $\int q_A = q_B$, the message $m_{A \to B}$ is the "bridge" that ensures this holds.
+$$\mu_{\mathrm{obs}_t \to \theta}(\theta) = \sum_{y_t} \sum_{x_t} p(y_t|x_t,\theta)\, r_{y|x\theta,t}(y_t|x_t,\theta)\, \mu_{y_t \to \mathrm{obs}_t}(y_t)\, \mu_{x_t \to \mathrm{obs}_t}(x_t)$$
+$$\mu_{\mathrm{obs}_t \to x_t}(x_t) = \sum_{y_t} \sum_{\theta} p(y_t|x_t,\theta)\, r_{y|x\theta,t}(y_t|x_t,\theta)\, \mu_{y_t \to \mathrm{obs}_t}(y_t)\, \mu_{\theta \to \mathrm{obs}_t}(\theta)$$
+$$\mu_{\mathrm{obs}_t \to y_t}(y_t) = \sum_{x_t} \sum_{\theta} p(y_t|x_t,\theta)\, r_{y|x\theta,t}(y_t|x_t,\theta)\, \mu_{\theta \to \mathrm{obs}_t}(\theta)\, \mu_{x_t \to \mathrm{obs}_t}(x_t)$$
 
-## 4. JAX Primitive Mapping for Active Inference
-- **Likelihoods:** Use `backward_obs_message_indexed` to handle the field-of-view (FOV) products.
-- **Dynamics:** Use `forward_message_indexed` and `transition_message_to_static_indexed` for $q_{\mathrm{dyn}}$ and $q_{\mathrm{pair}}$ updates.
-- **Entropy Correction:** If the scheme includes an "entropic correction" or $r_{y|x\theta}$ channel, treat it as a normalized likelihood term inside the $q_y$ factor.
+### Messages from Dynamics Factor $f_{\mathrm{dyn}_t}$
 
-## 5. Algorithmic Guardrails
-- **The $d_\theta$ Multiplier:** Note that $d_\theta = 1 + 2T$. Ensure the product over $T$ timesteps is handled in log-space to prevent numerical collapse.
-- **Normalization Axis:** - For $q_{\mathrm{sep},t}(x_t, \theta)$, normalization is over the joint $(x_t, \theta)$ space.
-    - For $q_{\mathrm{pair},t}(x_{t-1}, u_t)$, normalization is over the joint $(x_{t-1}, u_t)$ space.
-- **Convergence:** Apply damping directly to the log-messages or the natural parameters of the categorical distributions.
+$$\mu_{\mathrm{dyn}_t \to x_t}(x_t) = \sum_{x_{t-1}} \sum_{u_t} \sum_{\theta} \frac{p(x_t|x_{t-1},\theta,u_t)}{r_{x|xu,t}(x_t|x_{t-1},u_t)}\, \mu_{x_{t-1} \to \mathrm{dyn}_t}(x_{t-1})\, \mu_{u_t \to \mathrm{dyn}_t}(u_t)\, \mu_{\theta \to \mathrm{dyn}_t}(\theta)$$
+$$\mu_{\mathrm{dyn}_t \to x_{t-1}}(x_{t-1}) = \sum_{x_t} \sum_{u_t} \sum_{\theta} \frac{p(x_t|x_{t-1},\theta,u_t)}{r_{x|xu,t}(x_t|x_{t-1},u_t)}\, \mu_{x_t \to \mathrm{dyn}_t}(x_t)\, \mu_{u_t \to \mathrm{dyn}_t}(u_t)\, \mu_{\theta \to \mathrm{dyn}_t}(\theta)$$
+$$\mu_{\mathrm{dyn}_t \to u_t}(u_t) = \sum_{x_t} \sum_{x_{t-1}} \sum_{\theta} \frac{p(x_t|x_{t-1},\theta,u_t)}{r_{x|xu,t}(x_t|x_{t-1},u_t)}\, \mu_{x_{t-1} \to \mathrm{dyn}_t}(x_{t-1})\, \mu_{\theta \to \mathrm{dyn}_t}(\theta)\, \mu_{x_t \to \mathrm{dyn}_t}(x_t)$$
+$$\mu_{\mathrm{dyn}_t \to \theta}(\theta) = \sum_{x_t} \sum_{x_{t-1}} \sum_{u_t} \frac{p(x_t|x_{t-1},\theta,u_t)}{r_{x|xu,t}(x_t|x_{t-1},u_t)}\, \mu_{x_{t-1} \to \mathrm{dyn}_t}(x_{t-1})\, \mu_{u_t \to \mathrm{dyn}_t}(u_t)\, \mu_{x_t \to \mathrm{dyn}_t}(x_t)$$
 
-## 6. Verification Checklist
-- [ ] Are the degrees $d_i$ mapped exactly from the LaTeX (e.g., $d_{x_t}=4$ for $1 \le t \le T-1$)?
-- [ ] Does the "Channel" $r$ match the conditional $q(y \mid x, \theta)$?
-- [ ] Are all marginalization constraints ($\int q_{y,t} \mathrm{d}y_t = q_{\mathrm{sep},t}$) implemented via the correct summation axes?
+**Note**: The dynamics channel $r_{x|xu,t}$ does NOT depend on $\theta$. After marginalizing $\theta$ from the transition, the ratio $p/r$ can be precomputed on the reduced $(x_t, x_{t-1}, u_t)$ space.
+
+## 4. Factor Belief Updates
+
+The factor belief at each non-singleton factor is the **AIF-modified kernel times the product of all incoming variable-to-factor messages**:
+
+$$q_{\mathrm{obs},t}(y_t, x_t, \theta) \propto p(y_t | x_t, \theta)\, r_{y|x\theta,t}(y_t | x_t, \theta)\, \mu_{y_t \to \mathrm{obs}_t}(y_t)\, \mu_{x_t \to \mathrm{obs}_t}(x_t)\, \mu_{\theta \to \mathrm{obs}_t}(\theta)$$
+
+$$q_{\mathrm{dyn},t}(x_t, x_{t-1}, \theta, u_t) \propto \frac{p(x_t | x_{t-1}, \theta, u_t)}{r_{x|xu,t}(x_t | x_{t-1}, u_t)}\, \mu_{x_t \to \mathrm{dyn}_t}(x_t)\, \mu_{x_{t-1} \to \mathrm{dyn}_t}(x_{t-1})\, \mu_{\theta \to \mathrm{dyn}_t}(\theta)\, \mu_{u_t \to \mathrm{dyn}_t}(u_t)$$
+
+where $\mu_{i \to a}(s_i) \propto \prod_{b \in \partial i \setminus a} \mu_{b \to i}(s_i)$ is the variable-to-factor message (product of all incoming factor-to-variable messages *except* from factor $a$).
+
+**These factor beliefs are needed to compute the channel updates** (Section 6) via the region beliefs (Section 5). They are the joint distributions over each factor's scope, from which region beliefs are obtained by marginalization.
+
+## 5. Region Beliefs (Intermediate Marginals)
+
+These are derived from factor beliefs by marginalization. Each is **time-indexed**:
+
+| Symbol | Definition | Scope |
+| :--- | :--- | :--- |
+| $q_{\mathrm{obs},t}(y_t, x_t, \theta)$ | Observation factor belief at time $t$ (from Section 4) | $(y_t, x_t, \theta)$ |
+| $q_{\mathrm{dyn},t}(x_t, x_{t-1}, \theta, u_t)$ | Dynamics factor belief at time $t$ (from Section 4) | $(x_t, x_{t-1}, \theta, u_t)$ |
+| $q_{\mathrm{sep},t}(x_t, \theta)$ | $= \sum_{y_t} q_{\mathrm{obs},t}(y_t, x_t, \theta)$ | $(x_t, \theta)$ |
+| $q_{\mathrm{trip},t}(x_t, x_{t-1}, u_t)$ | $= \sum_{\theta} q_{\mathrm{dyn},t}(x_t, x_{t-1}, \theta, u_t)$ | $(x_t, x_{t-1}, u_t)$ |
+| $q_{\mathrm{pair},t}(x_{t-1}, u_t)$ | $= \sum_{x_t} q_{\mathrm{trip},t}(x_t, x_{t-1}, u_t)$ | $(x_{t-1}, u_t)$ |
+
+## 6. Channel Update Rules
+
+At each iteration, after computing factor beliefs, update the channels **independently at each time step $t$**:
+
+$$r_{y|x\theta,t}(y_t | x_t, \theta) \leftarrow \frac{q_{\mathrm{obs},t}(y_t, x_t, \theta)}{q_{\mathrm{sep},t}(x_t, \theta)} = q_t(y_t | x_t, \theta)$$
+$$r_{x|xu,t}(x_t | x_{t-1}, u_t) \leftarrow \frac{q_{\mathrm{trip},t}(x_t, x_{t-1}, u_t)}{q_{\mathrm{pair},t}(x_{t-1}, u_t)} = q_t(x_t | x_{t-1}, u_t)$$
+
+**Initialization**: Set all channels to uniform for all $t$ (equivalent to starting from standard BP).
+
+## 7. Singleton Belief Updates
+
+The singleton beliefs follow the **standard sum-product form** — the product of the singleton factor (prior/goal prior) and all incoming factor-to-variable messages:
+
+$$q_{x_t}^*(x_t) \propto \hat{p}_x(x_t)\, \mu_{\mathrm{obs}_t \to x_t}(x_t)\, \mu_{\mathrm{dyn}_t \to x_t}(x_t)\, \mu_{\mathrm{dyn}_{t+1} \to x_t}(x_t)$$
+$$q_\theta^*(\theta) \propto p(\theta) \prod_{\tau=1}^{T} \mu_{\mathrm{obs}_\tau \to \theta}(\theta)\, \mu_{\mathrm{dyn}_\tau \to \theta}(\theta)$$
+$$q_{u_t}^*(u_t) \propto p(u_t)\, \mu_{\mathrm{dyn}_t \to u_t}(u_t)$$
+$$q_{y_t}^*(y_t) \propto \hat{p}_y(y_t)\, \mu_{\mathrm{obs}_t \to y_t}(y_t)$$
+
+**IMPORTANT**: These are standard products. There is NO $1/d_i$ exponent on the beliefs. The Bethe entropy counting numbers $(d_i - 1)$ affect the *derivation* of the stationarity conditions (they determine how Lagrange multipliers combine), but the resulting fixed-point equations are simple products. This is proven in the paper's Appendix (Theorems for $\theta$ and $x_1$, extended to generic $t$ in the generic scheme).
+
+## 8. Degree Counting
+
+Variable degrees determine the Bethe entropy corrections $(d_i - 1) H[q_i]$:
+
+| Variable | Degree | Adjacent factors |
+| :--- | :--- | :--- |
+| $x_t$ ($1 \leq t \leq T{-}1$) | $d_{x_t} = 4$ | $f_{\mathrm{obs}_t}$, $f_{\mathrm{dyn}_t}$, $f_{\mathrm{dyn}_{t+1}}$, $\hat{p}_x$ |
+| $x_0$ | $d_{x_0} = 2$ | $p(x_0)$, $f_{\mathrm{dyn}_1}$ |
+| $x_T$ | $d_{x_T} = 3$ | $f_{\mathrm{obs}_T}$, $f_{\mathrm{dyn}_T}$, $\hat{p}_x$ |
+| $\theta$ | $d_\theta = 1 + 2T$ | $p(\theta)$, all $f_{\mathrm{obs}_\tau}$, all $f_{\mathrm{dyn}_\tau}$ |
+| $u_t$ | $d_{u_t} = 2$ | $p(u_t)$, $f_{\mathrm{dyn}_t}$ |
+| $y_t$ | $d_{y_t} = 2$ | $\hat{p}_y(y_t)$, $f_{\mathrm{obs}_t}$ |
+
+### Boundary Conditions
+- At $t = 1$: $\mu_{x_0 \to \mathrm{dyn}_1}(x_0) = p(x_0)$ (only prior connects to $x_0$ besides $f_{\mathrm{dyn}_1}$).
+- At $t = T$: no factor $f_{\mathrm{dyn}_{T+1}}$ exists, so $\mu_{\mathrm{dyn}_{T+1} \to x_T}$ is absent (set to $1$).
+
+## 9. Iteration Structure
+
+```
+Initialize: r_{y|xθ,t} = uniform, r_{x|xu,t} = uniform  for all t  (≡ standard BP)
+
+For each iteration:
+  1. Compute variable-to-factor messages (standard BP rule: product of
+     all incoming factor-to-variable messages except from target factor)
+  2. Compute factor-to-variable messages using AIF-modified kernels:
+     - obs_t: p(y|x,θ) · r_{y|xθ,t}        (time-local channel for time t)
+     - dyn_t: p(x|x',θ,u) / r_{x|xu,t}      (time-local channel for time t)
+  3. Update singleton beliefs (standard product form)
+  4. Compute factor beliefs: AIF-modified kernel × all variable-to-factor messages
+     - q_{obs,t} ∝ p(y|x,θ) · r_{y|xθ,t} · μ_{y→obs} · μ_{x→obs} · μ_{θ→obs}
+     - q_{dyn,t} ∝ [p(x|x',θ,u) / r_{x|xu,t}] · μ_{x→dyn} · μ_{x'→dyn} · μ_{θ→dyn} · μ_{u→dyn}
+  5. For each time step t, compute region beliefs by marginalization:
+     - q_{sep,t} = Σ_y q_{obs,t}
+     - q_{trip,t} = Σ_θ q_{dyn,t}
+     - q_{pair,t} = Σ_x q_{trip,t}
+  6. For each time step t, update channels:
+     - r_{y|xθ,t} ← q_{obs,t} / q_{sep,t}
+     - r_{x|xu,t} ← q_{trip,t} / q_{pair,t}
+  7. Check convergence
+```
+
+## 10. Algorithmic Guardrails
+- **The $d_\theta$ multiplier**: $d_\theta = 1 + 2T$ grows with $T$. Accumulate the product of $2T$ messages to $\theta$ in log-space to prevent numerical collapse.
+- **Channel normalization**: After each channel update at time $t$, verify $\sum_{y_t} r_{y|x\theta,t} = 1$ and $\sum_{x_t} r_{x|xu,t} = 1$. Renormalize if needed.
+- **Channel storage**: Maintain arrays of shape `[T, ...]` for each channel type. Channel `t` is indexed and updated independently.
+- **Dynamics ratio**: The ratio $p(x_t|x_{t-1},\theta,u_t) / r_{x|xu,t}(x_t|x_{t-1},u_t)$ can produce large values when $r$ is small. Compute in log-space: `log_ratio = log_transition - log_r_x[t]`.
+- **Normalization axes**:
+    - $q_{\mathrm{sep},t}(x_t, \theta)$: normalize over joint $(x_t, \theta)$ space.
+    - $q_{\mathrm{pair},t}(x_{t-1}, u_t)$: normalize over joint $(x_{t-1}, u_t)$ space.
+- **Convergence**: Apply damping directly to log-messages or natural parameters.
+
+## 11. Verification Checklist
+- [ ] Factor beliefs computed as AIF kernel × all variable-to-factor messages?
+- [ ] Setting channels to $1$ for all $t$ recovers standard BP messages exactly?
+- [ ] Singleton beliefs use simple product form (NO `1/d_i` exponent)?
+- [ ] Each time step $t$ has its own channel pair $(r_{y|x\theta,t}, r_{x|xu,t})$?
+- [ ] Channel $r_{x|xu,t}$ does not depend on $\theta$?
+- [ ] Channel normalization holds: $\sum_{y_t} r_{y|x\theta,t} = 1$ for all $(x_t, \theta)$, at each $t$?
+- [ ] Channel normalization holds: $\sum_{x_t} r_{x|xu,t} = 1$ for all $(x_{t-1}, u_t)$, at each $t$?
+- [ ] Region beliefs: $q_{\mathrm{sep},t} = \sum_y q_{\mathrm{obs},t}$, $q_{\mathrm{trip},t} = \sum_\theta q_{\mathrm{dyn},t}$, $q_{\mathrm{pair},t} = \sum_x q_{\mathrm{trip},t}$?
+- [ ] Degrees: $d_{x_t} = 4$ (interior), $d_{x_T} = 3$ (final), $d_{x_0} = 2$ (initial), $d_\theta = 1 + 2T$?
+- [ ] Dynamics ratio computed in log-space to avoid numerical issues?
+- [ ] Boundary: $\mu_{\mathrm{dyn}_{T+1} \to x_T}$ absent or set to $1$?
+ 

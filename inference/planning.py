@@ -45,12 +45,12 @@ def planning(
     
     def body_fn(_, carry):
         q_state, q_u = carry
-        q_state_new = forward_pass(reduced_tensor, q_state, q_u, horizon)
+        q_state_new = forward_pass(reduced_tensor, q_state, action_prior, horizon)
         q_u_new = backward_pass(reduced_tensor, q_state_new, goal, action_prior, horizon)
         return q_state_new, q_u_new
-    
+
     q_state, q_u = lax.fori_loop(0, n_iterations, body_fn, (q_state, q_u))
-    
+
     return q_u[0]
 
 
@@ -64,22 +64,24 @@ def marginalize_static(
 def forward_pass(
     reduced_tensor: jnp.ndarray,
     q_state: jnp.ndarray,
-    q_u: jnp.ndarray,
+    action_prior: jnp.ndarray,
     horizon: int,
 ) -> jnp.ndarray:
     """
     Forward pass: propagate state beliefs through time.
-    
+
+    The BP message μ_{u→dyn_t} = p(u) since u_t only connects to p(u_t) and dyn_t.
+
     reduced_tensor: (n_states, n_states, n_actions)
     q_state: (T+1, n_states) beliefs
-    q_u: (T, n_actions) action beliefs
+    action_prior: (n_actions,) prior over actions
     horizon: T
     """
     def body_fn(t, q_state):
-        q_next = jnp.einsum("ijk,j,k->i", reduced_tensor, q_state[t], q_u[t])
+        q_next = jnp.einsum("ijk,j,k->i", reduced_tensor, q_state[t], action_prior)
         q_next = q_next / (q_next.sum() + EPSILON)
         return q_state.at[t + 1].set(q_next)
-    
+
     return lax.fori_loop(0, horizon, body_fn, q_state)
 
 
@@ -107,7 +109,7 @@ def backward_pass(
         q_u_t = q_u_t / (q_u_t.sum() + EPSILON)
         q_u = q_u.at[t].set(q_u_t)
         
-        backward_msg = jnp.einsum("ijk,i,k->j", reduced_tensor, backward_msg, q_u_t)
+        backward_msg = jnp.einsum("ijk,i,k->j", reduced_tensor, backward_msg, action_prior)
         backward_msg = backward_msg / (backward_msg.sum() + EPSILON)
         
         return (backward_msg, q_u), None
@@ -162,12 +164,12 @@ def planning_indexed(
     
     def body_fn(_, carry):
         q_state, q_u = carry
-        q_state_new = forward_pass(reduced_tensor, q_state, q_u, horizon)
+        q_state_new = forward_pass(reduced_tensor, q_state, action_prior, horizon)
         q_u_new = backward_pass(reduced_tensor, q_state_new, goal, action_prior, horizon)
         return q_state_new, q_u_new
-    
+
     q_state, q_u = lax.fori_loop(0, n_iterations, body_fn, (q_state, q_u))
-    
+
     return q_u[0]
 
 
