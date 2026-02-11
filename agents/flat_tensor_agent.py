@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from inference.state_inference import state_inference_step, state_inference_step_indexed
 from inference.planning import planning, planning_indexed
-from inference.aif_planning import aif_planning_indexed
+from inference.loopy_bp import loopy_bp_planning_indexed
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
@@ -477,11 +477,10 @@ class AIFIndexedTensorAgent:
         )
 
         horizon = min(time_remaining, self.planning_horizon)
-        action_dist = aif_planning_indexed(
+        action_dist = loopy_bp_planning_indexed(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,

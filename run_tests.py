@@ -101,7 +101,7 @@ def run_inference_tests():
         TestMessages,
         TestStateInference,
         TestPlanning,
-        TestAIFPlanning,
+        TestLoopyBPPlanning,
         TestAgentIntegration,
     )
 
@@ -138,23 +138,21 @@ def run_inference_tests():
     t.test_marginalize_static_is_stochastic()
     print("  Planning: PASSED")
 
-    print("Running AIF planning tests...")
-    t = TestAIFPlanning()
+    print("Running loopy BP planning tests...")
+    t = TestLoopyBPPlanning()
     t.setup_method()
-    t.test_aif_output_shape()
+    t.test_output_shape()
     t.test_single_iter_matches_standard_bp()
-    t.test_aif_respects_action_mask()
-    t.test_channel_is_normalized()
-    t.test_backward_pass_with_messages_shape()
-    t.test_theta_updates_across_iterations()
-    t.test_obs_channel_normalized()
-    t.test_obs_messages_shape()
-    t.test_theta_message_computation()
-    t.test_dyn_channel_normalized()
-    print("  AIF Planning: PASSED")
+    t.test_respects_action_mask()
+    t.test_theta_cavities_shape_and_normalization()
+    t.test_forward_backward_messages_shape()
+    t.test_multi_iteration_changes_result()
+    t.test_dyn_to_theta_messages_finite()
+    print("  Loopy BP Planning: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()
+    t.setup_method()
     t.test_agent_creation()
     t.test_agent_step()
     t.test_agent_reset()

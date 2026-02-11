@@ -73,8 +73,8 @@ def main():
     parser.add_argument("--record", type=str, default=None, 
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "aif"],
-                        help="Planning method: 'bp' (standard Bethe BP) or 'aif' (Active Inference with dynamics channel)")
+    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy"],
+                        help="Planning method: 'bp' (standard BP, θ marginalized once) or 'loopy' (loopy BP with θ as variable)")
     parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation (memory-intensive, for testing)")
     args = parser.parse_args()
@@ -159,7 +159,7 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
         )
-    elif args.planning_method == "aif":
+    elif args.planning_method == "loopy":
         agent = AIFIndexedTensorAgent.create(
             grid_size=grid_size,
             transition_idx=transition_idx,
