@@ -22,7 +22,7 @@ from environments.minigrid import (
     generate_orientation_indices,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, AIFIndexedTensorAgent
+from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -73,8 +73,8 @@ def main():
     parser.add_argument("--record", type=str, default=None, 
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy"],
-                        help="Planning method: 'bp' (standard BP, θ marginalized once) or 'loopy' (loopy BP with θ as variable)")
+    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy", "region-extended"],
+                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors)")
     parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation (memory-intensive, for testing)")
     args = parser.parse_args()
@@ -160,7 +160,18 @@ def main():
             n_planning_iterations=args.planning_iterations,
         )
     elif args.planning_method == "loopy":
-        agent = AIFIndexedTensorAgent.create(
+        agent = LoopyBPAgent.create(
+            grid_size=grid_size,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
+    elif args.planning_method == "region-extended":
+        agent = RegionExtendedAgent.create(
             grid_size=grid_size,
             transition_idx=transition_idx,
             observation_idx=observation_idx,

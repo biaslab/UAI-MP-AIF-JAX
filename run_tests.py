@@ -102,6 +102,7 @@ def run_inference_tests():
         TestStateInference,
         TestPlanning,
         TestLoopyBPPlanning,
+        TestRegionExtendedLoopyBP,
         TestAgentIntegration,
     )
 
@@ -149,6 +150,16 @@ def run_inference_tests():
     t.test_multi_iteration_changes_result()
     t.test_dyn_to_theta_messages_finite()
     print("  Loopy BP Planning: PASSED")
+
+    print("Running region-extended loopy BP tests...")
+    t = TestRegionExtendedLoopyBP()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_matches_loopy_bp_single_iter()
+    t.test_matches_loopy_bp_multi_iter()
+    t.test_respects_action_mask()
+    t.test_theta_cavities_extended_shape()
+    print("  Region-Extended Loopy BP: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()

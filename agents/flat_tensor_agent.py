@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from inference.state_inference import state_inference_step, state_inference_step_indexed
 from inference.planning import planning, planning_indexed
 from inference.loopy_bp import loopy_bp_planning_indexed
+from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning_indexed
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
@@ -350,13 +351,12 @@ class IndexedTensorAgent:
 
 
 @dataclass
-class AIFIndexedTensorAgent:
+class LoopyBPAgent:
     """
-    Agent using Active Inference planning with dynamics channel.
+    Agent using loopy BP planning with θ as a variable node.
 
-    Same as IndexedTensorAgent but uses aif_planning_indexed for action
-    selection. State inference (perception) is unchanged — standard BP
-    with actual observations.
+    Same interface as IndexedTensorAgent but uses loopy_bp_planning_indexed,
+    which keeps θ as a variable node and iterates cavity messages.
     """
 
     grid_size: int
@@ -387,8 +387,8 @@ class AIFIndexedTensorAgent:
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
-    ) -> "AIFIndexedTensorAgent":
-        """Create a new AIF agent with uniform initial beliefs."""
+    ) -> "LoopyBPAgent":
+        """Create a new loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
@@ -421,7 +421,7 @@ class AIFIndexedTensorAgent:
             last_action=0,
         )
 
-    def reset(self) -> "AIFIndexedTensorAgent":
+    def reset(self) -> "LoopyBPAgent":
         """Reset beliefs to initial state."""
         dims = self.dims
         n_valid_locations = dims["n_locations"] - 2 * self.grid_size
@@ -440,7 +440,7 @@ class AIFIndexedTensorAgent:
 
         static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
 
-        return AIFIndexedTensorAgent(
+        return LoopyBPAgent(
             grid_size=self.grid_size,
             dims=self.dims,
             transition_idx=self.transition_idx,
@@ -460,9 +460,9 @@ class AIFIndexedTensorAgent:
         vision_obs: jnp.ndarray,
         orientation_obs: jnp.ndarray,
         time_remaining: int,
-    ) -> tuple[int, "AIFIndexedTensorAgent"]:
+    ) -> tuple[int, "LoopyBPAgent"]:
         """
-        Execute one agent step: perceive (standard BP), plan (AIF), act.
+        Execute one agent step: perceive (standard BP), plan (loopy BP), act.
         """
         q_current, q_static = state_inference_step_indexed(
             q_old_state=self.q_state,
@@ -488,7 +488,7 @@ class AIFIndexedTensorAgent:
 
         action = int(jnp.argmax(action_dist))
 
-        new_agent = AIFIndexedTensorAgent(
+        new_agent = LoopyBPAgent(
             grid_size=self.grid_size,
             dims=self.dims,
             transition_idx=self.transition_idx,
@@ -504,3 +504,162 @@ class AIFIndexedTensorAgent:
         )
 
         return action, new_agent
+
+
+@dataclass
+class RegionExtendedAgent:
+    """
+    Agent using region-extended loopy BP planning with observation factors.
+
+    Uses region_extended_loopy_bp_planning_indexed, which includes observation
+    factors in the factor graph.
+    """
+
+    grid_size: int
+    dims: dict[str, int]
+
+    transition_idx: jnp.ndarray
+    observation_idx: jnp.ndarray
+    orientation_idx: jnp.ndarray
+
+    q_state: jnp.ndarray
+    q_static: jnp.ndarray
+    goal: jnp.ndarray
+
+    planning_horizon: int
+    n_inference_iterations: int
+    n_planning_iterations: int
+
+    last_action: int
+
+    @classmethod
+    def create(
+        cls,
+        grid_size: int,
+        transition_idx: jnp.ndarray,
+        observation_idx: jnp.ndarray,
+        orientation_idx: jnp.ndarray,
+        goal: jnp.ndarray,
+        planning_horizon: int = 10,
+        n_inference_iterations: int = 10,
+        n_planning_iterations: int = 10,
+    ) -> "RegionExtendedAgent":
+        """Create a new region-extended agent with uniform initial beliefs."""
+        dims = get_dimensions(grid_size)
+
+        n_valid_locations = dims["n_locations"] - 2 * grid_size
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return cls(
+            grid_size=grid_size,
+            dims=dims,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=goal,
+            planning_horizon=planning_horizon,
+            n_inference_iterations=n_inference_iterations,
+            n_planning_iterations=n_planning_iterations,
+            last_action=0,
+        )
+
+    def reset(self) -> "RegionExtendedAgent":
+        """Reset beliefs to initial state."""
+        dims = self.dims
+        n_valid_locations = dims["n_locations"] - 2 * self.grid_size
+
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return RegionExtendedAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_idx=self.transition_idx,
+            observation_idx=self.observation_idx,
+            orientation_idx=self.orientation_idx,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=0,
+        )
+
+    def step(
+        self,
+        vision_obs: jnp.ndarray,
+        orientation_obs: jnp.ndarray,
+        time_remaining: int,
+    ) -> tuple[int, "RegionExtendedAgent"]:
+        """
+        Execute one agent step: perceive (standard BP), plan (region-extended), act.
+        """
+        q_current, q_static = state_inference_step_indexed(
+            q_old_state=self.q_state,
+            q_static_state=self.q_static,
+            transition_idx=self.transition_idx,
+            obs_idx=self.observation_idx,
+            ori_idx=self.orientation_idx,
+            vision_obs=vision_obs,
+            ori_obs=orientation_obs,
+            action_idx=self.last_action,
+            n_iterations=self.n_inference_iterations,
+        )
+
+        horizon = min(time_remaining, self.planning_horizon)
+        action_dist = region_extended_loopy_bp_planning_indexed(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_idx=self.transition_idx,
+            obs_idx=self.observation_idx,
+            goal=self.goal,
+            horizon=horizon,
+            n_iterations=self.n_planning_iterations,
+        )
+
+        action = int(jnp.argmax(action_dist))
+
+        new_agent = RegionExtendedAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_idx=self.transition_idx,
+            observation_idx=self.observation_idx,
+            orientation_idx=self.orientation_idx,
+            q_state=q_current,
+            q_static=q_static,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=action,
+        )
+
+        return action, new_agent
+
+
