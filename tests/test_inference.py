@@ -452,7 +452,7 @@ class TestRegionExtendedLoopyBP:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning_indexed(
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = region_extended_loopy_bp_planning_indexed(
             q_current, q_static, self.transition_idx, self.obs_idx, goal,
             horizon=5, n_iterations=2,
         )
@@ -479,7 +479,7 @@ class TestRegionExtendedLoopyBP:
             q_current, q_static, self.transition_idx, goal,
             horizon=5, n_iterations=1,
         )
-        extended_result, _, _ = region_extended_loopy_bp_planning_indexed(
+        extended_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
             q_current, q_static, self.transition_idx, self.obs_idx, goal,
             horizon=5, n_iterations=1,
         )
@@ -506,7 +506,7 @@ class TestRegionExtendedLoopyBP:
             q_current, q_static, self.transition_idx, goal,
             horizon=5, n_iterations=5,
         )
-        extended_result, _, _ = region_extended_loopy_bp_planning_indexed(
+        extended_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
             q_current, q_static, self.transition_idx, self.obs_idx, goal,
             horizon=5, n_iterations=5,
         )
@@ -527,7 +527,7 @@ class TestRegionExtendedLoopyBP:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, _, _ = region_extended_loopy_bp_planning_indexed(
+        action_dist, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
             q_current, q_static, self.transition_idx, self.obs_idx, goal,
             horizon=5, n_iterations=3,
         )

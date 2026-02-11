@@ -313,6 +313,30 @@ def compute_dyn_channels(dyn_region_beliefs):
     return joint / (marginal + EPSILON)
 
 
+def compute_dyn_kernels(transition_idx, dyn_channels, n_states):
+    """
+    Compute per-timestep dynamics kernels:
+        kernel_t = p(x_new | x_old, θ, u) / r_t(x_new | x_old, u)
+
+    Args:
+        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        dyn_channels: (T, n_states, n_states, n_actions) — r_t[x_old, x_new, u]
+        n_states: int
+
+    Returns:
+        (T, n_states, n_states, n_static, n_actions) — kernel per dynamics factor
+    """
+    # p(x_new | x_old, θ, u) as one-hot: (x_old, x_new, θ, u)
+    p_xnew = jax.nn.one_hot(transition_idx, n_states)   # (x_old, θ, u, x_new)
+    p_xnew = jnp.transpose(p_xnew, (0, 3, 1, 2))       # (x_old, x_new, θ, u)
+
+    # Broadcast channel over θ: (T, x_old, x_new, 1, u)
+    r = dyn_channels[:, :, :, None, :]
+
+    # kernel = p / r
+    return p_xnew[None] / (r + EPSILON)  # (T, x_old, x_new, θ, u)
+
+
 def compute_obs_channels_from_beliefs(obs_region_beliefs):
     """Compute r(y|x,θ) from obs region beliefs q(y,x,θ).
 
@@ -326,6 +350,28 @@ def compute_obs_channels_from_beliefs(obs_region_beliefs):
     """
     marginal = obs_region_beliefs.sum(axis=2, keepdims=True)  # (T+1, 49, 1, n_states, n_static)
     return obs_region_beliefs / (marginal + EPSILON)
+
+
+def compute_obs_kernels(obs_idx, obs_channels):
+    """
+    Compute per-timestep observation kernels (compact form):
+        obs_kernel_{t,k}(x, θ) = r_{t,k}(y* | x, θ)  where y* = obs_idx[k, x, θ]
+
+    Args:
+        obs_idx: (7, 7, n_states, n_static) -> cell_type index
+        obs_channels: (T+1, 49, n_cell_types, n_states, n_static) — r_{t,k}(y | x, θ)
+
+    Returns:
+        (T+1, 7, 7, n_states, n_static) — kernel value at deterministic y
+    """
+    obs_flat = obs_idx.reshape(49, obs_idx.shape[2], obs_idx.shape[3])
+    # Index into cell_type axis: (1, 49, 1, n_states, n_static)
+    y_idx = obs_flat[None, :, None, :, :]
+    # Gather r at deterministic y → (T+1, 49, 1, n_states, n_static)
+    kernels = jnp.take_along_axis(obs_channels, y_idx, axis=2)
+    kernels = kernels.squeeze(axis=2)          # (T+1, 49, n_states, n_static)
+    T_plus_1, _, n_states, n_static = kernels.shape
+    return kernels.reshape(T_plus_1, 7, 7, n_states, n_static)
 
 
 def compute_obs_region_beliefs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs, n_cell_types):
@@ -433,9 +479,11 @@ def region_extended_loopy_bp_planning_indexed(
     obs_channels_init = jnp.broadcast_to(
         r_init[None], (horizon + 1, 49, N_CELL_TYPES, n_states, n_static)
     )
+    dyn_kernels_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
+    obs_kernels_init = jnp.zeros((horizon + 1, 7, 7, n_states, n_static))
 
     def body_fn(_, carry):
-        log_dyn_to_theta, log_obs_to_theta, _, _, _ = carry
+        log_dyn_to_theta, log_obs_to_theta, _, _, _, _, _ = carry
 
         # Step 1: theta cavities (total-minus-self)
         cavity_dyn, cavity_obs = compute_theta_cavities_extended(
@@ -483,11 +531,17 @@ def region_extended_loopy_bp_planning_indexed(
         dyn_channels = compute_dyn_channels(dyn_regions)
         obs_channels = compute_obs_channels_from_beliefs(obs_regions)
 
-        return new_log_dyn_to_theta, new_log_obs_to_theta, q_u, dyn_channels, obs_channels
+        # Step 10: Dynamics kernels
+        dyn_kernels = compute_dyn_kernels(transition_idx, dyn_channels, n_states)
 
-    log_dyn_to_theta, log_obs_to_theta, q_u, dyn_channels, obs_channels = lax.fori_loop(
+        # Step 11: Observation kernels
+        obs_kernels = compute_obs_kernels(obs_idx, obs_channels)
+
+        return new_log_dyn_to_theta, new_log_obs_to_theta, q_u, dyn_channels, obs_channels, dyn_kernels, obs_kernels
+
+    log_dyn_to_theta, log_obs_to_theta, q_u, dyn_channels, obs_channels, dyn_kernels, obs_kernels = lax.fori_loop(
         0, n_iterations, body_fn,
-        (log_dyn_to_theta, log_obs_to_theta, q_u_init, dyn_channels_init, obs_channels_init)
+        (log_dyn_to_theta, log_obs_to_theta, q_u_init, dyn_channels_init, obs_channels_init, dyn_kernels_init, obs_kernels_init)
     )
 
-    return q_u[0], dyn_channels, obs_channels
+    return q_u[0], dyn_channels, obs_channels, dyn_kernels, obs_kernels

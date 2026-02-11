@@ -633,7 +633,7 @@ class RegionExtendedAgent:
         )
 
         horizon = min(time_remaining, self.planning_horizon)
-        action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning_indexed(
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = region_extended_loopy_bp_planning_indexed(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_idx=self.transition_idx,
