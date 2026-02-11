@@ -460,7 +460,7 @@ class TestRegionExtendedLoopyBP:
         assert action_dist.shape == (self.n_actions,)
         assert np.isclose(action_dist.sum(), 1.0)
         assert dyn_channels.shape == (5, self.n_states, self.n_states, self.n_actions)
-        assert obs_channels.shape == (49, self.n_states, self.n_static)
+        assert obs_channels.shape == (6, 49, 11, self.n_states, self.n_static)
 
     def test_matches_loopy_bp_single_iter(self):
         """With uniform obs, region-extended should match loopy_bp at 1 iteration."""

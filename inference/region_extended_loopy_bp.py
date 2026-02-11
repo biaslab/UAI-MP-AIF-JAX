@@ -24,6 +24,7 @@ from functools import partial
 
 from .messages import EPSILON
 from .planning import marginalize_static_indexed
+from environments.minigrid import N_CELL_TYPES
 
 
 # =============================================================================
@@ -253,13 +254,14 @@ def compute_theta_cavities_extended(log_prior, log_dyn_to_theta, log_obs_to_thet
 
 
 def compute_dyn_region_beliefs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x,
-                               cavity_dyn, action_prior):
+                               cavity_dyn, action_prior, n_states):
     """
     Compute region beliefs for dynamics factors.
 
-    q_{t,dyn}(x_t, theta, u_t) = (1/Z) * fwd[t](x_t) * obs_to_x[t](x_t)
-                                  * cavity_dyn_t(theta) * p(u_t)
-                                  * bwd[t+1](T[x_t, theta, u_t]) * obs_to_x[t+1](T[x_t, theta, u_t])
+    q_{t,dyn}(x_old, x_new, theta, u) = (1/Z) * p(x_new|x_old,theta,u)
+                                          * fwd[t](x_old) * obs_to_x[t](x_old)
+                                          * bwd[t+1](x_new) * obs_to_x[t+1](x_new)
+                                          * cavity_dyn_t(theta) * p(u)
 
     Args:
         transition_idx: (n_states, n_static, n_actions) -> new_state index
@@ -268,106 +270,70 @@ def compute_dyn_region_beliefs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x,
         obs_to_x: (T+1, n_states) obs messages to x
         cavity_dyn: (T, n_static) cavity beliefs for dyn factors
         action_prior: (n_actions,) prior over actions
+        n_states: number of dynamic states
 
     Returns:
-        region_beliefs: (T, n_states, n_static, n_actions) normalized region beliefs
+        region_beliefs: (T, n_states, n_states, n_static, n_actions) normalized region beliefs
     """
     T = cavity_dyn.shape[0]
 
+    # p(x_new | x_old, theta, u) as one-hot
+    p_xnew = jax.nn.one_hot(transition_idx, n_states)  # (x_old, theta, u, x_new)
+    p_xnew = jnp.transpose(p_xnew, (0, 3, 1, 2))      # (x_old, x_new, theta, u)
+
     def compute_single_t(t):
-        # Messages into dyn_t from x_t side
-        fwd_t = fwd_msgs[t] * obs_to_x[t]  # (n_states,)
+        fwd_t = fwd_msgs[t] * obs_to_x[t]                # (x_old,)
+        bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]      # (x_new,)
 
-        # Messages into dyn_t from x_{t+1} side, gathered at transition targets
-        bwd_t1_obs = bwd_msgs[t + 1] * obs_to_x[t + 1]  # (n_states,)
-        bwd_gathered = bwd_t1_obs[transition_idx]  # (n_states, n_static, n_actions)
+        belief = (p_xnew
+                  * fwd_t[:, None, None, None]
+                  * bwd_t1[None, :, None, None]
+                  * cavity_dyn[t][None, None, :, None]
+                  * action_prior[None, None, None, :])
 
-        # Region belief: fwd(x_t) * cavity(theta) * p(u) * bwd(T[x_t, theta, u])
-        belief = (fwd_t[:, None, None]
-                  * cavity_dyn[t][None, :, None]
-                  * action_prior[None, None, :]
-                  * bwd_gathered)
-
-        # Normalize
         Z = belief.sum() + EPSILON
         return belief / Z
 
     return jax.vmap(compute_single_t)(jnp.arange(T))
 
 
-def compute_dyn_channels(dyn_region_beliefs, transition_idx):
+def compute_dyn_channels(dyn_region_beliefs):
     """
     Compute dynamic channel distributions r_t(x_new | x_old, u) by marginalizing
     theta from the dynamics region beliefs.
 
     Args:
-        dyn_region_beliefs: (T, n_states, n_static, n_actions) normalized region beliefs
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        dyn_region_beliefs: (T, n_states, n_states, n_static, n_actions) normalized region beliefs
 
     Returns:
         (T, n_states, n_states, n_actions) — r_t[x_old, x_new, u]
     """
-    n_states = dyn_region_beliefs.shape[1]
-
-    def channel_single_t(belief_t):
-        # belief_t: (n_states, n_static, n_actions) = q(x_old, theta, u)
-        n_old, n_static, n_actions = belief_t.shape
-
-        def scatter_action(action):
-            # For this action: scatter-add over theta
-            # belief_t[:, :, action] has shape (n_old, n_static)
-            # transition_idx[:, :, action] has shape (n_old, n_static) -> x_new
-            next_idx = transition_idx[:, :, action]  # (n_old, n_static)
-            weights = belief_t[:, :, action]  # (n_old, n_static)
-
-            old_idx = jnp.broadcast_to(
-                jnp.arange(n_old)[:, None], (n_old, n_static)
-            )
-
-            # joint[x_old, x_new] for this action
-            joint = jnp.zeros((n_old, n_states))
-            joint = joint.at[old_idx.ravel(), next_idx.ravel()].add(weights.ravel())
-            return joint  # (n_old, n_states)
-
-        # (n_actions, n_old, n_states)
-        joint_per_action = jax.vmap(scatter_action)(jnp.arange(n_actions))
-        # -> (n_old, n_states, n_actions)
-        joint = jnp.transpose(joint_per_action, (1, 2, 0))
-
-        # Marginal q(x_old, u) = sum over x_new
-        q_xu = joint.sum(axis=1)  # (n_old, n_actions)
-
-        # Conditional r(x_new | x_old, u) = joint / q(x_old, u)
-        return joint / (q_xu[:, None, :] + EPSILON)
-
-    return jax.vmap(channel_single_t)(dyn_region_beliefs)
+    joint = dyn_region_beliefs.sum(axis=3)              # marginalize θ → (T, x_old, x_new, u)
+    marginal = joint.sum(axis=2, keepdims=True)         # (T, x_old, 1, u)
+    return joint / (marginal + EPSILON)
 
 
-def compute_obs_channels(obs_idx):
-    """
-    Compute observation channel indices by reshaping the FOV grid.
+def compute_obs_channels_from_beliefs(obs_region_beliefs):
+    """Compute r(y|x,θ) from obs region beliefs q(y,x,θ).
 
-    Since observations are deterministic, r(y | x_t, theta) = delta(y = obs_idx[k, x_t, theta]).
-    The channel IS the obs_idx — just reshape (7, 7, ...) to (49, ...).
+    r(y|x,θ) = q(y,x,θ) / Σ_y' q(y',x,θ)
 
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index
+        obs_region_beliefs: (T+1, 49, n_cell_types, n_states, n_static)
 
     Returns:
-        (49, n_states, n_static) — obs channel indices
+        (T+1, 49, n_cell_types, n_states, n_static) — r_t(y|x,θ) per FOV
     """
-    n_states = obs_idx.shape[2]
-    n_static = obs_idx.shape[3]
-    return obs_idx.reshape(49, n_states, n_static)
+    marginal = obs_region_beliefs.sum(axis=2, keepdims=True)  # (T+1, 49, 1, n_states, n_static)
+    return obs_region_beliefs / (marginal + EPSILON)
 
 
-def compute_obs_region_beliefs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs):
+def compute_obs_region_beliefs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs, n_cell_types):
     """
     Compute region beliefs for observation factors (per FOV position).
 
     For each FOV position k at timestep t:
-        q_{t,obs,k}(x_t, theta) = (1/Z) * mu_{x_t->obs_k}(x_t) * cavity_obs_t(theta)
-    y is collapsed since the observation factor is deterministic and y has uniform prior.
+        q_{t,obs,k}(y, x, theta) = (1/Z) * p(y|x,theta,k) * mu_{x_t->obs_k}(x_t) * cavity_obs_t(theta)
 
     mu_{x_t->obs_k}(x_t) is the product of all messages to x_t except from obs_k.
     Since all 49 obs->x messages are uniform, removing one still gives uniform,
@@ -379,30 +345,28 @@ def compute_obs_region_beliefs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) aggregated obs messages to x
         cavity_obs: (T+1, n_static) cavity beliefs for obs factors
+        n_cell_types: int, number of observation categories
 
     Returns:
-        region_beliefs: (T+1, 49, n_states, n_static) normalized region beliefs
+        region_beliefs: (T+1, 49, n_cell_types, n_states, n_static) normalized region beliefs
     """
     T_plus_1 = cavity_obs.shape[0]
-    n_states = obs_idx.shape[2]
-    n_static = obs_idx.shape[3]
+
+    # p(y|x,θ,k) as one-hot: (49, n_cell_types, n_states, n_static)
+    obs_flat = obs_idx.reshape(49, obs_idx.shape[2], obs_idx.shape[3])
+    p_y = jax.nn.one_hot(obs_flat, n_cell_types)       # (49, n_states, n_static, n_cell_types)
+    p_y = jnp.transpose(p_y, (0, 3, 1, 2))             # (49, n_cell_types, n_states, n_static)
 
     def compute_single_t(t):
-        # Message from x_t to obs factors (all other messages to x_t)
-        # fwd[t] * bwd[t] gives the product of dyn messages to x_t
-        # obs_to_x[t] is the aggregated obs message; for per-FOV cavity we'd divide out
-        # but with uniform obs->x, the cavity x->obs_k is just fwd*bwd
+        # Message from x_t to obs factors: fwd*bwd (uniform obs->x case)
         x_belief = fwd_msgs[t] * bwd_msgs[t]
         x_belief = x_belief / (x_belief.sum() + EPSILON)
 
-        # Region belief for each FOV: x_belief(x_t) * cavity_obs(theta)
-        # Shape: (n_states, n_static)
-        belief = x_belief[:, None] * cavity_obs[t][None, :]
+        # q(y,x,θ) = p(y|x,θ,k) * x_belief(x) * cavity(θ)
+        # (49, n_cell_types, n_states, n_static)
+        belief = p_y * x_belief[None, None, :, None] * cavity_obs[t][None, None, None, :]
         Z = belief.sum() + EPSILON
-        belief = belief / Z
-
-        # Tile to 49 FOV positions (all identical with uniform obs)
-        return jnp.tile(belief[None, :, :], (49, 1, 1))  # (49, n_states, n_static)
+        return belief / Z
 
     return jax.vmap(compute_single_t)(jnp.arange(T_plus_1))
 
@@ -462,11 +426,16 @@ def region_extended_loopy_bp_planning_indexed(
     q_u_init = jnp.zeros((horizon, n_actions))
     dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
 
-    # Obs channels are constant (deterministic mapping, doesn't depend on messages)
-    obs_channels = compute_obs_channels(obs_idx)
+    # Initialize obs channels: one-hot from deterministic obs_idx
+    obs_flat = obs_idx.reshape(49, n_states, n_static)
+    r_init = jax.nn.one_hot(obs_flat, N_CELL_TYPES)          # (49, n_states, n_static, N_CELL_TYPES)
+    r_init = jnp.transpose(r_init, (0, 3, 1, 2))             # (49, N_CELL_TYPES, n_states, n_static)
+    obs_channels_init = jnp.broadcast_to(
+        r_init[None], (horizon + 1, 49, N_CELL_TYPES, n_states, n_static)
+    )
 
     def body_fn(_, carry):
-        log_dyn_to_theta, log_obs_to_theta, _, _ = carry
+        log_dyn_to_theta, log_obs_to_theta, _, _, _ = carry
 
         # Step 1: theta cavities (total-minus-self)
         cavity_dyn, cavity_obs = compute_theta_cavities_extended(
@@ -504,20 +473,21 @@ def region_extended_loopy_bp_planning_indexed(
         # Step 8: Region beliefs
         dyn_regions = compute_dyn_region_beliefs(
             transition_idx, fwd_msgs, bwd_msgs, obs_to_x,
-            cavity_dyn, action_prior
+            cavity_dyn, action_prior, n_states
         )
-        _obs_regions = compute_obs_region_beliefs(
-            obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs
+        obs_regions = compute_obs_region_beliefs(
+            obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs, N_CELL_TYPES
         )
 
-        # Step 9: Dyn channel distributions from region beliefs
-        dyn_channels = compute_dyn_channels(dyn_regions, transition_idx)
+        # Step 9: Channel distributions from region beliefs
+        dyn_channels = compute_dyn_channels(dyn_regions)
+        obs_channels = compute_obs_channels_from_beliefs(obs_regions)
 
-        return new_log_dyn_to_theta, new_log_obs_to_theta, q_u, dyn_channels
+        return new_log_dyn_to_theta, new_log_obs_to_theta, q_u, dyn_channels, obs_channels
 
-    log_dyn_to_theta, log_obs_to_theta, q_u, dyn_channels = lax.fori_loop(
+    log_dyn_to_theta, log_obs_to_theta, q_u, dyn_channels, obs_channels = lax.fori_loop(
         0, n_iterations, body_fn,
-        (log_dyn_to_theta, log_obs_to_theta, q_u_init, dyn_channels_init)
+        (log_dyn_to_theta, log_obs_to_theta, q_u_init, dyn_channels_init, obs_channels_init)
     )
 
     return q_u[0], dyn_channels, obs_channels
