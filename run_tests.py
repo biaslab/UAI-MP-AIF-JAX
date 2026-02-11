@@ -155,8 +155,6 @@ def run_inference_tests():
     t = TestRegionExtendedLoopyBP()
     t.setup_method()
     t.test_output_shape()
-    t.test_matches_loopy_bp_single_iter()
-    t.test_matches_loopy_bp_multi_iter()
     t.test_respects_action_mask()
     t.test_theta_cavities_extended_shape()
     print("  Region-Extended Loopy BP: PASSED")

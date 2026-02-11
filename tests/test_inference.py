@@ -462,60 +462,6 @@ class TestRegionExtendedLoopyBP:
         assert dyn_channels.shape == (5, self.n_states, self.n_states, self.n_actions)
         assert obs_channels.shape == (6, 49, 11, self.n_states, self.n_static)
 
-    def test_matches_loopy_bp_single_iter(self):
-        """With uniform obs, region-extended should match loopy_bp at 1 iteration."""
-        import jax.numpy as jnp
-        from inference.loopy_bp import loopy_bp_planning_indexed
-        from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
-        )
-
-        q_current = jnp.ones(self.n_states) / self.n_states
-        q_static = jnp.ones(self.n_static) / self.n_static
-        goal = jnp.zeros(self.n_states)
-        goal = goal.at[0].set(1.0)
-
-        loopy_result = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
-            horizon=5, n_iterations=1,
-        )
-        extended_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=1,
-        )
-
-        assert np.allclose(loopy_result, extended_result, atol=1e-5), (
-            f"Region-extended should match loopy BP with 1 iteration.\n"
-            f"Loopy:    {loopy_result}\nExtended: {extended_result}"
-        )
-
-    def test_matches_loopy_bp_multi_iter(self):
-        """With uniform obs, region-extended should match loopy_bp at multiple iterations."""
-        import jax.numpy as jnp
-        from inference.loopy_bp import loopy_bp_planning_indexed
-        from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
-        )
-
-        q_current = jnp.ones(self.n_states) / self.n_states
-        q_static = jnp.ones(self.n_static) / self.n_static
-        goal = jnp.zeros(self.n_states)
-        goal = goal.at[0].set(1.0)
-
-        loopy_result = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
-            horizon=5, n_iterations=5,
-        )
-        extended_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=5,
-        )
-
-        assert np.allclose(loopy_result, extended_result, atol=1e-5), (
-            f"Region-extended should match loopy BP with 5 iterations.\n"
-            f"Loopy:    {loopy_result}\nExtended: {extended_result}"
-        )
-
     def test_respects_action_mask(self):
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import (

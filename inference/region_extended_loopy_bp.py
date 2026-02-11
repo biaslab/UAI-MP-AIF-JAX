@@ -23,7 +23,6 @@ from jax import lax
 from functools import partial
 
 from .messages import EPSILON
-from .planning import marginalize_static_indexed
 from environments.minigrid import N_CELL_TYPES
 
 
@@ -32,22 +31,21 @@ from environments.minigrid import N_CELL_TYPES
 # =============================================================================
 
 
-def compute_reduced_per_t(transition_idx, cavity_theta, n_states):
+def compute_reduced_per_t_from_kernels(dyn_kernels, cavity_theta):
     """
-    Compute per-timestep reduced transition tensors using theta cavity messages.
+    Compute per-timestep reduced tensors from dynamics kernels.
+
+    reduced[t](x_new, x_old, u) = Σ_θ κ_t(x_old, x_new, θ, u) · cavity[t](θ)
 
     Args:
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        dyn_kernels: (T, n_states, n_states, n_static, n_actions) — κ_t(x_old, x_new, θ, u)
         cavity_theta: (T, n_static) per-timestep cavity beliefs on theta
-        n_states: number of dynamic states
 
     Returns:
         (T, n_states, n_states, n_actions) per-timestep reduced tensors
     """
-    def reduce_single(cavity_t):
-        return marginalize_static_indexed(transition_idx, cavity_t, n_states)
-
-    return jax.vmap(reduce_single)(cavity_theta)
+    # tijkl = (T, x_old, x_new, θ, u), tk = (T, θ) → tjil = (T, x_new, x_old, u)
+    return jnp.einsum("tijkl,tk->tjil", dyn_kernels, cavity_theta)
 
 
 def forward_pass(reduced_per_t, q_x0, action_prior, obs_to_x, horizon):
@@ -131,16 +129,14 @@ def backward_pass(reduced_per_t, fwd_msgs, goal, action_prior, obs_to_x, horizon
     return bwd_msgs, q_u
 
 
-def compute_dyn_to_theta_msgs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x, action_prior, horizon):
+def compute_dyn_to_theta_msgs(dyn_kernels, fwd_msgs, bwd_msgs, obs_to_x, action_prior, horizon):
     """
     Compute messages from each dynamics factor to theta, using obs-augmented x messages.
 
-    For timestep t:
-        msg[theta] = sum_{x_t, u_t} I[T_idx[x_t, theta, u_t] == x_{t+1}]
-                     * (fwd[t]*obs_to_x[t])(x_t) * p(u_t) * (bwd[t+1]*obs_to_x[t+1])(x_{t+1})
+    msg(θ) = Σ_{x,x',u} κ_t(x, x', θ, u) · fwd(x) · bwd(x') · p(u)
 
     Args:
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        dyn_kernels: (T, n_states, n_states, n_static, n_actions) — κ_t(x_old, x_new, θ, u)
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) obs factor messages to x
@@ -154,14 +150,8 @@ def compute_dyn_to_theta_msgs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x, acti
         fwd_t = fwd_msgs[t] * obs_to_x[t]
         bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]
 
-        # Gather backward message at transition targets
-        bwd_gathered = bwd_t1[transition_idx]  # (n_states, n_static, n_actions)
-
-        # Weight: fwd[old] * action_prior[action] * bwd[new]
-        weights = fwd_t[:, None, None] * action_prior[None, None, :] * bwd_gathered
-
-        # Sum over old states and actions -> message to theta
-        msg = weights.sum(axis=(0, 2))  # (n_static,)
+        # κ: (x_old, x_new, θ, u), fwd: (x_old,), bwd: (x_new,), prior: (u,)
+        msg = jnp.einsum("ijkl,i,j,l->k", dyn_kernels[t], fwd_t, bwd_t1, action_prior)
 
         return jnp.log(msg + EPSILON)
 
@@ -173,48 +163,75 @@ def compute_dyn_to_theta_msgs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x, acti
 # =============================================================================
 
 
-def compute_obs_to_x_msgs(obs_idx, cavity_theta_obs, horizon):
+def compute_obs_to_x_msgs(obs_kernels, cavity_theta_obs, horizon):
     """
     Compute messages from observation factors to x variables.
 
-    For timestep t, the aggregated obs->x message is:
-        obs_to_x[t](x_t) = prod_k sum_{theta} cavity_obs_t(theta) * sum_{y_k} p(y_k | x_t, theta, k)
-    With uniform y prior, each FOV factor contributes a uniform message over x_t.
-    The product of 49 uniform messages is still uniform.
+    Per FOV position k:
+        μ_{obs_k→x}(x) = Σ_θ κ_{obs,t,k}(x,θ) · cavity_obs_t(θ)
+    Aggregated (product over k, normalized):
+        obs_to_x[t](x) ∝ Π_k μ_{obs_k→x}(x)
 
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index
+        obs_kernels: (T+1, 7, 7, n_states, n_static) — compact obs kernels
         cavity_theta_obs: (T+1, n_static) cavity beliefs for obs factors
         horizon: T
 
     Returns:
-        obs_to_x: (T+1, n_states) messages (uniform ones for now)
+        obs_to_x: (T+1, n_states) normalized messages
     """
-    n_states = obs_idx.shape[2]
-    return jnp.ones((horizon + 1, n_states))
+    T_plus_1 = obs_kernels.shape[0]
+    n_states = obs_kernels.shape[3]
+    n_static = obs_kernels.shape[4]
+    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
+
+    # Per-k message: Σ_θ κ(x,θ) · cavity(θ) → (T+1, 49, n_states)
+    per_k_msg = jnp.einsum("tkis,ts->tki", kernels_flat, cavity_theta_obs)
+
+    # Product over 49 FOV positions in log-space → (T+1, n_states)
+    log_per_k = jnp.log(per_k_msg + EPSILON)
+    log_obs_to_x = log_per_k.sum(axis=1)
+
+    # Normalize via softmax
+    return jax.nn.softmax(log_obs_to_x, axis=1)
 
 
-def compute_obs_to_theta_msgs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, horizon):
+def compute_obs_to_theta_msgs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, horizon):
     """
     Compute aggregated messages from observation factors to theta.
 
-    For timestep t, each FOV position k sends a message to theta:
-        msg_k(theta) = sum_{x_t, y_k} mu_{x_t->obs_k}(x_t) * p(y_k|x_t,theta,k) * p(y_k)
-    With uniform y, each msg_k is uniform over theta.
-    Aggregating 49 FOV positions: sum of 49 uniform = still uniform.
+    Per FOV position k:
+        μ_{obs_k→θ}(θ) = Σ_x κ_{obs,t,k}(x,θ) · μ_{x→obs_k}(x)
+    Aggregated in log-space:
+        log_obs_to_theta[t](θ) = Σ_k log μ_{obs_k→θ}(θ)
 
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index
+        obs_kernels: (T+1, 7, 7, n_states, n_static) — compact obs kernels
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
-        obs_to_x: (T+1, n_states) obs factor messages to x
+        obs_to_x: (T+1, n_states) aggregated obs messages to x (unused in cavity)
         horizon: T
 
     Returns:
-        log_obs_to_theta: (T+1, n_static) log-space messages (zeros = uniform)
+        log_obs_to_theta: (T+1, n_static) log-space messages
     """
-    n_static = obs_idx.shape[3]
-    return jnp.zeros((horizon + 1, n_static))
+    T_plus_1 = obs_kernels.shape[0]
+    n_states = obs_kernels.shape[3]
+    n_static = obs_kernels.shape[4]
+    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
+
+    def compute_msg_t(t):
+        # x→obs cavity: fwd * bwd (excludes obs_to_x)
+        x_msg = fwd_msgs[t] * bwd_msgs[t]
+        x_msg = x_msg / (x_msg.sum() + EPSILON)
+
+        # Per-k: Σ_x κ(x,θ) · x_msg(x) → (49, n_static)
+        per_k_msg = jnp.einsum("kis,i->ks", kernels_flat[t], x_msg)
+
+        # Sum of logs over k → (n_static,)
+        return jnp.log(per_k_msg + EPSILON).sum(axis=0)
+
+    return jax.vmap(compute_msg_t)(jnp.arange(horizon + 1))
 
 
 def compute_theta_cavities_extended(log_prior, log_dyn_to_theta, log_obs_to_theta):
@@ -253,39 +270,32 @@ def compute_theta_cavities_extended(log_prior, log_dyn_to_theta, log_obs_to_thet
 # =============================================================================
 
 
-def compute_dyn_region_beliefs(transition_idx, fwd_msgs, bwd_msgs, obs_to_x,
-                               cavity_dyn, action_prior, n_states):
+def compute_dyn_region_beliefs(dyn_kernels, fwd_msgs, bwd_msgs, obs_to_x,
+                               cavity_dyn, action_prior):
     """
     Compute region beliefs for dynamics factors.
 
-    q_{t,dyn}(x_old, x_new, theta, u) = (1/Z) * p(x_new|x_old,theta,u)
-                                          * fwd[t](x_old) * obs_to_x[t](x_old)
-                                          * bwd[t+1](x_new) * obs_to_x[t+1](x_new)
-                                          * cavity_dyn_t(theta) * p(u)
+    q_{t,dyn}(x_old, x_new, θ, u) ∝ κ_t(x_old, x_new, θ, u) · fwd(x_old) · bwd(x_new)
+                                       · cavity(θ) · p(u)
 
     Args:
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        dyn_kernels: (T, n_states, n_states, n_static, n_actions) — κ_t(x_old, x_new, θ, u)
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) obs messages to x
         cavity_dyn: (T, n_static) cavity beliefs for dyn factors
         action_prior: (n_actions,) prior over actions
-        n_states: number of dynamic states
 
     Returns:
         region_beliefs: (T, n_states, n_states, n_static, n_actions) normalized region beliefs
     """
     T = cavity_dyn.shape[0]
 
-    # p(x_new | x_old, theta, u) as one-hot
-    p_xnew = jax.nn.one_hot(transition_idx, n_states)  # (x_old, theta, u, x_new)
-    p_xnew = jnp.transpose(p_xnew, (0, 3, 1, 2))      # (x_old, x_new, theta, u)
-
     def compute_single_t(t):
-        fwd_t = fwd_msgs[t] * obs_to_x[t]                # (x_old,)
-        bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]      # (x_new,)
+        fwd_t = fwd_msgs[t] * obs_to_x[t]
+        bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]
 
-        belief = (p_xnew
+        belief = (dyn_kernels[t]
                   * fwd_t[:, None, None, None]
                   * bwd_t1[None, :, None, None]
                   * cavity_dyn[t][None, None, :, None]
@@ -374,43 +384,44 @@ def compute_obs_kernels(obs_idx, obs_channels):
     return kernels.reshape(T_plus_1, 7, 7, n_states, n_static)
 
 
-def compute_obs_region_beliefs(obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs, n_cell_types):
+def compute_obs_region_beliefs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs):
     """
     Compute region beliefs for observation factors (per FOV position).
 
-    For each FOV position k at timestep t:
-        q_{t,obs,k}(y, x, theta) = (1/Z) * p(y|x,theta,k) * mu_{x_t->obs_k}(x_t) * cavity_obs_t(theta)
+    q_{t,obs,k}(y, x, θ) ∝ κ_{t,k}(x, θ) · μ_y(y) · μ_{x→obs_k}(x) · cavity_obs_t(θ)
 
-    mu_{x_t->obs_k}(x_t) is the product of all messages to x_t except from obs_k.
-    Since all 49 obs->x messages are uniform, removing one still gives uniform,
-    so mu_{x_t->obs_k} = fwd[t] * bwd[t] * obs_to_x[t] (= fwd * bwd for uniform case).
+    With μ_y(y) = 1 (uniform, no observation), the belief is uniform over y.
 
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index
+        obs_kernels: (T+1, 7, 7, n_states, n_static) — compact obs kernels
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) aggregated obs messages to x
         cavity_obs: (T+1, n_static) cavity beliefs for obs factors
-        n_cell_types: int, number of observation categories
 
     Returns:
         region_beliefs: (T+1, 49, n_cell_types, n_states, n_static) normalized region beliefs
     """
     T_plus_1 = cavity_obs.shape[0]
-
-    # p(y|x,θ,k) as one-hot: (49, n_cell_types, n_states, n_static)
-    obs_flat = obs_idx.reshape(49, obs_idx.shape[2], obs_idx.shape[3])
-    p_y = jax.nn.one_hot(obs_flat, n_cell_types)       # (49, n_states, n_static, n_cell_types)
-    p_y = jnp.transpose(p_y, (0, 3, 1, 2))             # (49, n_cell_types, n_states, n_static)
+    n_states = obs_kernels.shape[3]
+    n_static = obs_kernels.shape[4]
+    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
 
     def compute_single_t(t):
-        # Message from x_t to obs factors: fwd*bwd (uniform obs->x case)
         x_belief = fwd_msgs[t] * bwd_msgs[t]
         x_belief = x_belief / (x_belief.sum() + EPSILON)
 
-        # q(y,x,θ) = p(y|x,θ,k) * x_belief(x) * cavity(θ)
-        # (49, n_cell_types, n_states, n_static)
-        belief = p_y * x_belief[None, None, :, None] * cavity_obs[t][None, None, None, :]
+        # (49, n_states, n_static) — belief over (x, θ) per FOV position
+        belief_xtheta = (kernels_flat[t]
+                         * x_belief[None, :, None]
+                         * cavity_obs[t][None, None, :])
+
+        # Broadcast uniform μ_y over y → (49, n_cell_types, n_states, n_static)
+        belief = jnp.broadcast_to(
+            belief_xtheta[:, None, :, :],
+            (49, N_CELL_TYPES, n_states, n_static)
+        )
+
         Z = belief.sum() + EPSILON
         return belief / Z
 
@@ -479,24 +490,28 @@ def region_extended_loopy_bp_planning_indexed(
     obs_channels_init = jnp.broadcast_to(
         r_init[None], (horizon + 1, 49, N_CELL_TYPES, n_states, n_static)
     )
-    dyn_kernels_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_kernels_init = jnp.zeros((horizon + 1, 7, 7, n_states, n_static))
+    p_xnew = jax.nn.one_hot(transition_idx, n_states)       # (x_old, θ, u, x_new)
+    p_xnew = jnp.transpose(p_xnew, (0, 3, 1, 2))           # (x_old, x_new, θ, u)
+    dyn_kernels_init = jnp.broadcast_to(
+        p_xnew[None], (horizon, n_states, n_states, n_static, n_actions)
+    )
+    obs_kernels_init = jnp.ones((horizon + 1, 7, 7, n_states, n_static))
 
     def body_fn(_, carry):
-        log_dyn_to_theta, log_obs_to_theta, _, _, _, _, _ = carry
+        log_dyn_to_theta, log_obs_to_theta, _, _, _, dyn_kernels, obs_kernels = carry
 
         # Step 1: theta cavities (total-minus-self)
         cavity_dyn, cavity_obs = compute_theta_cavities_extended(
             log_prior_theta, log_dyn_to_theta, log_obs_to_theta
         )
 
-        # Step 2: Per-timestep reduced tensors from dyn-cavities
-        reduced_per_t = compute_reduced_per_t(
-            transition_idx, cavity_dyn, n_states
+        # Step 2: Per-timestep reduced tensors from dyn-kernels
+        reduced_per_t = compute_reduced_per_t_from_kernels(
+            dyn_kernels, cavity_dyn
         )
 
-        # Step 3: obs->x messages (uniform for now)
-        obs_to_x = compute_obs_to_x_msgs(obs_idx, cavity_obs, horizon)
+        # Step 3: obs->x messages from obs kernels
+        obs_to_x = compute_obs_to_x_msgs(obs_kernels, cavity_obs, horizon)
 
         # Step 4: Forward pass (with obs->x)
         fwd_msgs = forward_pass(
@@ -510,21 +525,21 @@ def region_extended_loopy_bp_planning_indexed(
 
         # Step 6: dyn->theta messages
         new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
-            transition_idx, fwd_msgs, bwd_msgs, obs_to_x, action_prior, horizon
+            dyn_kernels, fwd_msgs, bwd_msgs, obs_to_x, action_prior, horizon
         )
 
-        # Step 7: obs->theta messages (uniform for now)
+        # Step 7: obs->theta messages from obs kernels
         new_log_obs_to_theta = compute_obs_to_theta_msgs(
-            obs_idx, fwd_msgs, bwd_msgs, obs_to_x, horizon
+            obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, horizon
         )
 
         # Step 8: Region beliefs
         dyn_regions = compute_dyn_region_beliefs(
-            transition_idx, fwd_msgs, bwd_msgs, obs_to_x,
-            cavity_dyn, action_prior, n_states
+            dyn_kernels, fwd_msgs, bwd_msgs, obs_to_x,
+            cavity_dyn, action_prior
         )
         obs_regions = compute_obs_region_beliefs(
-            obs_idx, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs, N_CELL_TYPES
+            obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs
         )
 
         # Step 9: Channel distributions from region beliefs
