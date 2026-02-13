@@ -107,6 +107,7 @@ class MiniGridWrapper:
         if fov_size != 7:
             from minigrid.wrappers import ViewSizeWrapper
             self.env = ViewSizeWrapper(self.env, agent_view_size=fov_size)
+            self.env.unwrapped.agent_view_size = fov_size
         if max_steps is not None:
             self.env = gym.wrappers.TimeLimit(self.env, max_episode_steps=max_steps)
         self.env_name = env_name
