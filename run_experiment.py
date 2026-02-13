@@ -79,6 +79,8 @@ def main():
                         help="Use full tensor representation (memory-intensive, for testing)")
     parser.add_argument("--fov-size", type=int, default=7,
                         help="Field-of-view size (must be odd and >= 3, default: 7)")
+    parser.add_argument("--no-orientation", action="store_true",
+                        help="Replace orientation observation with uniform (agent must infer orientation)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -108,6 +110,8 @@ def main():
     print(f"\nInternal grid size: {grid_size}x{grid_size}")
     print(f"MiniGrid environment: {env_name} (includes outer walls)")
     print(f"FOV size: {args.fov_size}x{args.fov_size}")
+    if args.no_orientation:
+        print(f"Orientation observation: DISABLED (uniform)")
     print()
 
     print("Generating tensors (this may take a moment)...")
@@ -236,6 +240,7 @@ def main():
         record_episodes=record_episodes if record_episodes else None,
         video_dir=args.video_dir if record_episodes else None,
         fov_size=args.fov_size,
+        no_orientation=args.no_orientation,
     )
     elapsed = time.time() - t0
 
@@ -261,6 +266,7 @@ def main():
                 "receding_horizon": args.receding_horizon,
                 "inference_iterations": args.inference_iterations,
                 "planning_iterations": args.planning_iterations,
+                "no_orientation": args.no_orientation,
                 "seed_start": args.seed,
             },
             "results": {
