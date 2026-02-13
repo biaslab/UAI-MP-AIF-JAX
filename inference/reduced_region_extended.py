@@ -119,7 +119,7 @@ def reduced_region_extended_planning_indexed(
             reduced_per_t, q_current_state, action_prior, obs_to_x, horizon
         )
 
-        # Step 5: Backward pass (with obs->x) + action marginals
+        # Step 5: Backward pass (with obs->x) + action priors 
         bwd_msgs, q_u = backward_pass(
             reduced_per_t, fwd_msgs, goal, action_prior, obs_to_x, horizon
         )
