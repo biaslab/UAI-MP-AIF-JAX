@@ -87,11 +87,13 @@ def reduced_region_extended_planning_indexed(
     q_u_init = jnp.zeros((horizon, n_actions))
     dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
 
-    obs_flat = obs_idx.reshape(49, n_states, n_static)
-    r_init = jax.nn.one_hot(obs_flat, N_CELL_TYPES)              # (49, n_states, n_static, N_CELL_TYPES)
-    r_init = jnp.transpose(r_init, (0, 3, 1, 2))                 # (49, N_CELL_TYPES, n_states, n_static)
+    fov_w, fov_h = obs_idx.shape[0], obs_idx.shape[1]
+    n_fov = fov_w * fov_h
+    obs_flat = obs_idx.reshape(n_fov, n_states, n_static)
+    r_init = jax.nn.one_hot(obs_flat, N_CELL_TYPES)              # (n_fov, n_states, n_static, N_CELL_TYPES)
+    r_init = jnp.transpose(r_init, (0, 3, 1, 2))                 # (n_fov, N_CELL_TYPES, n_states, n_static)
     obs_channels_init = jnp.broadcast_to(
-        r_init[None], (horizon + 1, 49, N_CELL_TYPES, n_states, n_static)
+        r_init[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
     )
 
     p_xnew = jax.nn.one_hot(transition_idx, n_states)           # (x_old, θ, u, x_new)
@@ -99,7 +101,7 @@ def reduced_region_extended_planning_indexed(
     dyn_kernels_init = jnp.broadcast_to(
         p_xnew[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    obs_kernels_init = jnp.ones((horizon + 1, 7, 7, n_states, n_static))
+    obs_kernels_init = jnp.ones((horizon + 1, fov_w, fov_h, n_states, n_static))
 
     def body_fn(_, carry):
         q_u, dyn_channels, obs_channels, dyn_kernels, obs_kernels = carry

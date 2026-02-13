@@ -77,7 +77,12 @@ def main():
                         help="Planning method: 'bp' (standard BP, θ marginalized once), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization)")
     parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation (memory-intensive, for testing)")
+    parser.add_argument("--fov-size", type=int, default=7,
+                        help="Field-of-view size (must be odd and >= 3, default: 7)")
     args = parser.parse_args()
+
+    if args.fov_size < 3 or args.fov_size % 2 == 0:
+        parser.error("--fov-size must be odd and >= 3")
     
     record_episodes = []
     if args.record:
@@ -102,6 +107,7 @@ def main():
 
     print(f"\nInternal grid size: {grid_size}x{grid_size}")
     print(f"MiniGrid environment: {env_name} (includes outer walls)")
+    print(f"FOV size: {args.fov_size}x{args.fov_size}")
     print()
 
     print("Generating tensors (this may take a moment)...")
@@ -111,7 +117,7 @@ def main():
         # Full tensor representation (memory-intensive)
         print("  Using FULL tensor representation (memory-intensive)")
         transition_tensor = jnp.array(generate_transition_tensor(grid_size))
-        observation_tensor = jnp.array(generate_observation_tensor(grid_size))
+        observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size))
         orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size))
         print(f"  Transition tensor: {transition_tensor.shape}")
         print(f"  Observation tensor: {observation_tensor.shape}")
@@ -126,7 +132,7 @@ def main():
         # Index-based representation (memory-efficient, default)
         print("  Using INDEX-based representation (memory-efficient)")
         transition_idx = jnp.array(generate_transition_indices(grid_size))
-        observation_idx = jnp.array(generate_observation_indices(grid_size))
+        observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
         orientation_idx = jnp.array(generate_orientation_indices(grid_size))
         print(f"  Transition indices: {transition_idx.shape} (dtype={transition_idx.dtype})")
         print(f"  Observation indices: {observation_idx.shape} (dtype={observation_idx.dtype})")
@@ -204,6 +210,7 @@ def main():
             n_planning_iterations=args.planning_iterations,
         )
     print(f"  Planning method: {args.planning_method}")
+    print(f"  FOV size: {args.fov_size}")
     print(f"  Max steps: {args.max_steps}")
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Inference iterations: {args.inference_iterations}")
@@ -228,6 +235,7 @@ def main():
         verbose=args.verbose,
         record_episodes=record_episodes if record_episodes else None,
         video_dir=args.video_dir if record_episodes else None,
+        fov_size=args.fov_size,
     )
     elapsed = time.time() - t0
 
@@ -246,6 +254,7 @@ def main():
                 "grid_size": grid_size,
                 "env_name": env_name,
                 "planning_method": args.planning_method,
+                "fov_size": args.fov_size,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,
                 "planning_horizon": args.planning_horizon,

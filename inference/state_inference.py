@@ -89,8 +89,9 @@ def _single_iteration(
         transition_tensor, q_old_state, q_static, action_onehot
     )
     
-    obs_flat = obs_tensors.reshape(49, 11, n_states, n_static)
-    vision_flat = vision_obs.reshape(49, 11)
+    n_fov = obs_tensors.shape[0] * obs_tensors.shape[1]
+    obs_flat = obs_tensors.reshape(n_fov, 11, n_states, n_static)
+    vision_flat = vision_obs.reshape(n_fov, 11)
     log_msgs_vision = jax.vmap(
         lambda t, v: jnp.log(backward_message_3d(t, v, q_static) + EPSILON)
     )(obs_flat, vision_flat)

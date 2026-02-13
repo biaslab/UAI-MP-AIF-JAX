@@ -16,6 +16,7 @@ def run_minigrid_tests():
         TestGetNextAgentPosition,
         TestFOV,
         TestTensorGeneration,
+        TestCustomFOVSize,
     )
 
     print("=" * 60)
@@ -95,6 +96,18 @@ def run_minigrid_tests():
     t.test_transition_tensor_is_stochastic()
     print("  Tensor generation: PASSED")
 
+    print("Running custom FOV size tests...")
+    t = TestCustomFOVSize()
+    t.test_in_fov_size5()
+    t.test_relative_to_fov_coords_size5()
+    t.test_get_fov_shape_size5()
+    t.test_get_fov_shape_size3()
+    t.test_get_fov_key_at_agent_size5()
+    t.test_get_fov_door_visible_size5()
+    t.test_observation_indices_shape_size5()
+    t.test_observation_tensor_shape_size5()
+    print("  Custom FOV size: PASSED")
+
 
 def run_inference_tests():
     from tests.test_inference import (
@@ -105,6 +118,7 @@ def run_inference_tests():
         TestRegionExtendedLoopyBP,
         TestReducedRegionExtended,
         TestAgentIntegration,
+        TestCustomFOVSizeInference,
     )
 
     print()
@@ -176,10 +190,35 @@ def run_inference_tests():
     t.test_agent_reset()
     print("  Agent integration: PASSED")
 
+    print("Running custom FOV size inference tests...")
+    t = TestCustomFOVSizeInference()
+    t.setup_method()
+    t.test_obs_idx_shape()
+    t.test_state_inference_with_fov5()
+    t.test_region_extended_with_fov5()
+    t.test_reduced_region_extended_with_fov5()
+    t.test_agent_step_with_fov5()
+    print("  Custom FOV size inference: PASSED")
+
+
+def run_groundtruth_tests():
+    from tests.test_minigrid_groundtruth import TestFOVSizeAgainstMiniGrid
+
+    print()
+    print("=" * 60)
+    print("GROUNDTRUTH FOV SIZE TESTS")
+    print("=" * 60)
+
+    print("Running FOV size=5 ground truth tests...")
+    t = TestFOVSizeAgainstMiniGrid()
+    t.test_fov_size5_matches_minigrid()
+    print("  FOV size=5 ground truth: PASSED")
+
 
 def main():
     run_minigrid_tests()
     run_inference_tests()
+    run_groundtruth_tests()
 
     print()
     print("=" * 60)

@@ -658,3 +658,123 @@ class TestAgentIntegration:
         )
         new_agent = agent.reset()
         assert new_agent.q_state is not None
+
+
+class TestCustomFOVSizeInference:
+    """Test that inference and planning work with non-default FOV sizes."""
+
+    def setup_method(self):
+        import jax.numpy as jnp
+        from environments.minigrid import (
+            generate_transition_indices,
+            generate_observation_indices,
+            generate_orientation_indices,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        self.n = 3
+        self.fov_size = 5
+        n_loc = self.n * self.n
+        n_key = n_loc - 2 * self.n
+        n_door = n_loc - 2 * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.n_static = n_key * n_door
+        self.n_actions = 7
+
+        self.transition_idx = jnp.array(generate_transition_indices(self.n))
+        self.obs_idx = jnp.array(generate_observation_indices(self.n, fov_size=self.fov_size))
+        self.orientation_idx = jnp.array(generate_orientation_indices(self.n))
+
+    def test_obs_idx_shape(self):
+        assert self.obs_idx.shape[:2] == (self.fov_size, self.fov_size)
+
+    def test_state_inference_with_fov5(self):
+        import jax.numpy as jnp
+        from inference.state_inference import state_inference_step_indexed
+
+        q_old = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        vision_obs = jnp.zeros((self.fov_size, self.fov_size, 11))
+        vision_obs = vision_obs.at[:, :, 1].set(1.0)
+        ori_obs = jnp.array([1.0, 0.0, 0.0, 0.0])
+
+        q_current, q_static_new = state_inference_step_indexed(
+            q_old, q_static,
+            self.transition_idx, self.obs_idx, self.orientation_idx,
+            vision_obs, ori_obs,
+            action_idx=0,
+            n_iterations=2,
+        )
+
+        assert q_current.shape == (self.n_states,)
+        assert q_static_new.shape == (self.n_static,)
+        assert np.isclose(q_current.sum(), 1.0)
+        assert np.isclose(q_static_new.sum(), 1.0)
+
+    def test_region_extended_with_fov5(self):
+        import jax.numpy as jnp
+        from inference.region_extended_loopy_bp import (
+            region_extended_loopy_bp_planning_indexed,
+        )
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = region_extended_loopy_bp_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=3, n_iterations=2,
+        )
+
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(action_dist.sum(), 1.0)
+        # obs_channels should use n_fov = 5*5 = 25
+        assert obs_channels.shape == (4, 25, 11, self.n_states, self.n_static)
+
+    def test_reduced_region_extended_with_fov5(self):
+        import jax.numpy as jnp
+        from inference.reduced_region_extended import (
+            reduced_region_extended_planning_indexed,
+        )
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = reduced_region_extended_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=3, n_iterations=2,
+        )
+
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(action_dist.sum(), 1.0)
+        assert obs_channels.shape == (4, 25, 11, self.n_states, self.n_static)
+
+    def test_agent_step_with_fov5(self):
+        import jax.numpy as jnp
+        from agents.flat_tensor_agent import IndexedTensorAgent
+        from utils.tensors import get_dimensions, flatten_state_index
+
+        dims = get_dimensions(self.n)
+        goal = jnp.zeros(dims["n_states"])
+        goal = goal.at[0].set(1.0)
+
+        agent = IndexedTensorAgent.create(
+            grid_size=self.n,
+            transition_idx=self.transition_idx,
+            observation_idx=self.obs_idx,
+            orientation_idx=self.orientation_idx,
+            goal=goal,
+            planning_horizon=3,
+            n_planning_iterations=1,
+        )
+
+        vision_obs = jnp.zeros((self.fov_size, self.fov_size, 11))
+        vision_obs = vision_obs.at[:, :, 1].set(1.0)
+        ori_obs = jnp.array([1.0, 0.0, 0.0, 0.0])
+
+        action, new_agent = agent.step(vision_obs, ori_obs, time_remaining=10)
+        assert 0 <= action < 7
