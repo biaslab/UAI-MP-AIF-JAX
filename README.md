@@ -4,13 +4,24 @@ Message passing implementation for planning in MiniGrid's DoorKey environment us
 
 ## Overview
 
-This project implements discrete factor graph inference for goal-directed planning in partially observable grid worlds. Currently features:
+This project implements discrete factor graph inference for goal-directed planning in partially observable grid worlds. Features:
 
 - **Loopy Belief Propagation** for state inference
-- **Forward-Backward Message Passing** for action planning
+- **Multiple message-passing schemes** for action planning (see below)
 - **Memory-efficient indexed tensor representation** (100-400x smaller than full tensors)
 
-**In Progress:** Implementing full Active Inference with region-extended Bethe approximation (see [.claude/skills/](.claude/skills/) for mathematical framework).
+## Planning Methods
+
+| Flag | Method | Description |
+|------|--------|-------------|
+| `bp` | Standard BP | Marginalizes static parameter θ once; forward-backward on temporal graph |
+| `loopy` | Loopy BP | Treats θ as a variable node in the factor graph |
+| `region-extended` | Region-extended loopy BP | Adds observation factors to the planning graph |
+| `reduced-aif` | Reduced region-extended | Fixed θ with kernel reparameterization + observation factors |
+| `nuijten` | Nuijten MP | Region beliefs without kernels, θ inferred |
+| `reduced-nuijten` | Reduced Nuijten MP | Region beliefs without kernels, θ fixed |
+
+Select a method with `--planning-method <flag>`.
 
 ## Quick Start
 
@@ -18,11 +29,47 @@ This project implements discrete factor graph inference for goal-directed planni
 # Install dependencies
 uv sync
 
-# Run basic experiment (5x5 grid, 100 episodes)
+# Run basic experiment (5x5 grid, 100 episodes, standard BP)
 uv run python run_experiment.py --grid-size 3 --episodes 100
+
+# Run with a different planning method
+uv run python run_experiment.py --grid-size 3 --episodes 100 --planning-method region-extended
 
 # Run all tests
 uv run python run_tests.py
+```
+
+## Experiments
+
+`run_experiment.py` runs multi-episode experiments and reports success rate, average steps, and average reward.
+
+```bash
+uv run python run_experiment.py --grid-size 3 --episodes 100 \
+    --planning-method bp \
+    --planning-horizon 15 \
+    --inference-iterations 10 \
+    --planning-iterations 10 \
+    --fov-size 7 \
+    --seed 0
+```
+
+Key options:
+
+- `--grid-size N` — Internal grid size (MiniGrid size = N+2)
+- `--planning-horizon N` — Lookahead depth
+- `--receding-horizon` — Decrease horizon as episode time runs out
+- `--fov-size N` — Field-of-view size (odd, >= 3)
+- `--no-orientation` — Replace orientation observation with uniform (agent must infer orientation)
+- `--full-tensors` — Use full tensor representation (debugging only, grid_size <= 3)
+- `--record first,last` — Record episodes to video
+- `--output results.json` — Save results to JSON
+
+## Diagnostics
+
+`run_diagnostics.py` runs a single episode and prints full internal state at every step: beliefs, observations, inference/planning timing, action distributions, and entropy.
+
+```bash
+uv run python run_diagnostics.py --grid-size 3 --seed 0 --planning-method bp
 ```
 
 ## Key Features
@@ -34,7 +81,7 @@ uv run python run_tests.py
 ## Project Structure
 
 ```
-agents/         # Agent implementations (FlatTensor & IndexedTensor)
+agents/         # Agent implementations
 environments/   # MiniGrid tensor generation & gym wrapper
 inference/      # State inference & planning algorithms
 tests/          # Unit & integration tests
