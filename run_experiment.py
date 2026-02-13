@@ -22,7 +22,7 @@ from environments.minigrid import (
     generate_orientation_indices,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent
+from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -73,11 +73,18 @@ def main():
     parser.add_argument("--record", type=str, default=None, 
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy", "region-extended", "reduced-aif"],
-                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization)")
+    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy", "region-extended", "reduced-aif", "nuijten", "reduced-nuijten"],
+                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization), 'nuijten' (region beliefs, no kernels, θ inferred), 'reduced-nuijten' (region beliefs, no kernels, θ fixed)")
     parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation (memory-intensive, for testing)")
+    parser.add_argument("--fov-size", type=int, default=7,
+                        help="Field-of-view size (must be odd and >= 3, default: 7)")
+    parser.add_argument("--no-orientation", action="store_true",
+                        help="Replace orientation observation with uniform (agent must infer orientation)")
     args = parser.parse_args()
+
+    if args.fov_size < 3 or args.fov_size % 2 == 0:
+        parser.error("--fov-size must be odd and >= 3")
     
     record_episodes = []
     if args.record:
@@ -102,6 +109,9 @@ def main():
 
     print(f"\nInternal grid size: {grid_size}x{grid_size}")
     print(f"MiniGrid environment: {env_name} (includes outer walls)")
+    print(f"FOV size: {args.fov_size}x{args.fov_size}")
+    if args.no_orientation:
+        print(f"Orientation observation: DISABLED (uniform)")
     print()
 
     print("Generating tensors (this may take a moment)...")
@@ -111,7 +121,7 @@ def main():
         # Full tensor representation (memory-intensive)
         print("  Using FULL tensor representation (memory-intensive)")
         transition_tensor = jnp.array(generate_transition_tensor(grid_size))
-        observation_tensor = jnp.array(generate_observation_tensor(grid_size))
+        observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size))
         orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size))
         print(f"  Transition tensor: {transition_tensor.shape}")
         print(f"  Observation tensor: {observation_tensor.shape}")
@@ -126,7 +136,7 @@ def main():
         # Index-based representation (memory-efficient, default)
         print("  Using INDEX-based representation (memory-efficient)")
         transition_idx = jnp.array(generate_transition_indices(grid_size))
-        observation_idx = jnp.array(generate_observation_indices(grid_size))
+        observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
         orientation_idx = jnp.array(generate_orientation_indices(grid_size))
         print(f"  Transition indices: {transition_idx.shape} (dtype={transition_idx.dtype})")
         print(f"  Observation indices: {observation_idx.shape} (dtype={observation_idx.dtype})")
@@ -192,6 +202,28 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
         )
+    elif args.planning_method == "nuijten":
+        agent = NuijtenMPAgent.create(
+            grid_size=grid_size,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
+    elif args.planning_method == "reduced-nuijten":
+        agent = ReducedNuijtenMPAgent.create(
+            grid_size=grid_size,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
     else:
         agent = IndexedTensorAgent.create(
             grid_size=grid_size,
@@ -204,6 +236,7 @@ def main():
             n_planning_iterations=args.planning_iterations,
         )
     print(f"  Planning method: {args.planning_method}")
+    print(f"  FOV size: {args.fov_size}")
     print(f"  Max steps: {args.max_steps}")
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Inference iterations: {args.inference_iterations}")
@@ -228,6 +261,8 @@ def main():
         verbose=args.verbose,
         record_episodes=record_episodes if record_episodes else None,
         video_dir=args.video_dir if record_episodes else None,
+        fov_size=args.fov_size,
+        no_orientation=args.no_orientation,
     )
     elapsed = time.time() - t0
 
@@ -246,12 +281,14 @@ def main():
                 "grid_size": grid_size,
                 "env_name": env_name,
                 "planning_method": args.planning_method,
+                "fov_size": args.fov_size,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,
                 "planning_horizon": args.planning_horizon,
                 "receding_horizon": args.receding_horizon,
                 "inference_iterations": args.inference_iterations,
                 "planning_iterations": args.planning_iterations,
+                "no_orientation": args.no_orientation,
                 "seed_start": args.seed,
             },
             "results": {

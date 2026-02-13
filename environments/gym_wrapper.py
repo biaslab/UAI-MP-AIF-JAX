@@ -85,7 +85,7 @@ def save_frames(frames: list, frames_dir: str, episode_id: int):
 
 @dataclass
 class StepResult:
-    vision_obs: jnp.ndarray  # (7, 7, 11) one-hot
+    vision_obs: jnp.ndarray  # (fov_size, fov_size, 11) one-hot
     orientation_obs: jnp.ndarray  # (4,) one-hot
     reward: float
     terminated: bool
@@ -99,13 +99,19 @@ class MiniGridWrapper:
         env_name: str = "MiniGrid-DoorKey-5x5-v0",
         render_mode: Optional[str] = None,
         max_steps: Optional[int] = None,
+        fov_size: int = 7,
     ):
         # Ensure the environment is registered (needed for non-standard sizes)
         env_name = ensure_env_registered(env_name)
         self.env = gym.make(env_name, render_mode=render_mode)
+        if fov_size != 7:
+            from minigrid.wrappers import ViewSizeWrapper
+            self.env = ViewSizeWrapper(self.env, agent_view_size=fov_size)
+            self.env.unwrapped.agent_view_size = fov_size
         if max_steps is not None:
             self.env = gym.wrappers.TimeLimit(self.env, max_episode_steps=max_steps)
         self.env_name = env_name
+        self.fov_size = fov_size
 
     def reset(self, seed: Optional[int] = None) -> StepResult:
         obs, info = self.env.reset(seed=seed)
@@ -134,9 +140,10 @@ class MiniGridWrapper:
         )
 
     def _image_to_onehot(self, image: np.ndarray) -> np.ndarray:
-        onehot = np.zeros((7, 7, N_CELL_TYPES), dtype=np.float32)
-        for i in range(7):
-            for j in range(7):
+        fov_w, fov_h = image.shape[0], image.shape[1]
+        onehot = np.zeros((fov_w, fov_h, N_CELL_TYPES), dtype=np.float32)
+        for i in range(fov_w):
+            for j in range(fov_h):
                 cell_type = int(image[i, j])
                 onehot[i, j, cell_type] = 1.0
         return onehot
@@ -166,6 +173,7 @@ def run_episode(
     receding_horizon: bool = False,
     verbose: bool = False,
     record: bool = False,
+    no_orientation: bool = False,
 ) -> dict:
     """
     Run a single episode with the agent.
@@ -181,8 +189,20 @@ def run_episode(
 
     Returns dict with episode statistics and optional frames.
     """
+    uniform_orientation = jnp.ones(N_ORIENTATIONS) / N_ORIENTATIONS
+
     result = env.reset(seed=seed)
     agent = agent.reset()
+
+    if no_orientation:
+        result = StepResult(
+            vision_obs=result.vision_obs,
+            orientation_obs=uniform_orientation,
+            reward=result.reward,
+            terminated=result.terminated,
+            truncated=result.truncated,
+            info=result.info,
+        )
 
     total_reward = 0.0
     steps = 0
@@ -208,6 +228,15 @@ def run_episode(
             print(f"Step {steps}: action={action}, time_remaining={time_remaining}")
 
         result = env.step(action)
+        if no_orientation:
+            result = StepResult(
+                vision_obs=result.vision_obs,
+                orientation_obs=uniform_orientation,
+                reward=result.reward,
+                terminated=result.terminated,
+                truncated=result.truncated,
+                info=result.info,
+            )
         total_reward += result.reward
         steps += 1
 
@@ -247,6 +276,8 @@ def run_experiment(
     show_progress: bool = True,
     record_episodes: Optional[list[int]] = None,
     video_dir: Optional[str] = None,
+    fov_size: int = 7,
+    no_orientation: bool = False,
 ) -> dict:
     """
     Run multiple episodes and collect statistics.
@@ -270,7 +301,7 @@ def run_experiment(
         record_episodes = []
     
     actual_render_mode = "rgb_array" if record_episodes else render_mode
-    env = MiniGridWrapper(env_name=env_name, render_mode=actual_render_mode, max_steps=max_steps)
+    env = MiniGridWrapper(env_name=env_name, render_mode=actual_render_mode, max_steps=max_steps, fov_size=fov_size)
 
     results = []
     successes = 0
@@ -281,8 +312,8 @@ def run_experiment(
         should_record = i in record_episodes
         
         episode_result = run_episode(
-            agent, env, seed=seed, receding_horizon=receding_horizon, 
-            verbose=verbose, record=should_record
+            agent, env, seed=seed, receding_horizon=receding_horizon,
+            verbose=verbose, record=should_record, no_orientation=no_orientation
         )
         
         if should_record and "frames" in episode_result and video_dir:

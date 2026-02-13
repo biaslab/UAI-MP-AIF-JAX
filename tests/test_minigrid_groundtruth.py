@@ -577,3 +577,55 @@ class TestObservationTensorConsistency:
                                         f"Tensor mismatch at ({fx},{fy}): "
                                         f"fov={cell_type}, tensor[{cell_type}]={tensor_val}"
                                     )
+
+
+class TestFOVSizeAgainstMiniGrid:
+    """Test that our get_fov with fov_size=5 matches MiniGrid ViewSizeWrapper."""
+
+    def test_fov_size5_matches_minigrid(self):
+        """FOV with fov_size=5 should match MiniGrid ViewSizeWrapper(agent_view_size=5)."""
+        from minigrid.wrappers import ViewSizeWrapper
+
+        grid_size = 3
+        fov_size = 5
+
+        for seed in [0, 1, 42, 100]:
+            base_env = gym.make("MiniGrid-DoorKey-5x5-v0")
+            env = ViewSizeWrapper(base_env, agent_view_size=fov_size)
+            obs, _ = env.reset(seed=seed)
+
+            mg_obs = obs["image"][:, :, 0]
+            agent_pos = env.unwrapped.agent_pos
+            agent_dir = env.unwrapped.agent_dir
+
+            grid = env.unwrapped.grid
+            mg_key, mg_door = None, None
+            for i in range(5):
+                for j in range(5):
+                    cell = grid.get(i, j)
+                    if cell:
+                        if cell.type == "key":
+                            mg_key = (i, j)
+                        elif cell.type == "door":
+                            mg_door = (i, j)
+
+            our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
+            our_key = mg_to_our_coords(mg_key[0], mg_key[1], grid_size)
+            our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
+
+            our_fov = get_fov(
+                our_agent[0], our_agent[1],
+                agent_dir,
+                our_key[0], our_key[1],
+                our_door[0], our_door[1],
+                0,
+                grid_size,
+                fov_size=fov_size,
+            )
+
+            assert our_fov.shape == (fov_size, fov_size), f"FOV shape mismatch for seed {seed}"
+            assert np.array_equal(mg_obs, our_fov), (
+                f"FOV mismatch for fov_size={fov_size}, seed {seed}:\n"
+                f"MiniGrid:\n{mg_obs}\nOurs:\n{our_fov}"
+            )
+            env.close()

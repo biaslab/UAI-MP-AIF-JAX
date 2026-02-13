@@ -101,18 +101,20 @@ def backward_pass(reduced_per_t, fwd_msgs, goal, action_prior, obs_to_x, horizon
     bwd_msgs = jnp.zeros((horizon + 1, n_states))
     bwd_msgs = bwd_msgs.at[horizon].set(goal)
     q_u = jnp.zeros((horizon, n_actions))
+    log_action_prior = jnp.log(action_prior + EPSILON)
 
     def body_fn(carry, t):
         bwd_msgs, q_u = carry
         # Incoming to dyn_t from x_{t+1}: bwd[t+1] * obs_to_x[t+1]
         bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]
 
-        # Action marginal: mu_{dyn_t -> u_t}
-        # Incoming from x_t: fwd[t] * obs_to_x[t]
+        # Action marginal in log-space for numerical stability
         fwd_t = fwd_msgs[t] * obs_to_x[t]
-        msg_to_u = jnp.einsum("ijk,i,j->k", reduced_per_t[t], bwd_t1, fwd_t)
-        q_u_t = msg_to_u * action_prior
-        q_u_t = q_u_t / (q_u_t.sum() + EPSILON)
+        log_terms = (jnp.log(reduced_per_t[t] + EPSILON)
+                     + jnp.log(bwd_t1 + EPSILON)[:, None, None]
+                     + jnp.log(fwd_t + EPSILON)[None, :, None])
+        log_msg_to_u = jax.scipy.special.logsumexp(log_terms, axis=(0, 1))
+        q_u_t = jax.nn.softmax(log_msg_to_u + log_action_prior)
         q_u = q_u.at[t].set(q_u_t)
 
         # Backward message to x_t (from dyn_t, excluding x_t's own forward)
@@ -183,12 +185,13 @@ def compute_obs_to_x_msgs(obs_kernels, cavity_theta_obs, horizon):
     T_plus_1 = obs_kernels.shape[0]
     n_states = obs_kernels.shape[3]
     n_static = obs_kernels.shape[4]
-    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
+    n_fov = obs_kernels.shape[1] * obs_kernels.shape[2]
+    kernels_flat = obs_kernels.reshape(T_plus_1, n_fov, n_states, n_static)
 
-    # Per-k message: Σ_θ κ(x,θ) · cavity(θ) → (T+1, 49, n_states)
+    # Per-k message: Σ_θ κ(x,θ) · cavity(θ) → (T+1, n_fov, n_states)
     per_k_msg = jnp.einsum("tkis,ts->tki", kernels_flat, cavity_theta_obs)
 
-    # Product over 49 FOV positions in log-space → (T+1, n_states)
+    # Product over n_fov FOV positions in log-space → (T+1, n_states)
     log_per_k = jnp.log(per_k_msg + EPSILON)
     log_obs_to_x = log_per_k.sum(axis=1)
 
@@ -206,7 +209,7 @@ def compute_obs_to_theta_msgs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, horizon
         log_obs_to_theta[t](θ) = Σ_k log μ_{obs_k→θ}(θ)
 
     Args:
-        obs_kernels: (T+1, 7, 7, n_states, n_static) — compact obs kernels
+        obs_kernels: (T+1, fov_w, fov_h, n_states, n_static) — compact obs kernels
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) aggregated obs messages to x (unused in cavity)
@@ -218,14 +221,15 @@ def compute_obs_to_theta_msgs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, horizon
     T_plus_1 = obs_kernels.shape[0]
     n_states = obs_kernels.shape[3]
     n_static = obs_kernels.shape[4]
-    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
+    n_fov = obs_kernels.shape[1] * obs_kernels.shape[2]
+    kernels_flat = obs_kernels.reshape(T_plus_1, n_fov, n_states, n_static)
 
     def compute_msg_t(t):
         # x→obs cavity: fwd * bwd (excludes obs_to_x)
         x_msg = fwd_msgs[t] * bwd_msgs[t]
         x_msg = x_msg / (x_msg.sum() + EPSILON)
 
-        # Per-k: Σ_x κ(x,θ) · x_msg(x) → (49, n_static)
+        # Per-k: Σ_x κ(x,θ) · x_msg(x) → (n_fov, n_static)
         per_k_msg = jnp.einsum("kis,i->ks", kernels_flat[t], x_msg)
 
         # Sum of logs over k → (n_static,)
@@ -292,17 +296,16 @@ def compute_dyn_region_beliefs(dyn_kernels, fwd_msgs, bwd_msgs, obs_to_x,
     T = cavity_dyn.shape[0]
 
     def compute_single_t(t):
-        fwd_t = fwd_msgs[t] * obs_to_x[t]
-        bwd_t1 = bwd_msgs[t + 1] * obs_to_x[t + 1]
+        log_fwd_t = jnp.log(fwd_msgs[t] * obs_to_x[t] + EPSILON)
+        log_bwd_t1 = jnp.log(bwd_msgs[t + 1] * obs_to_x[t + 1] + EPSILON)
 
-        belief = (dyn_kernels[t]
-                  * fwd_t[:, None, None, None]
-                  * bwd_t1[None, :, None, None]
-                  * cavity_dyn[t][None, None, :, None]
-                  * action_prior[None, None, None, :])
+        log_belief = (jnp.log(dyn_kernels[t] + EPSILON)
+                      + log_fwd_t[:, None, None, None]
+                      + log_bwd_t1[None, :, None, None]
+                      + jnp.log(cavity_dyn[t] + EPSILON)[None, None, :, None]
+                      + jnp.log(action_prior + EPSILON)[None, None, None, :])
 
-        Z = belief.sum() + EPSILON
-        return belief / Z
+        return jax.nn.softmax(log_belief.ravel()).reshape(log_belief.shape)
 
     return jax.vmap(compute_single_t)(jnp.arange(T))
 
@@ -319,8 +322,7 @@ def compute_dyn_channels(dyn_region_beliefs):
         (T, n_states, n_states, n_actions) — r_t[x_old, x_new, u]
     """
     joint = dyn_region_beliefs.sum(axis=3)              # marginalize θ → (T, x_old, x_new, u)
-    marginal = joint.sum(axis=2, keepdims=True)         # (T, x_old, 1, u)
-    return joint / (marginal + EPSILON)
+    return jax.nn.softmax(jnp.log(joint + EPSILON), axis=2)
 
 
 def compute_dyn_kernels(transition_idx, dyn_channels, n_states):
@@ -353,13 +355,12 @@ def compute_obs_channels_from_beliefs(obs_region_beliefs):
     r(y|x,θ) = q(y,x,θ) / Σ_y' q(y',x,θ)
 
     Args:
-        obs_region_beliefs: (T+1, 49, n_cell_types, n_states, n_static)
+        obs_region_beliefs: (T+1, n_fov, n_cell_types, n_states, n_static)
 
     Returns:
-        (T+1, 49, n_cell_types, n_states, n_static) — r_t(y|x,θ) per FOV
+        (T+1, n_fov, n_cell_types, n_states, n_static) — r_t(y|x,θ) per FOV
     """
-    marginal = obs_region_beliefs.sum(axis=2, keepdims=True)  # (T+1, 49, 1, n_states, n_static)
-    return obs_region_beliefs / (marginal + EPSILON)
+    return jax.nn.softmax(jnp.log(obs_region_beliefs + EPSILON), axis=2)
 
 
 def compute_obs_kernels(obs_idx, obs_channels):
@@ -368,20 +369,22 @@ def compute_obs_kernels(obs_idx, obs_channels):
         obs_kernel_{t,k}(x, θ) = r_{t,k}(y* | x, θ)  where y* = obs_idx[k, x, θ]
 
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index
-        obs_channels: (T+1, 49, n_cell_types, n_states, n_static) — r_{t,k}(y | x, θ)
+        obs_idx: (fov_w, fov_h, n_states, n_static) -> cell_type index
+        obs_channels: (T+1, n_fov, n_cell_types, n_states, n_static) — r_{t,k}(y | x, θ)
 
     Returns:
-        (T+1, 7, 7, n_states, n_static) — kernel value at deterministic y
+        (T+1, fov_w, fov_h, n_states, n_static) — kernel value at deterministic y
     """
-    obs_flat = obs_idx.reshape(49, obs_idx.shape[2], obs_idx.shape[3])
-    # Index into cell_type axis: (1, 49, 1, n_states, n_static)
+    fov_w, fov_h = obs_idx.shape[0], obs_idx.shape[1]
+    n_fov = fov_w * fov_h
+    obs_flat = obs_idx.reshape(n_fov, obs_idx.shape[2], obs_idx.shape[3])
+    # Index into cell_type axis: (1, n_fov, 1, n_states, n_static)
     y_idx = obs_flat[None, :, None, :, :]
-    # Gather r at deterministic y → (T+1, 49, 1, n_states, n_static)
+    # Gather r at deterministic y → (T+1, n_fov, 1, n_states, n_static)
     kernels = jnp.take_along_axis(obs_channels, y_idx, axis=2)
-    kernels = kernels.squeeze(axis=2)          # (T+1, 49, n_states, n_static)
+    kernels = kernels.squeeze(axis=2)          # (T+1, n_fov, n_states, n_static)
     T_plus_1, _, n_states, n_static = kernels.shape
-    return kernels.reshape(T_plus_1, 7, 7, n_states, n_static)
+    return kernels.reshape(T_plus_1, fov_w, fov_h, n_states, n_static)
 
 
 def compute_obs_region_beliefs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, cavity_obs):
@@ -393,37 +396,36 @@ def compute_obs_region_beliefs(obs_kernels, fwd_msgs, bwd_msgs, obs_to_x, cavity
     With μ_y(y) = 1 (uniform, no observation), the belief is uniform over y.
 
     Args:
-        obs_kernels: (T+1, 7, 7, n_states, n_static) — compact obs kernels
+        obs_kernels: (T+1, fov_w, fov_h, n_states, n_static) — compact obs kernels
         fwd_msgs: (T+1, n_states) forward messages
         bwd_msgs: (T+1, n_states) backward messages
         obs_to_x: (T+1, n_states) aggregated obs messages to x
         cavity_obs: (T+1, n_static) cavity beliefs for obs factors
 
     Returns:
-        region_beliefs: (T+1, 49, n_cell_types, n_states, n_static) normalized region beliefs
+        region_beliefs: (T+1, n_fov, n_cell_types, n_states, n_static) normalized region beliefs
     """
     T_plus_1 = cavity_obs.shape[0]
     n_states = obs_kernels.shape[3]
     n_static = obs_kernels.shape[4]
-    kernels_flat = obs_kernels.reshape(T_plus_1, 49, n_states, n_static)
+    n_fov = obs_kernels.shape[1] * obs_kernels.shape[2]
+    kernels_flat = obs_kernels.reshape(T_plus_1, n_fov, n_states, n_static)
 
     def compute_single_t(t):
-        x_belief = fwd_msgs[t] * bwd_msgs[t]
-        x_belief = x_belief / (x_belief.sum() + EPSILON)
+        log_x_belief = jnp.log(fwd_msgs[t] + EPSILON) + jnp.log(bwd_msgs[t] + EPSILON)
 
-        # (49, n_states, n_static) — belief over (x, θ) per FOV position
-        belief_xtheta = (kernels_flat[t]
-                         * x_belief[None, :, None]
-                         * cavity_obs[t][None, None, :])
+        # (n_fov, n_states, n_static) — log belief over (x, θ) per FOV position
+        log_belief_xtheta = (jnp.log(kernels_flat[t] + EPSILON)
+                             + log_x_belief[None, :, None]
+                             + jnp.log(cavity_obs[t] + EPSILON)[None, None, :])
 
-        # Broadcast uniform μ_y over y → (49, n_cell_types, n_states, n_static)
-        belief = jnp.broadcast_to(
-            belief_xtheta[:, None, :, :],
-            (49, N_CELL_TYPES, n_states, n_static)
+        # Broadcast uniform μ_y over y → (n_fov, n_cell_types, n_states, n_static)
+        log_belief = jnp.broadcast_to(
+            log_belief_xtheta[:, None, :, :],
+            (n_fov, N_CELL_TYPES, n_states, n_static)
         )
 
-        Z = belief.sum() + EPSILON
-        return belief / Z
+        return jax.nn.softmax(log_belief.ravel()).reshape(log_belief.shape)
 
     return jax.vmap(compute_single_t)(jnp.arange(T_plus_1))
 
@@ -484,18 +486,20 @@ def region_extended_loopy_bp_planning_indexed(
     dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
 
     # Initialize obs channels: one-hot from deterministic obs_idx
-    obs_flat = obs_idx.reshape(49, n_states, n_static)
-    r_init = jax.nn.one_hot(obs_flat, N_CELL_TYPES)          # (49, n_states, n_static, N_CELL_TYPES)
-    r_init = jnp.transpose(r_init, (0, 3, 1, 2))             # (49, N_CELL_TYPES, n_states, n_static)
+    fov_w, fov_h = obs_idx.shape[0], obs_idx.shape[1]
+    n_fov = fov_w * fov_h
+    obs_flat = obs_idx.reshape(n_fov, n_states, n_static)
+    r_init = jax.nn.one_hot(obs_flat, N_CELL_TYPES)          # (n_fov, n_states, n_static, N_CELL_TYPES)
+    r_init = jnp.transpose(r_init, (0, 3, 1, 2))             # (n_fov, N_CELL_TYPES, n_states, n_static)
     obs_channels_init = jnp.broadcast_to(
-        r_init[None], (horizon + 1, 49, N_CELL_TYPES, n_states, n_static)
+        r_init[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
     )
     p_xnew = jax.nn.one_hot(transition_idx, n_states)       # (x_old, θ, u, x_new)
     p_xnew = jnp.transpose(p_xnew, (0, 3, 1, 2))           # (x_old, x_new, θ, u)
     dyn_kernels_init = jnp.broadcast_to(
         p_xnew[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    obs_kernels_init = jnp.ones((horizon + 1, 7, 7, n_states, n_static))
+    obs_kernels_init = jnp.ones((horizon + 1, fov_w, fov_h, n_states, n_static))
 
     def body_fn(_, carry):
         log_dyn_to_theta, log_obs_to_theta, _, _, _, dyn_kernels, obs_kernels = carry
@@ -559,4 +563,6 @@ def region_extended_loopy_bp_planning_indexed(
         (log_dyn_to_theta, log_obs_to_theta, q_u_init, dyn_channels_init, obs_channels_init, dyn_kernels_init, obs_kernels_init)
     )
 
-    return q_u[0], dyn_channels, obs_channels, dyn_kernels, obs_kernels
+    action_dist = q_u[0]
+    action_dist = action_dist / (action_dist.sum() + EPSILON)
+    return action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels

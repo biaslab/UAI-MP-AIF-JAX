@@ -67,11 +67,12 @@ def backward_obs_message_indexed(
     """
     n_states = obs_idx.shape[2]
     n_static = obs_idx.shape[3]
-    
+    n_fov = obs_idx.shape[0] * obs_idx.shape[1]
+
     # Reshape for vectorized gather
-    obs_idx_flat = obs_idx.reshape(49, n_states, n_static)  # (49, n_states, n_static)
-    vision_flat = vision_obs.reshape(49, 11)  # (49, 11)
-    
+    obs_idx_flat = obs_idx.reshape(n_fov, n_states, n_static)  # (n_fov, n_states, n_static)
+    vision_flat = vision_obs.reshape(n_fov, 11)  # (n_fov, 11)
+
     # For each FOV position, gather P(observed | state, static)
     # likelihood[fov, state, static] = vision_flat[fov, obs_idx_flat[fov, state, static]]
     def gather_likelihood(fov_idx):
@@ -80,19 +81,19 @@ def backward_obs_message_indexed(
         cell_types = obs_idx_flat[fov_idx]  # (n_states, n_static)
         probs = vision_flat[fov_idx]  # (11,)
         return probs[cell_types]  # (n_states, n_static)
-    
+
     # Vectorize over FOV positions
-    likelihoods = jax.vmap(gather_likelihood)(jnp.arange(49))  # (49, n_states, n_static)
-    
+    likelihoods = jax.vmap(gather_likelihood)(jnp.arange(n_fov))  # (n_fov, n_states, n_static)
+
     # Product over FOV positions (sum in log space for numerical stability)
     log_likelihood = jnp.log(likelihoods + EPSILON).sum(axis=0)  # (n_states, n_static)
-    
+
     # Marginalize over static
     log_msg = jax.scipy.special.logsumexp(
         log_likelihood + jnp.log(q_static + EPSILON)[None, :],
         axis=1
     )
-    
+
     return log_msg  # Return log-space message
 
 
@@ -103,27 +104,28 @@ def backward_obs_message_to_static_indexed(
 ) -> jnp.ndarray:
     """
     Backward observation message to static variable using index-based representation.
-    
+
     Args:
-        obs_idx: (7, 7, n_states, n_static) -> cell_type index (uint8)
-        vision_obs: (7, 7, 11) soft observation
+        obs_idx: (fov_w, fov_h, n_states, n_static) -> cell_type index (uint8)
+        vision_obs: (fov_w, fov_h, 11) soft observation
         q_state: (n_states,) belief over state
-        
+
     Returns:
         log_msg: (n_static,) log-space message
     """
     n_states = obs_idx.shape[2]
     n_static = obs_idx.shape[3]
-    
-    obs_idx_flat = obs_idx.reshape(49, n_states, n_static)
-    vision_flat = vision_obs.reshape(49, 11)
-    
+    n_fov = obs_idx.shape[0] * obs_idx.shape[1]
+
+    obs_idx_flat = obs_idx.reshape(n_fov, n_states, n_static)
+    vision_flat = vision_obs.reshape(n_fov, 11)
+
     def gather_likelihood(fov_idx):
         cell_types = obs_idx_flat[fov_idx]
         probs = vision_flat[fov_idx]
         return probs[cell_types]
-    
-    likelihoods = jax.vmap(gather_likelihood)(jnp.arange(49))
+
+    likelihoods = jax.vmap(gather_likelihood)(jnp.arange(n_fov))
     log_likelihood = jnp.log(likelihoods + EPSILON).sum(axis=0)  # (n_states, n_static)
     
     # Marginalize over state

@@ -581,3 +581,81 @@ class TestTensorGeneration:
                     assert np.isclose(
                         prob_sum, 1.0
                     ), f"Transition probs don't sum to 1: {prob_sum} at ({old_idx},{static_idx},{action})"
+
+
+class TestCustomFOVSize:
+    def test_in_fov_size5(self):
+        assert in_fov(0, 0, fov_size=5) == True
+        assert in_fov(0, 4, fov_size=5) == True
+        assert in_fov(-2, 0, fov_size=5) == True
+        assert in_fov(2, 0, fov_size=5) == True
+        assert in_fov(-3, 0, fov_size=5) == False
+        assert in_fov(3, 0, fov_size=5) == False
+        assert in_fov(0, -1, fov_size=5) == False
+        assert in_fov(0, 5, fov_size=5) == False
+
+    def test_relative_to_fov_coords_size5(self):
+        # Agent is at (2, 4) in 5x5 FOV
+        assert relative_to_fov_coords(0, 0, fov_size=5) == (2, 4)
+        assert relative_to_fov_coords(0, 1, fov_size=5) == (2, 3)
+        assert relative_to_fov_coords(-1, 0, fov_size=5) == (1, 4)
+        assert relative_to_fov_coords(1, 0, fov_size=5) == (3, 4)
+
+    def test_get_fov_shape_size5(self):
+        n = 5
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n, fov_size=5)
+        assert fov.shape == (5, 5)
+
+    def test_get_fov_shape_size3(self):
+        n = 5
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n, fov_size=3)
+        assert fov.shape == (3, 3)
+
+    def test_get_fov_key_at_agent_size5(self):
+        n = 5
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 1, n, fov_size=5)
+        # Agent at (half=2, fov_size-1=4)
+        assert fov[2, 4] == CellType.KEY
+
+    def test_get_fov_door_visible_size5(self):
+        n = 5
+        # Agent at (2,2), facing RIGHT, door at (3,2) — relative (0,1) → FOV (2,3)
+        fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n, fov_size=5)
+        assert fov[2, 3] == CellType.DOOR
+
+    def test_observation_indices_shape_size5(self):
+        from environments.minigrid import (
+            generate_observation_indices,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        n = 3
+        fov_size = 5
+        n_location_states = n * n
+        n_key_positions = n_location_states - 2 * n
+        n_door_positions = n_location_states - 2 * n
+        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        n_static_states = n_key_positions * n_door_positions
+
+        obs_idx = generate_observation_indices(n, fov_size=fov_size)
+        assert obs_idx.shape == (fov_size, fov_size, n_total_states, n_static_states)
+
+    def test_observation_tensor_shape_size5(self):
+        from environments.minigrid import (
+            generate_observation_tensor,
+            N_CELL_TYPES,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        n = 3
+        fov_size = 5
+        n_location_states = n * n
+        n_key_positions = n_location_states - 2 * n
+        n_door_positions = n_location_states - 2 * n
+        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        n_static_states = n_key_positions * n_door_positions
+
+        B = generate_observation_tensor(n, fov_size=fov_size)
+        assert B.shape == (fov_size, fov_size, N_CELL_TYPES, n_total_states, n_static_states)

@@ -110,13 +110,15 @@ def get_relative_coords(
         return (dx, dy)
 
 
-def in_fov(rel_x: int, rel_y: int) -> bool:
-    return -3 <= rel_x <= 3 and 0 <= rel_y <= 6
+def in_fov(rel_x: int, rel_y: int, fov_size: int = 7) -> bool:
+    half = fov_size // 2
+    return -half <= rel_x <= half and 0 <= rel_y <= fov_size - 1
 
 
-def relative_to_fov_coords(rel_x: int, rel_y: int) -> tuple[int, int]:
-    fov_x = 3 + rel_x  # Agent at column 3 (0-indexed)
-    fov_y = 6 - rel_y  # Agent at row 6 (0-indexed)
+def relative_to_fov_coords(rel_x: int, rel_y: int, fov_size: int = 7) -> tuple[int, int]:
+    half = fov_size // 2
+    fov_x = half + rel_x  # Agent at column half (0-indexed)
+    fov_y = (fov_size - 1) - rel_y  # Agent at last row (0-indexed)
     return (fov_x, fov_y)
 
 
@@ -197,27 +199,29 @@ def get_fov(
     door_y: int,
     door_key_state: int,
     n: int,
+    fov_size: int = 7,
 ) -> np.ndarray:
-    fov = np.full((7, 7), CellType.EMPTY, dtype=np.int32)
+    half = fov_size // 2
+    fov = np.full((fov_size, fov_size), CellType.EMPTY, dtype=np.int32)
     walls = create_wall_set(door_x, door_y, n)
 
     for wall_x, wall_y in walls:
         rel_wall = get_relative_coords(agent_x, agent_y, orientation, wall_x, wall_y)
-        if in_fov(*rel_wall):
-            fov_x, fov_y = relative_to_fov_coords(*rel_wall)
+        if in_fov(*rel_wall, fov_size):
+            fov_x, fov_y = relative_to_fov_coords(*rel_wall, fov_size)
             fov[fov_x, fov_y] = CellType.WALL
 
     if door_key_state == 0:  # Don't have the key
         rel_key = get_relative_coords(agent_x, agent_y, orientation, key_x, key_y)
-        if in_fov(*rel_key):
-            fov_x, fov_y = relative_to_fov_coords(*rel_key)
+        if in_fov(*rel_key, fov_size):
+            fov_x, fov_y = relative_to_fov_coords(*rel_key, fov_size)
             fov[fov_x, fov_y] = CellType.KEY
     else:  # Have the key - it appears at agent position
-        fov[3, 6] = CellType.KEY
+        fov[half, fov_size - 1] = CellType.KEY
 
     rel_door = get_relative_coords(agent_x, agent_y, orientation, door_x, door_y)
-    if in_fov(*rel_door):
-        fov_x, fov_y = relative_to_fov_coords(*rel_door)
+    if in_fov(*rel_door, fov_size):
+        fov_x, fov_y = relative_to_fov_coords(*rel_door, fov_size)
         fov[fov_x, fov_y] = CellType.DOOR
 
     if door_key_state != 2:  # Door not open - blocks visibility
@@ -226,13 +230,13 @@ def get_fov(
     relative_walls = set()
     for wall in walls:
         rel = get_relative_coords(agent_x, agent_y, orientation, wall[0], wall[1])
-        if in_fov(*rel):
-            relative_walls.add(relative_to_fov_coords(*rel))
+        if in_fov(*rel, fov_size):
+            relative_walls.add(relative_to_fov_coords(*rel, fov_size))
 
-    visibility_mask = generate_visibility_mask(3, 6, 7, 7, relative_walls)
-    for x in range(-3, 4):
-        for y in range(7):
-            fov_x, fov_y = relative_to_fov_coords(x, y)
+    visibility_mask = generate_visibility_mask(half, fov_size - 1, fov_size, fov_size, relative_walls)
+    for x in range(-half, half + 1):
+        for y in range(fov_size):
+            fov_x, fov_y = relative_to_fov_coords(x, y, fov_size)
             if not visibility_mask[fov_x, fov_y]:
                 fov[fov_x, fov_y] = CellType.UNSEEN
 
@@ -315,7 +319,7 @@ def get_next_agent_position(
         return coords_to_state(agent_x, agent_y, n)
 
 
-def generate_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
+def generate_observation_tensor(n: int, fov_size: int = 7, dtype=np.float16) -> np.ndarray:
     """Generate full observation tensor (memory-intensive, for reference/testing)."""
     n_location_states = n * n
     n_key_positions = n_location_states - 2 * n
@@ -323,7 +327,7 @@ def generate_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
     n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
     n_static_states = n_key_positions * n_door_positions
 
-    B = np.zeros((7, 7, N_CELL_TYPES, n_total_states, n_static_states), dtype=dtype)
+    B = np.zeros((fov_size, fov_size, N_CELL_TYPES, n_total_states, n_static_states), dtype=dtype)
 
     for agent_state in range(n_location_states):
         agent_x, agent_y = state_to_coords(agent_state, n)
@@ -346,6 +350,7 @@ def generate_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
                             door_y,
                             door_key_state,
                             n,
+                            fov_size,
                         )
                         flat_state = flatten_state_index(
                             agent_state,
@@ -358,22 +363,22 @@ def generate_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
                         flat_static = flatten_position_index(
                             key_pos, door_pos, n_key_positions, n_door_positions
                         )
-                        for i in range(7):
-                            for j in range(7):
+                        for i in range(fov_size):
+                            for j in range(fov_size):
                                 B[i, j, fov[i, j], flat_state, flat_static] = 1.0
 
     return B
 
 
-def generate_observation_indices(n: int) -> np.ndarray:
+def generate_observation_indices(n: int, fov_size: int = 7) -> np.ndarray:
     """
     Generate index-based observation tensor (memory-efficient).
-    
+
     Instead of storing B[fov_x, fov_y, cell_type, state, static] as one-hot,
     store obs_idx[fov_x, fov_y, state, static] -> cell_type directly.
-    
+
     Returns:
-        obs_idx: (7, 7, n_total_states, n_static_states) uint8 array
+        obs_idx: (fov_size, fov_size, n_total_states, n_static_states) uint8 array
         where obs_idx[i, j, state, static] = expected cell type at FOV position (i,j)
     """
     n_location_states = n * n
@@ -383,7 +388,7 @@ def generate_observation_indices(n: int) -> np.ndarray:
     n_static_states = n_key_positions * n_door_positions
 
     # Index array: for each (fov_x, fov_y, state, static), store the cell type
-    obs_idx = np.zeros((7, 7, n_total_states, n_static_states), dtype=np.uint8)
+    obs_idx = np.zeros((fov_size, fov_size, n_total_states, n_static_states), dtype=np.uint8)
 
     for agent_state in range(n_location_states):
         agent_x, agent_y = state_to_coords(agent_state, n)
@@ -406,6 +411,7 @@ def generate_observation_indices(n: int) -> np.ndarray:
                             door_y,
                             door_key_state,
                             n,
+                            fov_size,
                         )
                         flat_state = flatten_state_index(
                             agent_state,
@@ -635,9 +641,10 @@ def generate_transition_indices(n: int) -> np.ndarray:
 
 
 def observation_to_onehot(image: np.ndarray) -> np.ndarray:
-    onehot = np.zeros((7, 7, N_CELL_TYPES), dtype=np.float16)
-    for i in range(7):
-        for j in range(7):
+    fov_w, fov_h = image.shape[0], image.shape[1]
+    onehot = np.zeros((fov_w, fov_h, N_CELL_TYPES), dtype=np.float16)
+    for i in range(fov_w):
+        for j in range(fov_h):
             onehot[i, j, image[i, j]] = 1.0
     return onehot
 
