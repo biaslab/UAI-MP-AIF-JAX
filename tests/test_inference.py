@@ -813,6 +813,416 @@ class TestReducedRegionExtended:
         )
 
 
+class TestNuijtenMP:
+    """Tests for Nuijten MP: EFE functions (vectorized) and full planning pipeline."""
+
+    def setup_method(self):
+        import jax.numpy as jnp
+        from environments.minigrid import (
+            generate_transition_tensor,
+            generate_observation_tensor,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        self.n = 3
+        n_loc = self.n * self.n
+        n_key = n_loc - 2 * self.n
+        n_door = n_loc - 2 * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.n_static = n_key * n_door
+        self.n_actions = 7
+
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+
+    # -----------------------------------------------------------------
+    # Observation region beliefs
+    # -----------------------------------------------------------------
+
+    def test_obs_region_beliefs_shape_and_normalization(self):
+        """Region beliefs: correct shape, each timestep sums to 1."""
+        import jax.numpy as jnp
+        from inference.planning import safe_log
+        from inference.nuijten_mp import compute_obs_region_beliefs_original
+        from environments.minigrid import N_CELL_TYPES
+
+        horizon = 3
+        n_fov = 49
+        log_B_flat = safe_log(self.observation_tensor.reshape(n_fov, N_CELL_TYPES, self.n_states, self.n_static))
+        log_fwd = jnp.log(jnp.ones((horizon + 1, self.n_states)) / self.n_states)
+        log_bwd = jnp.log(jnp.ones((horizon + 1, self.n_states)) / self.n_states)
+        log_cavity = jnp.log(jnp.ones((horizon + 1, self.n_static)) / self.n_static)
+
+        beliefs = compute_obs_region_beliefs_original(log_B_flat, log_fwd, log_bwd, log_cavity)
+
+        assert beliefs.shape == (horizon + 1, n_fov, N_CELL_TYPES, self.n_states, self.n_static)
+        for t in range(horizon + 1):
+            assert np.isclose(beliefs[t].sum(), 1.0, atol=1e-5), (
+                f"Beliefs at t={t} sum to {beliefs[t].sum()}"
+            )
+        assert np.all(np.array(beliefs) >= 0), "Beliefs must be non-negative"
+
+    def test_obs_region_beliefs_matches_reference(self):
+        """Vectorized region beliefs must match old vmap-based implementation."""
+        import jax
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.planning import safe_log
+        from inference.nuijten_mp import compute_obs_region_beliefs_original
+        from environments.minigrid import N_CELL_TYPES
+
+        horizon = 3
+        n_fov = 49
+        log_B_flat = safe_log(self.observation_tensor.reshape(n_fov, N_CELL_TYPES, self.n_states, self.n_static))
+        log_fwd = jnp.log(jnp.ones((horizon + 1, self.n_states)) / self.n_states)
+        log_bwd = jnp.log(jnp.ones((horizon + 1, self.n_states)) / self.n_states)
+        log_cavity = jnp.log(jnp.ones((horizon + 1, self.n_static)) / self.n_static)
+
+        # Old vmap-based reference
+        def reference(log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs):
+            T_plus_1 = log_fwd_msgs.shape[0]
+            def compute_single_t(t):
+                log_x_belief = log_fwd_msgs[t] + log_bwd_msgs[t]
+                log_x_belief = log_x_belief - logsumexp(log_x_belief)
+                log_belief = (log_B_flat
+                              + log_x_belief[None, None, :, None]
+                              + log_cavity_obs[t][None, None, None, :])
+                return jax.nn.softmax(log_belief.ravel()).reshape(log_belief.shape)
+            return jax.vmap(compute_single_t)(jnp.arange(T_plus_1))
+
+        result = compute_obs_region_beliefs_original(log_B_flat, log_fwd, log_bwd, log_cavity)
+        expected = reference(log_B_flat, log_fwd, log_bwd, log_cavity)
+
+        assert np.allclose(result, expected, atol=1e-5), (
+            f"Max diff: {np.abs(np.array(result) - np.array(expected)).max()}"
+        )
+
+    # -----------------------------------------------------------------
+    # EFE action prior (dynamics)
+    # -----------------------------------------------------------------
+
+    def test_efe_action_prior_shape_and_valid(self):
+        """EFE action prior: valid probability distributions, masked actions near zero."""
+        import jax
+        import jax.numpy as jnp
+        from inference.nuijten_mp import compute_efe_action_prior
+
+        T, n_x, n_theta, n_u = 3, 6, 4, 5
+        action_mask = jnp.array([1.0, 1.0, 1.0, 0.0, 1.0])
+        key = jax.random.PRNGKey(42)
+        log_beliefs = jax.random.normal(key, (T, n_x, n_x, n_theta, n_u))
+
+        result = compute_efe_action_prior(log_beliefs, action_mask)
+
+        assert result.shape == (T, n_u)
+        for t in range(T):
+            assert np.isclose(result[t].sum(), 1.0, atol=1e-5)
+            assert result[t, 3] < 1e-6, "Masked action should have near-zero probability"
+
+    def test_efe_action_prior_matches_reference(self):
+        """Vectorized EFE must match old vmap-based implementation."""
+        import jax
+        import jax.numpy as jnp
+        from inference.messages import EPSILON
+        from inference.nuijten_mp import compute_efe_action_prior
+
+        T, n_x, n_theta, n_u = 2, 4, 3, 5
+        action_mask = jnp.array([1.0, 1.0, 1.0, 0.0, 1.0])
+        key = jax.random.PRNGKey(123)
+        log_beliefs = jax.random.normal(key, (T, n_x, n_x, n_theta, n_u))
+
+        # Old vmap-based reference
+        def reference(log_dyn_region_beliefs, mask):
+            def compute_single_t(log_region_t):
+                def compute_single_u(u):
+                    log_joint = log_region_t[:, :, :, u]
+                    q_joint = jax.nn.softmax(log_joint.ravel()).reshape(log_joint.shape)
+                    log_q = jnp.log(q_joint + EPSILON)
+                    H_joint = -(q_joint * log_q).sum()
+                    q_marg = q_joint.sum(axis=1)
+                    log_q_marg = jnp.log(q_marg + EPSILON)
+                    H_marginal = -(q_marg * log_q_marg).sum()
+                    return H_joint - H_marginal
+                n_actions = log_region_t.shape[3]
+                efe = jax.vmap(compute_single_u)(jnp.arange(n_actions))
+                efe = jnp.where(mask > 0, efe, -jnp.inf)
+                return jax.nn.softmax(efe)
+            return jax.vmap(compute_single_t)(log_dyn_region_beliefs)
+
+        result = compute_efe_action_prior(log_beliefs, action_mask)
+        expected = reference(log_beliefs, action_mask)
+
+        assert np.allclose(result, expected, atol=1e-5), (
+            f"Vectorized EFE differs from reference.\n"
+            f"Max diff: {np.abs(np.array(result) - np.array(expected)).max()}"
+        )
+
+    # -----------------------------------------------------------------
+    # Obs EFE → x messages
+    # -----------------------------------------------------------------
+
+    def test_obs_efe_to_x_shape_and_normalized(self):
+        """Obs EFE→x: log-normalized per timestep."""
+        import jax
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.nuijten_mp import compute_obs_efe_to_x
+
+        T_plus_1, n_fov, n_y, n_x, n_theta = 4, 4, 5, 6, 3
+        key = jax.random.PRNGKey(42)
+        raw = jax.random.normal(key, (T_plus_1, n_fov, n_y, n_x, n_theta))
+        beliefs = jax.nn.softmax(raw.reshape(T_plus_1, -1), axis=1).reshape(raw.shape)
+
+        log_msg = compute_obs_efe_to_x(beliefs)
+
+        assert log_msg.shape == (T_plus_1, n_x)
+        for t in range(T_plus_1):
+            log_sum = float(logsumexp(log_msg[t]))
+            assert np.isclose(log_sum, 0.0, atol=1e-4), (
+                f"Not log-normalized at t={t}: logsumexp={log_sum}"
+            )
+
+    def test_obs_efe_to_x_matches_reference(self):
+        """Vectorized obs EFE→x must match old vmap-based implementation."""
+        import jax
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.messages import EPSILON
+        from inference.nuijten_mp import compute_obs_efe_to_x
+
+        T_plus_1, n_fov, n_y, n_x, n_theta = 3, 4, 5, 6, 3
+        key = jax.random.PRNGKey(99)
+        raw = jax.random.normal(key, (T_plus_1, n_fov, n_y, n_x, n_theta))
+        beliefs = jax.nn.softmax(raw.reshape(T_plus_1, -1), axis=1).reshape(raw.shape)
+
+        # Old vmap-based reference
+        def reference(obs_region_beliefs):
+            def compute_H_cond(belief_slice):
+                Z = belief_slice.sum() + EPSILON
+                q = belief_slice / Z
+                log_q = jnp.log(q + EPSILON)
+                H_joint = -(q * log_q).sum()
+                q_marg_theta = q.sum(axis=0)
+                log_q_marg = jnp.log(q_marg_theta + EPSILON)
+                H_marg = -(q_marg_theta * log_q_marg).sum()
+                return H_joint - H_marg
+            compute_per_x = jax.vmap(compute_H_cond)
+            def compute_per_k(belief_k):
+                return compute_per_x(jnp.transpose(belief_k, (1, 0, 2)))
+            def compute_per_t(beliefs_t):
+                H_per_k = jax.vmap(compute_per_k)(beliefs_t)
+                total = H_per_k.sum(axis=0)
+                log_msg = -total
+                return log_msg - logsumexp(log_msg)
+            return jax.vmap(compute_per_t)(obs_region_beliefs)
+
+        result = compute_obs_efe_to_x(beliefs)
+        expected = reference(beliefs)
+
+        assert np.allclose(result, expected, atol=1e-4), (
+            f"Vectorized obs_efe_to_x differs from reference.\n"
+            f"Max diff: {np.abs(np.array(result) - np.array(expected)).max()}"
+        )
+
+    # -----------------------------------------------------------------
+    # Obs EFE → θ messages
+    # -----------------------------------------------------------------
+
+    def test_obs_efe_to_theta_shape_and_finite(self):
+        """Obs EFE→θ: correct shape, all finite."""
+        import jax
+        import jax.numpy as jnp
+        from inference.nuijten_mp import compute_obs_efe_to_theta
+
+        T_plus_1, n_fov, n_y, n_x, n_theta = 4, 4, 5, 6, 3
+        key = jax.random.PRNGKey(42)
+        raw = jax.random.normal(key, (T_plus_1, n_fov, n_y, n_x, n_theta))
+        beliefs = jax.nn.softmax(raw.reshape(T_plus_1, -1), axis=1).reshape(raw.shape)
+
+        log_msg = compute_obs_efe_to_theta(beliefs)
+
+        assert log_msg.shape == (T_plus_1, n_theta)
+        assert jnp.all(jnp.isfinite(log_msg)), f"Non-finite values: {log_msg}"
+
+    def test_obs_efe_to_theta_matches_reference(self):
+        """Vectorized obs EFE→θ must match old vmap-based implementation."""
+        import jax
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.messages import EPSILON
+        from inference.nuijten_mp import compute_obs_efe_to_theta
+
+        T_plus_1, n_fov, n_y, n_x, n_theta = 3, 4, 5, 6, 3
+        key = jax.random.PRNGKey(77)
+        raw = jax.random.normal(key, (T_plus_1, n_fov, n_y, n_x, n_theta))
+        beliefs = jax.nn.softmax(raw.reshape(T_plus_1, -1), axis=1).reshape(raw.shape)
+
+        # Old vmap-based reference
+        def reference(obs_region_beliefs):
+            def compute_H_cond(belief_slice):
+                Z = belief_slice.sum() + EPSILON
+                q = belief_slice / Z
+                log_q = jnp.log(q + EPSILON)
+                H_joint = -(q * log_q).sum()
+                q_marg_x = q.sum(axis=0)
+                log_q_marg = jnp.log(q_marg_x + EPSILON)
+                H_marg = -(q_marg_x * log_q_marg).sum()
+                return H_joint - H_marg
+            compute_per_theta = jax.vmap(compute_H_cond)
+            def compute_per_k(belief_k):
+                return compute_per_theta(jnp.transpose(belief_k, (2, 0, 1)))
+            def compute_per_t(beliefs_t):
+                H_per_k = jax.vmap(compute_per_k)(beliefs_t)
+                total = H_per_k.sum(axis=0)
+                return jnp.log(jax.nn.softmax(-total) + EPSILON)
+            return jax.vmap(compute_per_t)(obs_region_beliefs)
+
+        result = compute_obs_efe_to_theta(beliefs)
+        expected = reference(beliefs)
+
+        assert np.allclose(result, expected, atol=1e-4), (
+            f"Vectorized obs_efe_to_theta differs from reference.\n"
+            f"Max diff: {np.abs(np.array(result) - np.array(expected)).max()}"
+        )
+
+    # -----------------------------------------------------------------
+    # Full planning pipeline: θ-inferred variant
+    # -----------------------------------------------------------------
+
+    def test_nuijten_output_shape(self):
+        """Full Nuijten MP: valid action distribution."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
+        )
+
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
+        assert jnp.all(jnp.isfinite(action_dist))
+
+    def test_nuijten_respects_action_mask(self):
+        """Nuijten MP must zero out masked actions (DROP, DONE)."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, _, _ = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
+        )
+
+        assert action_dist[4] < 1e-6, f"DROP should be masked, got {action_dist[4]}"
+        assert action_dist[6] < 1e-6, f"DONE should be masked, got {action_dist[6]}"
+
+    def test_nuijten_multi_iteration_no_nan(self):
+        """θ-inferred: 5 iterations must stay finite."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=5,
+        )
+
+        assert jnp.all(jnp.isfinite(action_dist)), f"NaN in action_dist: {action_dist}"
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
+        assert jnp.all(jnp.isfinite(log_dyn_beliefs)), "NaN in dyn region beliefs"
+        assert jnp.all(jnp.isfinite(obs_beliefs)), "NaN in obs region beliefs"
+
+    def test_nuijten_region_beliefs_shapes(self):
+        """Check shapes of returned region beliefs."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import nuijten_mp_planning
+        from environments.minigrid import N_CELL_TYPES
+
+        horizon = 3
+        n_fov = 49
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        _, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=horizon, n_iterations=2,
+        )
+
+        assert log_dyn_beliefs.shape == (horizon, self.n_states, self.n_states, self.n_static, self.n_actions)
+        assert obs_beliefs.shape == (horizon + 1, n_fov, N_CELL_TYPES, self.n_states, self.n_static)
+
+    # -----------------------------------------------------------------
+    # Full planning pipeline: θ-fixed variant
+    # -----------------------------------------------------------------
+
+    def test_reduced_nuijten_output_shape(self):
+        """Reduced Nuijten MP: valid action distribution."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import reduced_nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, log_dyn_beliefs, obs_beliefs = reduced_nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
+        )
+
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
+        assert jnp.all(jnp.isfinite(action_dist))
+
+    def test_reduced_nuijten_respects_action_mask(self):
+        """Reduced Nuijten MP must zero out masked actions."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import reduced_nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, _, _ = reduced_nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
+        )
+
+        assert action_dist[4] < 1e-6
+        assert action_dist[6] < 1e-6
+
+    def test_reduced_nuijten_multi_iteration_no_nan(self):
+        """θ-fixed: 5 iterations must stay finite."""
+        import jax.numpy as jnp
+        from inference.nuijten_mp import reduced_nuijten_mp_planning
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist, log_dyn_beliefs, obs_beliefs = reduced_nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=5,
+        )
+
+        assert jnp.all(jnp.isfinite(action_dist)), f"NaN in action_dist: {action_dist}"
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
+        assert jnp.all(jnp.isfinite(log_dyn_beliefs)), "NaN in dyn region beliefs"
+        assert jnp.all(jnp.isfinite(obs_beliefs)), "NaN in obs region beliefs"
+
+
 class TestAgentIntegration:
     def setup_method(self):
         import jax.numpy as jnp

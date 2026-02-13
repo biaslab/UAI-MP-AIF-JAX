@@ -118,6 +118,7 @@ def run_inference_tests():
         TestRegionExtendedLoopyBP,
         TestNumericalStability,
         TestReducedRegionExtended,
+        TestNuijtenMP,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
     )
@@ -195,6 +196,26 @@ def run_inference_tests():
     t.test_respects_action_mask()
     t.test_single_iter_matches_region_extended()
     print("  Reduced Region-Extended: PASSED")
+
+    print("Running Nuijten MP tests...")
+    t = TestNuijtenMP()
+    t.setup_method()
+    t.test_obs_region_beliefs_shape_and_normalization()
+    t.test_obs_region_beliefs_matches_reference()
+    t.test_efe_action_prior_shape_and_valid()
+    t.test_efe_action_prior_matches_reference()
+    t.test_obs_efe_to_x_shape_and_normalized()
+    t.test_obs_efe_to_x_matches_reference()
+    t.test_obs_efe_to_theta_shape_and_finite()
+    t.test_obs_efe_to_theta_matches_reference()
+    t.test_nuijten_output_shape()
+    t.test_nuijten_respects_action_mask()
+    t.test_nuijten_multi_iteration_no_nan()
+    t.test_nuijten_region_beliefs_shapes()
+    t.test_reduced_nuijten_output_shape()
+    t.test_reduced_nuijten_respects_action_mask()
+    t.test_reduced_nuijten_multi_iteration_no_nan()
+    print("  Nuijten MP: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()

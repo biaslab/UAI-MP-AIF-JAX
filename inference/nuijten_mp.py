@@ -52,20 +52,18 @@ def compute_obs_region_beliefs_original(log_B_flat, log_fwd_msgs, log_bwd_msgs, 
     Returns:
         region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static) normalized
     """
-    T_plus_1 = log_fwd_msgs.shape[0]
+    log_x_belief = log_fwd_msgs + log_bwd_msgs  # (T+1, n_states)
+    log_x_belief = log_x_belief - logsumexp(log_x_belief, axis=1, keepdims=True)
 
-    def compute_single_t(t):
-        log_x_belief = log_fwd_msgs[t] + log_bwd_msgs[t]
-        log_x_belief = log_x_belief - logsumexp(log_x_belief)
+    # Broadcast to (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+    log_belief = (log_B_flat[None]
+                  + log_x_belief[:, None, None, :, None]
+                  + log_cavity_obs[:, None, None, None, :])
 
-        # q(y, x, θ) ∝ B(y|x,θ) · q(x) · cavity(θ)
-        log_belief = (log_B_flat
-                      + log_x_belief[None, None, :, None]
-                      + log_cavity_obs[t][None, None, None, :])
-
-        return jax.nn.softmax(log_belief.ravel()).reshape(log_belief.shape)
-
-    return jax.vmap(compute_single_t)(jnp.arange(T_plus_1))
+    # Normalize per t over all (n_fov, N_CELL_TYPES, n_states, n_static)
+    T_plus_1 = log_belief.shape[0]
+    flat = log_belief.reshape(T_plus_1, -1)
+    return jax.nn.softmax(flat, axis=1).reshape(log_belief.shape)
 
 
 # =============================================================================
@@ -77,9 +75,9 @@ def compute_efe_action_prior(log_dyn_region_beliefs, action_mask):
     """
     Compute EFE-based per-timestep action prior from dynamics region beliefs.
 
-    π_t(u) = softmax( H(q(x_new, x_old, θ | u)) − H(q(x_old, θ | u)) )
+    π_t(u) = softmax( H(x_new | x_old, θ, u) )
 
-    Accepts unnormalized log beliefs, locally softmax's for entropy.
+    Vectorized — no nested vmaps.
 
     Args:
         log_dyn_region_beliefs: (T, x_old, x_new, θ, u) unnormalized log beliefs
@@ -88,26 +86,21 @@ def compute_efe_action_prior(log_dyn_region_beliefs, action_mask):
     Returns:
         action_prior_per_t: (T, n_actions) probability-space action priors
     """
-    def compute_single_t(log_region_t):
-        # log_region_t: (x_old, x_new, θ, u)
-        def compute_single_u(u):
-            log_joint = log_region_t[:, :, :, u]
-            q_joint = jax.nn.softmax(log_joint.ravel()).reshape(log_joint.shape)
-            log_q = jnp.log(q_joint + EPSILON)
-            H_joint = -(q_joint * log_q).sum()
+    # Move u to front for per-(t,u) softmax: (T, u, x_old, x_new, θ)
+    log_b = log_dyn_region_beliefs.transpose(0, 4, 1, 2, 3)
+    shape = log_b.shape
+    log_b_flat = log_b.reshape(shape[0] * shape[1], -1)
+    q = jax.nn.softmax(log_b_flat, axis=1).reshape(shape)  # (T, u, x_old, x_new, θ)
 
-            q_marg = q_joint.sum(axis=1)  # (x_old, θ)
-            log_q_marg = jnp.log(q_marg + EPSILON)
-            H_marginal = -(q_marg * log_q_marg).sum()
+    # q(x_old, θ | u, t) = sum_{x_new} q
+    q_marg = q.sum(axis=3, keepdims=True)  # (T, u, x_old, 1, θ)
 
-            return H_joint - H_marginal
+    # H(x_new | x_old, θ, u, t) = -sum q log(q / q_marg)
+    q_cond = q / (q_marg + EPSILON)
+    efe = -(q * jnp.log(q_cond + EPSILON)).sum(axis=(2, 3, 4))  # (T, u)
 
-        n_actions = log_region_t.shape[3]
-        efe = jax.vmap(compute_single_u)(jnp.arange(n_actions))
-        efe = jnp.where(action_mask > 0, efe, -jnp.inf)
-        return jax.nn.softmax(efe)
-
-    return jax.vmap(compute_single_t)(log_dyn_region_beliefs)
+    efe = jnp.where(action_mask[None] > 0, efe, -jnp.inf)
+    return jax.nn.softmax(efe, axis=1)
 
 
 def compute_obs_efe_to_x(obs_region_beliefs):
@@ -116,43 +109,36 @@ def compute_obs_efe_to_x(obs_region_beliefs):
 
     obs_to_x[t](x) = softmax(-sum_k H_k(y | theta, x))
 
+    Vectorized — no nested vmaps.
+
     Args:
         obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static) normalized
 
     Returns:
         log_obs_to_x: (T+1, n_states) log-normalized messages
     """
-    def compute_H_cond(belief_slice):
-        # belief_slice: (N_CELL_TYPES, n_static) — q(y, theta) for fixed x, k
-        Z = belief_slice.sum() + EPSILON
-        q = belief_slice / Z
-        log_q = jnp.log(q + EPSILON)
-        H_joint = -(q * log_q).sum()
+    # Normalize per (t, k, x) over (y=axis2, θ=axis4)
+    Z = obs_region_beliefs.sum(axis=(2, 4), keepdims=True) + EPSILON
+    q = obs_region_beliefs / Z
 
-        q_marg_theta = q.sum(axis=0)  # (n_static,)
-        log_q_marg = jnp.log(q_marg_theta + EPSILON)
-        H_marg = -(q_marg_theta * log_q_marg).sum()
+    # q(θ | k, x, t) = sum_y q(y, θ | k, x, t)
+    q_theta = q.sum(axis=2, keepdims=True)  # (T+1, n_fov, 1, n_states, n_static)
 
-        return H_joint - H_marg
+    # H(y | θ, k, x, t) = -sum_{y,θ} q log(q / q_theta)
+    q_cond = q / (q_theta + EPSILON)
+    H_cond = -(q * jnp.log(q_cond + EPSILON)).sum(axis=(2, 4))  # (T+1, n_fov, n_states)
 
-    compute_per_x = jax.vmap(compute_H_cond)
-
-    def compute_per_k(belief_k):
-        return compute_per_x(jnp.transpose(belief_k, (1, 0, 2)))
-
-    def compute_per_t(beliefs_t):
-        H_per_k = jax.vmap(compute_per_k)(beliefs_t)  # (n_fov, n_states)
-        total = H_per_k.sum(axis=0)
-        # Return log-normalized
-        log_msg = -total
-        return log_msg - logsumexp(log_msg)
-
-    return jax.vmap(compute_per_t)(obs_region_beliefs)
+    # Sum over FOV positions
+    total_H = H_cond.sum(axis=1)  # (T+1, n_states)
+    log_msg = -total_H
+    return log_msg - logsumexp(log_msg, axis=1, keepdims=True)
 
 
 def compute_obs_efe_to_theta(obs_region_beliefs):
     """
     Message to theta from observation factors via EFE (log-space).
+
+    Vectorized — no nested vmaps.
 
     Args:
         obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static) normalized
@@ -160,29 +146,20 @@ def compute_obs_efe_to_theta(obs_region_beliefs):
     Returns:
         log_obs_to_theta: (T+1, n_static) log-space messages
     """
-    def compute_H_cond(belief_slice):
-        Z = belief_slice.sum() + EPSILON
-        q = belief_slice / Z
-        log_q = jnp.log(q + EPSILON)
-        H_joint = -(q * log_q).sum()
+    # Normalize per (t, k, θ) over (y=axis2, x=axis3)
+    Z = obs_region_beliefs.sum(axis=(2, 3), keepdims=True) + EPSILON
+    q = obs_region_beliefs / Z
 
-        q_marg_x = q.sum(axis=0)
-        log_q_marg = jnp.log(q_marg_x + EPSILON)
-        H_marg = -(q_marg_x * log_q_marg).sum()
+    # q(x | k, θ, t) = sum_y q(y, x | k, θ, t)
+    q_x = q.sum(axis=2, keepdims=True)  # (T+1, n_fov, 1, n_states, n_static)
 
-        return H_joint - H_marg
+    # H(y | x, k, θ, t) = -sum_{y,x} q log(q / q_x)
+    q_cond = q / (q_x + EPSILON)
+    H_cond = -(q * jnp.log(q_cond + EPSILON)).sum(axis=(2, 3))  # (T+1, n_fov, n_static)
 
-    compute_per_theta = jax.vmap(compute_H_cond)
-
-    def compute_per_k(belief_k):
-        return compute_per_theta(jnp.transpose(belief_k, (2, 0, 1)))
-
-    def compute_per_t(beliefs_t):
-        H_per_k = jax.vmap(compute_per_k)(beliefs_t)
-        total = H_per_k.sum(axis=0)
-        return jnp.log(jax.nn.softmax(-total) + EPSILON)
-
-    return jax.vmap(compute_per_t)(obs_region_beliefs)
+    # Sum over FOV positions
+    total_H = H_cond.sum(axis=1)  # (T+1, n_static)
+    return jnp.log(jax.nn.softmax(-total_H, axis=1) + EPSILON)
 
 
 # =============================================================================
@@ -288,17 +265,14 @@ def compute_dyn_to_theta_msgs_nuijten(log_T_kernel_tiled, log_fwd_msgs, log_bwd_
     Returns:
         log_dyn_to_theta: (T, n_static) log-space messages
     """
-    def compute_msg_t(t):
-        log_fwd_t = log_fwd_msgs[t] + log_obs_to_x[t]
-        log_bwd_t1 = log_bwd_msgs[t + 1] + log_obs_to_x[t + 1]
+    log_fwd_t = log_fwd_msgs[:-1] + log_obs_to_x[:-1]    # (T, n_states)
+    log_bwd_t1 = log_bwd_msgs[1:] + log_obs_to_x[1:]     # (T, n_states)
 
-        terms = (log_T_kernel_tiled[t]
-                 + log_fwd_t[:, None, None, None]
-                 + log_bwd_t1[None, :, None, None]
-                 + log_action_prior_per_t[t][None, None, None, :])
-        return logsumexp(terms, axis=(0, 1, 3))
-
-    return jax.vmap(compute_msg_t)(jnp.arange(horizon))
+    terms = (log_T_kernel_tiled
+             + log_fwd_t[:, :, None, None, None]
+             + log_bwd_t1[:, None, :, None, None]
+             + log_action_prior_per_t[:, None, None, None, :])
+    return logsumexp(terms, axis=(1, 2, 4))
 
 
 def compute_dyn_region_beliefs_nuijten(log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs,
@@ -317,19 +291,14 @@ def compute_dyn_region_beliefs_nuijten(log_T_kernel_tiled, log_fwd_msgs, log_bwd
     Returns:
         log_region_beliefs: (T, x_old, x_new, θ, u) unnormalized log beliefs
     """
-    T = log_cavity_dyn.shape[0]
+    log_fwd_t = log_fwd_msgs[:-1] + log_obs_to_x[:-1]    # (T, n_states)
+    log_bwd_t1 = log_bwd_msgs[1:] + log_obs_to_x[1:]     # (T, n_states)
 
-    def compute_single_t(t):
-        log_fwd_t = log_fwd_msgs[t] + log_obs_to_x[t]
-        log_bwd_t1 = log_bwd_msgs[t + 1] + log_obs_to_x[t + 1]
-
-        return (log_T_kernel_tiled[t]
-                + log_fwd_t[:, None, None, None]
-                + log_bwd_t1[None, :, None, None]
-                + log_cavity_dyn[t][None, None, :, None]
-                + log_action_prior_per_t[t][None, None, None, :])
-
-    return jax.vmap(compute_single_t)(jnp.arange(T))
+    return (log_T_kernel_tiled
+            + log_fwd_t[:, :, None, None, None]
+            + log_bwd_t1[:, None, :, None, None]
+            + log_cavity_dyn[:, None, None, :, None]
+            + log_action_prior_per_t[:, None, None, None, :])
 
 
 # =============================================================================
