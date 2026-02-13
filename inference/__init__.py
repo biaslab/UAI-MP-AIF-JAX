@@ -8,10 +8,13 @@ from .messages import (
     combine_messages,
     combine_messages_log,
     EPSILON,
+    LOG_ZERO,
+    safe_log,
+    safe_log_div,
 )
 from .state_inference import state_inference_step
 from .planning import planning, marginalize_static
-from .loopy_bp import loopy_bp_planning_indexed
-from .region_extended_loopy_bp import region_extended_loopy_bp_planning_indexed
-from .reduced_region_extended import reduced_region_extended_planning_indexed
-from .nuijten_mp import nuijten_mp_planning_indexed, reduced_nuijten_mp_planning_indexed
+from .loopy_bp import loopy_bp_planning
+from .region_extended_loopy_bp import region_extended_loopy_bp_planning
+from .reduced_region_extended import reduced_region_extended_planning
+from .nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning

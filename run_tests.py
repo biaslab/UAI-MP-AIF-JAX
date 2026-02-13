@@ -116,6 +116,7 @@ def run_inference_tests():
         TestPlanning,
         TestLoopyBPPlanning,
         TestRegionExtendedLoopyBP,
+        TestNumericalStability,
         TestReducedRegionExtended,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
@@ -173,6 +174,19 @@ def run_inference_tests():
     t.test_respects_action_mask()
     t.test_theta_cavities_extended_shape()
     print("  Region-Extended Loopy BP: PASSED")
+
+    print("Running numerical stability tests...")
+    t = TestNumericalStability()
+    t.test_safe_log_div_zero_over_zero()
+    t.test_dyn_channel_with_deterministic_transitions()
+    t.test_dyn_channel_naive_division_creates_bogus_transitions()
+    t.test_obs_channel_with_deterministic_observations()
+    t.test_naive_subtraction_produces_zero_for_impossible()
+    t.test_safe_log_on_float16_tensor()
+    t.test_safe_log_on_float32_tensor()
+    t.test_region_extended_multi_iteration_no_nan()
+    t.test_reduced_region_extended_multi_iteration_no_nan()
+    print("  Numerical stability: PASSED")
 
     print("Running reduced region-extended tests...")
     t = TestReducedRegionExtended()

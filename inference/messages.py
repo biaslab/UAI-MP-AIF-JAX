@@ -5,6 +5,17 @@ import jax.numpy as jnp
 from jax import nn
 
 EPSILON = 1e-10
+LOG_ZERO = -1e12
+
+
+def safe_log(x):
+    """Log that maps 0 → LOG_ZERO instead of -inf."""
+    return jnp.where(x > 0, jnp.log(jnp.maximum(x, 1e-30)), LOG_ZERO)
+
+
+def safe_log_div(log_num, log_den):
+    """log(num/den) where 0/0 → LOG_ZERO (result is 0 in probability space)."""
+    return jnp.where(log_num > LOG_ZERO / 2, log_num - log_den, LOG_ZERO)
 
 
 # =============================================================================

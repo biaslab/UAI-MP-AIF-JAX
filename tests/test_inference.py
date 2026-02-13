@@ -91,7 +91,6 @@ class TestStateInference:
             generate_transition_tensor,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
-            N_ACTIONS,
             N_CELL_TYPES,
         )
 
@@ -102,10 +101,10 @@ class TestStateInference:
         self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
         self.n_static = n_key * n_door
 
-        self.transition_tensor = jnp.array(generate_transition_tensor(self.n))
-        self.obs_tensors = jnp.array(generate_observation_tensor(self.n))
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
+        self.obs_tensors = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
         self.ori_tensor = jnp.array(
-            generate_orientation_observation_tensor(self.n)
+            generate_orientation_observation_tensor(self.n), dtype=jnp.float32
         )
 
     def test_state_inference_shapes(self):
@@ -190,7 +189,7 @@ class TestPlanning:
         self.n_static = n_key * n_door
         self.n_actions = 7
 
-        self.transition_tensor = jnp.array(generate_transition_tensor(self.n))
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
 
     def test_planning_output_shape(self):
         import jax.numpy as jnp
@@ -227,20 +226,24 @@ class TestPlanning:
 
     def test_marginalize_static_shape(self):
         import jax.numpy as jnp
-        from inference.planning import marginalize_static
+        from inference.planning import marginalize_static, safe_log
 
+        log_T = safe_log(self.transition_tensor)
         q_static = jnp.ones(self.n_static) / self.n_static
-        reduced = marginalize_static(self.transition_tensor, q_static)
+        log_reduced = marginalize_static(log_T, safe_log(q_static))
 
-        assert reduced.shape == (self.n_states, self.n_states, self.n_actions)
+        assert log_reduced.shape == (self.n_states, self.n_states, self.n_actions)
 
     def test_marginalize_static_is_stochastic(self):
         import jax.numpy as jnp
-        from inference.planning import marginalize_static
+        from inference.planning import marginalize_static, safe_log
 
+        log_T = safe_log(self.transition_tensor)
         q_static = jnp.ones(self.n_static) / self.n_static
-        reduced = marginalize_static(self.transition_tensor, q_static)
+        log_reduced = marginalize_static(log_T, safe_log(q_static))
 
+        # Convert to probability space and check stochasticity
+        reduced = jnp.exp(log_reduced)
         for old_state in range(min(10, self.n_states)):
             for action in range(self.n_actions):
                 prob_sum = reduced[:, old_state, action].sum()
@@ -253,7 +256,7 @@ class TestLoopyBPPlanning:
     def setup_method(self):
         import jax.numpy as jnp
         from environments.minigrid import (
-            generate_transition_indices,
+            generate_transition_tensor,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
         )
@@ -266,19 +269,19 @@ class TestLoopyBPPlanning:
         self.n_static = n_key * n_door
         self.n_actions = 7
 
-        self.transition_idx = jnp.array(generate_transition_indices(self.n))
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
 
     def test_output_shape(self):
         import jax.numpy as jnp
-        from inference.loopy_bp import loopy_bp_planning_indexed
+        from inference.loopy_bp import loopy_bp_planning
 
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        action_dist = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=2,
         )
 
@@ -288,20 +291,20 @@ class TestLoopyBPPlanning:
     def test_single_iter_matches_standard_bp(self):
         """With 1 iteration, cavity_θ = p(θ) for all t, matching standard BP."""
         import jax.numpy as jnp
-        from inference.planning import planning_indexed
-        from inference.loopy_bp import loopy_bp_planning_indexed
+        from inference.planning import planning
+        from inference.loopy_bp import loopy_bp_planning
 
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        bp_result = planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        bp_result = planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=1,
         )
-        loopy_result = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        loopy_result = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=1,
         )
 
@@ -312,15 +315,15 @@ class TestLoopyBPPlanning:
 
     def test_respects_action_mask(self):
         import jax.numpy as jnp
-        from inference.loopy_bp import loopy_bp_planning_indexed
+        from inference.loopy_bp import loopy_bp_planning
 
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        action_dist = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=3,
         )
 
@@ -330,6 +333,7 @@ class TestLoopyBPPlanning:
 
     def test_theta_cavities_shape_and_normalization(self):
         import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
         from inference.loopy_bp import compute_theta_cavities
 
         n_static = 64
@@ -337,14 +341,16 @@ class TestLoopyBPPlanning:
         log_prior = jnp.log(jnp.ones(n_static) / n_static)
         log_dyn_to_theta = jnp.zeros((T, n_static))
 
-        cavities = compute_theta_cavities(log_prior, log_dyn_to_theta)
+        log_cavities = compute_theta_cavities(log_prior, log_dyn_to_theta)
 
-        assert cavities.shape == (T, n_static)
+        assert log_cavities.shape == (T, n_static)
         for t in range(T):
-            assert np.isclose(cavities[t].sum(), 1.0, atol=1e-5)
+            # Log-space cavities should be normalized: logsumexp = 0
+            assert np.isclose(logsumexp(log_cavities[t]), 0.0, atol=1e-5)
 
     def test_forward_backward_messages_shape(self):
         import jax.numpy as jnp
+        from inference.planning import safe_log
         from inference.loopy_bp import (
             forward_pass, backward_pass, compute_reduced_per_t,
         )
@@ -356,33 +362,35 @@ class TestLoopyBPPlanning:
         action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
         horizon = 5
 
-        cavity_theta = jnp.tile(q_static, (horizon, 1))
-        reduced_per_t = compute_reduced_per_t(
-            self.transition_idx, cavity_theta, self.n_states,
+        log_T = safe_log(self.transition_tensor)
+        log_cavity_theta = safe_log(jnp.tile(q_static, (horizon, 1)))
+        log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+        log_fwd_msgs = forward_pass(
+            log_reduced_per_t, safe_log(q_current), safe_log(action_prior), horizon
         )
-        fwd_msgs = forward_pass(reduced_per_t, q_current, action_prior, horizon)
-        bwd_msgs, q_u = backward_pass(
-            reduced_per_t, fwd_msgs, goal, action_prior, horizon,
+        log_bwd_msgs, q_u = backward_pass(
+            log_reduced_per_t, log_fwd_msgs, safe_log(goal),
+            safe_log(action_prior), horizon,
         )
 
-        assert fwd_msgs.shape == (horizon + 1, self.n_states)
-        assert bwd_msgs.shape == (horizon + 1, self.n_states)
+        assert log_fwd_msgs.shape == (horizon + 1, self.n_states)
+        assert log_bwd_msgs.shape == (horizon + 1, self.n_states)
 
     def test_multi_iteration_changes_result(self):
         import jax.numpy as jnp
-        from inference.loopy_bp import loopy_bp_planning_indexed
+        from inference.loopy_bp import loopy_bp_planning
 
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        result_1 = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        result_1 = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=1,
         )
-        result_5 = loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, goal,
+        result_5 = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
             horizon=5, n_iterations=5,
         )
 
@@ -392,6 +400,7 @@ class TestLoopyBPPlanning:
 
     def test_dyn_to_theta_messages_finite(self):
         import jax.numpy as jnp
+        from inference.planning import safe_log
         from inference.loopy_bp import (
             forward_pass, backward_pass,
             compute_reduced_per_t, compute_dyn_to_theta_msgs,
@@ -404,17 +413,19 @@ class TestLoopyBPPlanning:
         action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
         horizon = 5
 
-        cavity_theta = jnp.tile(q_static, (horizon, 1))
-        reduced_per_t = compute_reduced_per_t(
-            self.transition_idx, cavity_theta, self.n_states,
+        log_T = safe_log(self.transition_tensor)
+        log_cavity_theta = safe_log(jnp.tile(q_static, (horizon, 1)))
+        log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+        log_fwd_msgs = forward_pass(
+            log_reduced_per_t, safe_log(q_current), safe_log(action_prior), horizon
         )
-        fwd_msgs = forward_pass(reduced_per_t, q_current, action_prior, horizon)
-        bwd_msgs, _ = backward_pass(
-            reduced_per_t, fwd_msgs, goal, action_prior, horizon,
+        log_bwd_msgs, _ = backward_pass(
+            log_reduced_per_t, log_fwd_msgs, safe_log(goal),
+            safe_log(action_prior), horizon,
         )
 
         log_dyn_to_theta = compute_dyn_to_theta_msgs(
-            self.transition_idx, fwd_msgs, bwd_msgs, action_prior, horizon,
+            log_T, log_fwd_msgs, log_bwd_msgs, safe_log(action_prior), horizon,
         )
 
         assert jnp.all(jnp.isfinite(log_dyn_to_theta))
@@ -424,8 +435,8 @@ class TestRegionExtendedLoopyBP:
     def setup_method(self):
         import jax.numpy as jnp
         from environments.minigrid import (
-            generate_transition_indices,
-            generate_observation_indices,
+            generate_transition_tensor,
+            generate_observation_tensor,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
         )
@@ -438,13 +449,13 @@ class TestRegionExtendedLoopyBP:
         self.n_static = n_key * n_door
         self.n_actions = 7
 
-        self.transition_idx = jnp.array(generate_transition_indices(self.n))
-        self.obs_idx = jnp.array(generate_observation_indices(self.n))
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
 
     def test_output_shape(self):
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
+            region_extended_loopy_bp_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -452,9 +463,9 @@ class TestRegionExtendedLoopyBP:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=2,
+        action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=2,
         )
 
         assert action_dist.shape == (self.n_actions,)
@@ -465,7 +476,7 @@ class TestRegionExtendedLoopyBP:
     def test_respects_action_mask(self):
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
+            region_extended_loopy_bp_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -473,9 +484,9 @@ class TestRegionExtendedLoopyBP:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=3,
+        action_dist, _, _ = region_extended_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=3,
         )
 
         assert action_dist[4] < 1e-6
@@ -483,6 +494,7 @@ class TestRegionExtendedLoopyBP:
 
     def test_theta_cavities_extended_shape(self):
         import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
         from inference.region_extended_loopy_bp import compute_theta_cavities_extended
 
         n_static = 64
@@ -491,24 +503,230 @@ class TestRegionExtendedLoopyBP:
         log_dyn = jnp.zeros((T, n_static))
         log_obs = jnp.zeros((T + 1, n_static))
 
-        cavity_dyn, cavity_obs = compute_theta_cavities_extended(
+        log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
             log_prior, log_dyn, log_obs
         )
 
-        assert cavity_dyn.shape == (T, n_static)
-        assert cavity_obs.shape == (T + 1, n_static)
+        assert log_cavity_dyn.shape == (T, n_static)
+        assert log_cavity_obs.shape == (T + 1, n_static)
         for t in range(T):
-            assert np.isclose(cavity_dyn[t].sum(), 1.0, atol=1e-5)
+            assert np.isclose(logsumexp(log_cavity_dyn[t]), 0.0, atol=1e-5)
         for t in range(T + 1):
-            assert np.isclose(cavity_obs[t].sum(), 1.0, atol=1e-5)
+            assert np.isclose(logsumexp(log_cavity_obs[t]), 0.0, atol=1e-5)
+
+
+class TestNumericalStability:
+    """Tests for numerical edge cases in log-space kernel reparameterization.
+
+    The main hazard: channels computed from region beliefs contain -inf
+    (from normalizing deterministic conditionals). Dividing the original
+    factor by such a channel (log_factor - log_channel) produces +inf
+    unless guarded by safe_log_div.
+    """
+
+    def test_safe_log_div_zero_over_zero(self):
+        """0/0 must give 0, not 1 (LOG_ZERO - LOG_ZERO = 0 is wrong)."""
+        import jax.numpy as jnp
+        from inference.messages import safe_log_div, LOG_ZERO
+
+        log_num = jnp.array([LOG_ZERO, LOG_ZERO, -5.0, -5.0])
+        log_den = jnp.array([LOG_ZERO, -3.0,    LOG_ZERO, -3.0])
+        result = safe_log_div(log_num, log_den)
+
+        # 0/0 → 0  (LOG_ZERO)
+        assert result[0] < LOG_ZERO / 2, f"0/0 should be LOG_ZERO, got {result[0]}"
+        # 0/x → 0  (LOG_ZERO)
+        assert result[1] < LOG_ZERO / 2, f"0/x should be LOG_ZERO, got {result[1]}"
+        # x/0 → normal subtraction (caller's responsibility; we only guard numerator=0)
+        assert jnp.isfinite(result[2])
+        # x/y → normal subtraction
+        assert np.isclose(result[3], -5.0 - (-3.0), atol=1e-5)
+
+    def test_dyn_channel_with_deterministic_transitions(self):
+        """Channels from a one-hot (deterministic) factor contain LOG_ZERO for
+        impossible transitions. safe_log_div must keep the kernel finite."""
+        import jax.numpy as jnp
+        from inference.messages import safe_log_div, LOG_ZERO
+        from inference.region_extended_loopy_bp import compute_dyn_channels
+
+        T, n_x, n_theta, n_u = 2, 4, 3, 2
+
+        # Deterministic factor: for each (x_old, theta, u), exactly one x_new is 1
+        factor = jnp.zeros((T, n_x, n_x, n_theta, n_u))
+        # x_new = (x_old + 1) % n_x  for all theta, u
+        for x_old in range(n_x):
+            x_new = (x_old + 1) % n_x
+            factor = factor.at[:, x_old, x_new, :, :].set(1.0)
+        log_factor = jnp.where(factor > 0, 0.0, LOG_ZERO)
+
+        # Treat log_factor as region beliefs (skip cavity/messages for this unit test)
+        log_channels = compute_dyn_channels(log_factor)
+
+        # Channels contain LOG_ZERO for impossible transitions (near -1e12, not exactly -inf)
+        assert float(log_channels.min()) < LOG_ZERO / 2, (
+            "Deterministic channels should contain ~LOG_ZERO for impossible transitions"
+        )
+
+        # Kernel = factor / channel via safe_log_div must be finite
+        log_kernel = safe_log_div(log_factor[:, :, :, :1, :], log_channels[:, :, :, None, :])
+        assert jnp.all(jnp.isfinite(log_kernel)), (
+            f"Kernel has non-finite values: min={log_kernel.min()}, max={log_kernel.max()}"
+        )
+
+    def test_dyn_channel_naive_division_creates_bogus_transitions(self):
+        """Without safe_log_div, LOG_ZERO - LOG_ZERO = 0 makes impossible
+        transitions look like probability 1. This is the core kernel bug."""
+        import jax.numpy as jnp
+        from inference.messages import safe_log_div, LOG_ZERO
+        from inference.region_extended_loopy_bp import compute_dyn_channels
+
+        T, n_x, n_theta, n_u = 1, 3, 1, 1
+
+        # Deterministic: x_old=0 → x_new=1, x_old=1 → x_new=2, x_old=2 → x_new=0
+        factor = jnp.zeros((T, n_x, n_x, n_theta, n_u))
+        for x_old in range(n_x):
+            x_new = (x_old + 1) % n_x
+            factor = factor.at[:, x_old, x_new, :, :].set(1.0)
+        log_factor = jnp.where(factor > 0, 0.0, LOG_ZERO)
+
+        log_channels = compute_dyn_channels(log_factor)
+
+        # Naive subtraction: for impossible transitions, both factor and channel
+        # are ~LOG_ZERO, so their difference is ~0 (looks like probability 1)
+        naive = log_factor - log_channels[:, :, :, None, :]
+        impossible_mask = (factor == 0.0)
+        bogus_count = int(jnp.sum(jnp.abs(naive[impossible_mask]) < 1.0))
+        assert bogus_count > 0, "Naive subtraction should produce near-zero entries for 0/0"
+
+        # safe_log_div: impossible entries stay at LOG_ZERO
+        safe = safe_log_div(log_factor, log_channels[:, :, :, None, :])
+        assert jnp.all(safe[impossible_mask] < LOG_ZERO / 2), (
+            "safe_log_div should keep impossible transitions at LOG_ZERO"
+        )
+
+    def test_obs_channel_with_deterministic_observations(self):
+        """Obs channels from a one-hot B(y|x,theta) contain LOG_ZERO for
+        impossible cell types. safe_log_div keeps the kernel finite."""
+        import jax.numpy as jnp
+        from inference.messages import safe_log_div, LOG_ZERO
+        from inference.region_extended_loopy_bp import compute_obs_channels
+
+        T_plus_1, n_fov, n_y, n_x, n_theta = 3, 2, 5, 4, 3
+
+        # Deterministic obs: for each (fov, x, theta), exactly one y is 1
+        beliefs = jnp.zeros((T_plus_1, n_fov, n_y, n_x, n_theta))
+        beliefs = beliefs.at[:, :, 0, :, :].set(1.0)  # all map to y=0
+        log_beliefs = jnp.where(beliefs > 0, 0.0, LOG_ZERO)
+
+        log_channels = compute_obs_channels(log_beliefs)
+
+        # Channels contain LOG_ZERO for impossible y values
+        assert float(log_channels.min()) < LOG_ZERO / 2, (
+            "Deterministic obs channels should contain ~LOG_ZERO"
+        )
+
+        log_kernel = safe_log_div(log_beliefs, log_channels)
+        assert jnp.all(jnp.isfinite(log_kernel)), (
+            f"Obs kernel has non-finite values: min={log_kernel.min()}, max={log_kernel.max()}"
+        )
+
+    def test_naive_subtraction_produces_zero_for_impossible(self):
+        """Plain subtraction maps LOG_ZERO/LOG_ZERO → 0 (probability 1),
+        making impossible transitions look certain. This is the core bug."""
+        import jax.numpy as jnp
+        from inference.messages import LOG_ZERO
+
+        # Simulate: factor=0, channel=0 in log-space
+        log_factor = jnp.array(LOG_ZERO)
+        log_channel = jnp.array(LOG_ZERO)
+
+        naive = log_factor - log_channel
+        assert np.isclose(float(naive), 0.0), (
+            "LOG_ZERO - LOG_ZERO should give 0 (the bug: impossible transition looks certain)"
+        )
+
+    def test_safe_log_on_float16_tensor(self):
+        """safe_log on a float16 tensor must not produce -inf (LOG_ZERO overflows float16)."""
+        import jax.numpy as jnp
+        from inference.planning import safe_log, LOG_ZERO
+
+        x = jnp.array([0.0, 0.5, 1.0], dtype=jnp.float16)
+        result = safe_log(x)
+
+        # float16 cannot represent -1e12; result[0] will be -inf
+        # This test documents the requirement to cast to float32 BEFORE calling safe_log
+        assert result.dtype == jnp.float16
+        assert jnp.isinf(result[0]), "safe_log on float16 zero gives -inf (cast to float32 first!)"
+
+    def test_safe_log_on_float32_tensor(self):
+        """safe_log on float32 must use LOG_ZERO, never -inf."""
+        import jax.numpy as jnp
+        from inference.planning import safe_log, LOG_ZERO
+
+        x = jnp.array([0.0, 0.5, 1.0], dtype=jnp.float32)
+        result = safe_log(x)
+
+        assert jnp.all(jnp.isfinite(result)), "safe_log on float32 should never produce -inf"
+        assert np.isclose(float(result[0]), LOG_ZERO, rtol=1e-5)
+
+    def test_region_extended_multi_iteration_no_nan(self):
+        """Full region-extended planning must stay finite through 10 iterations
+        with real deterministic tensors (the scenario that triggered the original bug)."""
+        import jax.numpy as jnp
+        from environments.minigrid import generate_transition_tensor, generate_observation_tensor
+        from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
+
+        n = 4
+        n_states = n * n * 4 * 3
+        n_static = (n * n - 2 * n) ** 2
+
+        transition_tensor = jnp.array(generate_transition_tensor(n), dtype=jnp.float32)
+        observation_tensor = jnp.array(generate_observation_tensor(n), dtype=jnp.float32)
+
+        q_current = jnp.ones(n_states) / n_states
+        q_static = jnp.ones(n_static) / n_static
+        goal = jnp.zeros(n_states).at[0].set(1.0)
+
+        action_dist, dyn_ch, obs_ch = region_extended_loopy_bp_planning(
+            q_current, q_static, transition_tensor, observation_tensor,
+            goal, horizon=5, n_iterations=10,
+        )
+
+        assert jnp.all(jnp.isfinite(action_dist)), f"action_dist has NaN/inf: {action_dist}"
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
+
+    def test_reduced_region_extended_multi_iteration_no_nan(self):
+        """Same for reduced variant."""
+        import jax.numpy as jnp
+        from environments.minigrid import generate_transition_tensor, generate_observation_tensor
+        from inference.reduced_region_extended import reduced_region_extended_planning
+
+        n = 4
+        n_states = n * n * 4 * 3
+        n_static = (n * n - 2 * n) ** 2
+
+        transition_tensor = jnp.array(generate_transition_tensor(n), dtype=jnp.float32)
+        observation_tensor = jnp.array(generate_observation_tensor(n), dtype=jnp.float32)
+
+        q_current = jnp.ones(n_states) / n_states
+        q_static = jnp.ones(n_static) / n_static
+        goal = jnp.zeros(n_states).at[0].set(1.0)
+
+        action_dist, dyn_ch, obs_ch = reduced_region_extended_planning(
+            q_current, q_static, transition_tensor, observation_tensor,
+            goal, horizon=5, n_iterations=10,
+        )
+
+        assert jnp.all(jnp.isfinite(action_dist)), f"action_dist has NaN/inf: {action_dist}"
+        assert np.isclose(action_dist.sum(), 1.0, atol=1e-5)
 
 
 class TestReducedRegionExtended:
     def setup_method(self):
         import jax.numpy as jnp
         from environments.minigrid import (
-            generate_transition_indices,
-            generate_observation_indices,
+            generate_transition_tensor,
+            generate_observation_tensor,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
         )
@@ -521,13 +739,13 @@ class TestReducedRegionExtended:
         self.n_static = n_key * n_door
         self.n_actions = 7
 
-        self.transition_idx = jnp.array(generate_transition_indices(self.n))
-        self.obs_idx = jnp.array(generate_observation_indices(self.n))
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
 
     def test_output_shape(self):
         import jax.numpy as jnp
         from inference.reduced_region_extended import (
-            reduced_region_extended_planning_indexed,
+            reduced_region_extended_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -535,9 +753,9 @@ class TestReducedRegionExtended:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = reduced_region_extended_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=2,
+        action_dist, dyn_channels, obs_channels = reduced_region_extended_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=2,
         )
 
         assert action_dist.shape == (self.n_actions,)
@@ -548,7 +766,7 @@ class TestReducedRegionExtended:
     def test_respects_action_mask(self):
         import jax.numpy as jnp
         from inference.reduced_region_extended import (
-            reduced_region_extended_planning_indexed,
+            reduced_region_extended_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -556,9 +774,9 @@ class TestReducedRegionExtended:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, _, _, _, _ = reduced_region_extended_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=3,
+        action_dist, _, _ = reduced_region_extended_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=3,
         )
 
         assert action_dist[4] < 1e-6
@@ -569,10 +787,10 @@ class TestReducedRegionExtended:
         (both use q_static_state), so results should be identical."""
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
+            region_extended_loopy_bp_planning,
         )
         from inference.reduced_region_extended import (
-            reduced_region_extended_planning_indexed,
+            reduced_region_extended_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -580,13 +798,13 @@ class TestReducedRegionExtended:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        full_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=1,
+        full_result, _, _ = region_extended_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=1,
         )
-        reduced_result, _, _, _, _ = reduced_region_extended_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=5, n_iterations=1,
+        reduced_result, _, _ = reduced_region_extended_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=5, n_iterations=1,
         )
 
         assert np.allclose(full_result, reduced_result, atol=1e-5), (
@@ -599,6 +817,7 @@ class TestAgentIntegration:
     def setup_method(self):
         import jax.numpy as jnp
         from environments.minigrid import (
+            generate_transition_tensor,
             generate_transition_indices,
             generate_observation_indices,
             generate_orientation_indices,
@@ -607,6 +826,7 @@ class TestAgentIntegration:
 
         self.grid_size = 4
         self.dims = get_dimensions(self.grid_size)
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.grid_size), dtype=jnp.float32)
         self.transition_idx = jnp.array(generate_transition_indices(self.grid_size))
         self.observation_idx = jnp.array(generate_observation_indices(self.grid_size))
         self.orientation_idx = jnp.array(generate_orientation_indices(self.grid_size))
@@ -618,6 +838,7 @@ class TestAgentIntegration:
 
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
+            transition_tensor=self.transition_tensor,
             transition_idx=self.transition_idx,
             observation_idx=self.observation_idx,
             orientation_idx=self.orientation_idx,
@@ -632,6 +853,7 @@ class TestAgentIntegration:
 
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
+            transition_tensor=self.transition_tensor,
             transition_idx=self.transition_idx,
             observation_idx=self.observation_idx,
             orientation_idx=self.orientation_idx,
@@ -651,6 +873,7 @@ class TestAgentIntegration:
 
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
+            transition_tensor=self.transition_tensor,
             transition_idx=self.transition_idx,
             observation_idx=self.observation_idx,
             orientation_idx=self.orientation_idx,
@@ -666,7 +889,9 @@ class TestCustomFOVSizeInference:
     def setup_method(self):
         import jax.numpy as jnp
         from environments.minigrid import (
+            generate_transition_tensor,
             generate_transition_indices,
+            generate_observation_tensor,
             generate_observation_indices,
             generate_orientation_indices,
             N_ORIENTATIONS,
@@ -682,7 +907,9 @@ class TestCustomFOVSizeInference:
         self.n_static = n_key * n_door
         self.n_actions = 7
 
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.transition_idx = jnp.array(generate_transition_indices(self.n))
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n, fov_size=self.fov_size), dtype=jnp.float32)
         self.obs_idx = jnp.array(generate_observation_indices(self.n, fov_size=self.fov_size))
         self.orientation_idx = jnp.array(generate_orientation_indices(self.n))
 
@@ -715,7 +942,7 @@ class TestCustomFOVSizeInference:
     def test_region_extended_with_fov5(self):
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import (
-            region_extended_loopy_bp_planning_indexed,
+            region_extended_loopy_bp_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -723,9 +950,9 @@ class TestCustomFOVSizeInference:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = region_extended_loopy_bp_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=3, n_iterations=2,
+        action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
         )
 
         assert action_dist.shape == (self.n_actions,)
@@ -736,7 +963,7 @@ class TestCustomFOVSizeInference:
     def test_reduced_region_extended_with_fov5(self):
         import jax.numpy as jnp
         from inference.reduced_region_extended import (
-            reduced_region_extended_planning_indexed,
+            reduced_region_extended_planning,
         )
 
         q_current = jnp.ones(self.n_states) / self.n_states
@@ -744,9 +971,9 @@ class TestCustomFOVSizeInference:
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
 
-        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = reduced_region_extended_planning_indexed(
-            q_current, q_static, self.transition_idx, self.obs_idx, goal,
-            horizon=3, n_iterations=2,
+        action_dist, dyn_channels, obs_channels = reduced_region_extended_planning(
+            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            goal, horizon=3, n_iterations=2,
         )
 
         assert action_dist.shape == (self.n_actions,)
@@ -764,6 +991,7 @@ class TestCustomFOVSizeInference:
 
         agent = IndexedTensorAgent.create(
             grid_size=self.n,
+            transition_tensor=self.transition_tensor,
             transition_idx=self.transition_idx,
             observation_idx=self.obs_idx,
             orientation_idx=self.orientation_idx,
