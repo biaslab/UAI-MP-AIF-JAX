@@ -103,6 +103,7 @@ def run_inference_tests():
         TestPlanning,
         TestLoopyBPPlanning,
         TestRegionExtendedLoopyBP,
+        TestReducedRegionExtended,
         TestAgentIntegration,
     )
 
@@ -158,6 +159,14 @@ def run_inference_tests():
     t.test_respects_action_mask()
     t.test_theta_cavities_extended_shape()
     print("  Region-Extended Loopy BP: PASSED")
+
+    print("Running reduced region-extended tests...")
+    t = TestReducedRegionExtended()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_respects_action_mask()
+    t.test_single_iter_matches_region_extended()
+    print("  Reduced Region-Extended: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()

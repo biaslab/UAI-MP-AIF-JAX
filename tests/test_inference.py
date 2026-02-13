@@ -503,6 +503,98 @@ class TestRegionExtendedLoopyBP:
             assert np.isclose(cavity_obs[t].sum(), 1.0, atol=1e-5)
 
 
+class TestReducedRegionExtended:
+    def setup_method(self):
+        import jax.numpy as jnp
+        from environments.minigrid import (
+            generate_transition_indices,
+            generate_observation_indices,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        self.n = 4
+        n_loc = self.n * self.n
+        n_key = n_loc - 2 * self.n
+        n_door = n_loc - 2 * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.n_static = n_key * n_door
+        self.n_actions = 7
+
+        self.transition_idx = jnp.array(generate_transition_indices(self.n))
+        self.obs_idx = jnp.array(generate_observation_indices(self.n))
+
+    def test_output_shape(self):
+        import jax.numpy as jnp
+        from inference.reduced_region_extended import (
+            reduced_region_extended_planning_indexed,
+        )
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = reduced_region_extended_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=5, n_iterations=2,
+        )
+
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(action_dist.sum(), 1.0)
+        assert dyn_channels.shape == (5, self.n_states, self.n_states, self.n_actions)
+        assert obs_channels.shape == (6, 49, 11, self.n_states, self.n_static)
+
+    def test_respects_action_mask(self):
+        import jax.numpy as jnp
+        from inference.reduced_region_extended import (
+            reduced_region_extended_planning_indexed,
+        )
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+
+        action_dist, _, _, _, _ = reduced_region_extended_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=5, n_iterations=3,
+        )
+
+        assert action_dist[4] < 1e-6
+        assert action_dist[6] < 1e-6
+
+    def test_single_iter_matches_region_extended(self):
+        """With 1 iteration, kernels are all p/r=1 and cavities are identical
+        (both use q_static_state), so results should be identical."""
+        import jax.numpy as jnp
+        from inference.region_extended_loopy_bp import (
+            region_extended_loopy_bp_planning_indexed,
+        )
+        from inference.reduced_region_extended import (
+            reduced_region_extended_planning_indexed,
+        )
+
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+
+        full_result, _, _, _, _ = region_extended_loopy_bp_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=5, n_iterations=1,
+        )
+        reduced_result, _, _, _, _ = reduced_region_extended_planning_indexed(
+            q_current, q_static, self.transition_idx, self.obs_idx, goal,
+            horizon=5, n_iterations=1,
+        )
+
+        assert np.allclose(full_result, reduced_result, atol=1e-5), (
+            f"Region-extended and reduced should match with 1 iteration.\n"
+            f"Full:    {full_result}\nReduced: {reduced_result}"
+        )
+
+
 class TestAgentIntegration:
     def setup_method(self):
         import jax.numpy as jnp

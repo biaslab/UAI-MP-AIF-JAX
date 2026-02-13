@@ -9,6 +9,7 @@ from inference.state_inference import state_inference_step, state_inference_step
 from inference.planning import planning, planning_indexed
 from inference.loopy_bp import loopy_bp_planning_indexed
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning_indexed
+from inference.reduced_region_extended import reduced_region_extended_planning_indexed
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
@@ -646,6 +647,163 @@ class RegionExtendedAgent:
         action = int(jnp.argmax(action_dist))
 
         new_agent = RegionExtendedAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_idx=self.transition_idx,
+            observation_idx=self.observation_idx,
+            orientation_idx=self.orientation_idx,
+            q_state=q_current,
+            q_static=q_static,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=action,
+        )
+
+        return action, new_agent
+
+
+@dataclass
+class ReducedRegionExtendedAgent:
+    """
+    Agent using reduced region-extended planning with fixed θ.
+
+    Uses reduced_region_extended_planning_indexed, which fixes θ at q_static_state
+    but keeps observation factors and kernel reparametrization.
+    """
+
+    grid_size: int
+    dims: dict[str, int]
+
+    transition_idx: jnp.ndarray
+    observation_idx: jnp.ndarray
+    orientation_idx: jnp.ndarray
+
+    q_state: jnp.ndarray
+    q_static: jnp.ndarray
+    goal: jnp.ndarray
+
+    planning_horizon: int
+    n_inference_iterations: int
+    n_planning_iterations: int
+
+    last_action: int
+
+    @classmethod
+    def create(
+        cls,
+        grid_size: int,
+        transition_idx: jnp.ndarray,
+        observation_idx: jnp.ndarray,
+        orientation_idx: jnp.ndarray,
+        goal: jnp.ndarray,
+        planning_horizon: int = 10,
+        n_inference_iterations: int = 10,
+        n_planning_iterations: int = 10,
+    ) -> "ReducedRegionExtendedAgent":
+        """Create a new reduced region-extended agent with uniform initial beliefs."""
+        dims = get_dimensions(grid_size)
+
+        n_valid_locations = dims["n_locations"] - 2 * grid_size
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return cls(
+            grid_size=grid_size,
+            dims=dims,
+            transition_idx=transition_idx,
+            observation_idx=observation_idx,
+            orientation_idx=orientation_idx,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=goal,
+            planning_horizon=planning_horizon,
+            n_inference_iterations=n_inference_iterations,
+            n_planning_iterations=n_planning_iterations,
+            last_action=0,
+        )
+
+    def reset(self) -> "ReducedRegionExtendedAgent":
+        """Reset beliefs to initial state."""
+        dims = self.dims
+        n_valid_locations = dims["n_locations"] - 2 * self.grid_size
+
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return ReducedRegionExtendedAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_idx=self.transition_idx,
+            observation_idx=self.observation_idx,
+            orientation_idx=self.orientation_idx,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=0,
+        )
+
+    def step(
+        self,
+        vision_obs: jnp.ndarray,
+        orientation_obs: jnp.ndarray,
+        time_remaining: int,
+    ) -> tuple[int, "ReducedRegionExtendedAgent"]:
+        """
+        Execute one agent step: perceive (standard BP), plan (reduced region-extended), act.
+        """
+        q_current, q_static = state_inference_step_indexed(
+            q_old_state=self.q_state,
+            q_static_state=self.q_static,
+            transition_idx=self.transition_idx,
+            obs_idx=self.observation_idx,
+            ori_idx=self.orientation_idx,
+            vision_obs=vision_obs,
+            ori_obs=orientation_obs,
+            action_idx=self.last_action,
+            n_iterations=self.n_inference_iterations,
+        )
+
+        horizon = min(time_remaining, self.planning_horizon)
+        action_dist, dyn_channels, obs_channels, dyn_kernels, obs_kernels = reduced_region_extended_planning_indexed(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_idx=self.transition_idx,
+            obs_idx=self.observation_idx,
+            goal=self.goal,
+            horizon=horizon,
+            n_iterations=self.n_planning_iterations,
+        )
+
+        action = int(jnp.argmax(action_dist))
+
+        new_agent = ReducedRegionExtendedAgent(
             grid_size=self.grid_size,
             dims=self.dims,
             transition_idx=self.transition_idx,

@@ -13,3 +13,4 @@ from .state_inference import state_inference_step
 from .planning import planning, marginalize_static
 from .loopy_bp import loopy_bp_planning_indexed
 from .region_extended_loopy_bp import region_extended_loopy_bp_planning_indexed
+from .reduced_region_extended import reduced_region_extended_planning_indexed
