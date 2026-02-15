@@ -24,11 +24,12 @@ from .region_extended_loopy_bp import (
     compute_obs_region_beliefs,
     compute_dyn_channels,
     compute_obs_channels,
+    anneal_log_channel,
 )
 from environments.minigrid import N_CELL_TYPES
 
 
-@partial(jax.jit, static_argnums=(5, 6))
+@partial(jax.jit, static_argnums=(5, 6, 7))
 def reduced_region_extended_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta (used as fixed cavity)
@@ -37,6 +38,7 @@ def reduced_region_extended_planning(
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
+    anneal=False,         # bool (static) - anneal channel influence over iterations
 ) -> jnp.ndarray:
     """
     Plan actions via reduced region-extended BP with fixed θ.
@@ -75,12 +77,19 @@ def reduced_region_extended_planning(
     log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
     log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
 
-    def body_fn(_, carry):
+    def body_fn(i, carry):
         q_u, log_dyn_channels, log_obs_channels = carry
 
-        # Inline kernels
-        log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-        log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
+        # Inline kernels (with optional channel annealing)
+        if anneal and n_iterations > 1:
+            alpha = i / (n_iterations - 1)
+            scaled_dyn = anneal_log_channel(log_dyn_channels, alpha, cond_axis=2)
+            scaled_obs = anneal_log_channel(log_obs_channels, alpha, cond_axis=2)
+        else:
+            scaled_dyn = log_dyn_channels
+            scaled_obs = log_obs_channels
+        log_dyn_kernels = safe_log_div(log_T_kernel[None], scaled_dyn[:, :, :, None, :])
+        log_obs_kernels = safe_log_div(log_B_flat[None], scaled_obs)
 
         # Reduced tensors
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)

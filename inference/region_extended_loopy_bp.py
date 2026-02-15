@@ -31,6 +31,29 @@ from environments.minigrid import N_CELL_TYPES
 
 
 # =============================================================================
+# Channel annealing
+# =============================================================================
+
+
+def anneal_log_channel(log_channel, alpha, cond_axis):
+    """Linearly interpolate between uniform-over-valid and channel in prob space.
+
+    Computes: annealed = (1-alpha) * uniform_valid + alpha * channel
+    in log-space via logaddexp. Structural zeros (LOG_ZERO) are preserved.
+    """
+    valid = log_channel > LOG_ZERO / 2
+    n_valid = valid.sum(axis=cond_axis, keepdims=True)
+    log_uniform = jnp.where(valid, -jnp.log(jnp.maximum(n_valid, 1)), LOG_ZERO)
+
+    log_alpha = jnp.where(alpha > 0, jnp.log(alpha), LOG_ZERO)
+    log_1_minus_alpha = jnp.where(alpha < 1, jnp.log(1 - alpha), LOG_ZERO)
+
+    return jnp.where(valid,
+        jnp.logaddexp(log_1_minus_alpha + log_uniform, log_alpha + log_channel),
+        LOG_ZERO)
+
+
+# =============================================================================
 # Forward/backward passes (log-space with obs_to_x injection)
 # =============================================================================
 
@@ -294,7 +317,7 @@ def compute_obs_channels(log_region_beliefs):
 # =============================================================================
 
 
-@partial(jax.jit, static_argnums=(5, 6))
+@partial(jax.jit, static_argnums=(5, 6, 7))
 def region_extended_loopy_bp_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta
@@ -303,6 +326,7 @@ def region_extended_loopy_bp_planning(
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
+    anneal=False,         # bool (static) - anneal channel influence over iterations
 ) -> jnp.ndarray:
     """
     Plan actions via region-extended loopy BP with observation factors.
@@ -341,7 +365,7 @@ def region_extended_loopy_bp_planning(
     log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
     log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
 
-    def body_fn(_, carry):
+    def body_fn(i, carry):
         log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels, log_obs_channels = carry
 
         # Step 1: theta cavities
@@ -350,8 +374,15 @@ def region_extended_loopy_bp_planning(
         )
 
         # Step 2: Inline kernels (factor / channel in log-space)
-        log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-        log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
+        if anneal and n_iterations > 1:
+            alpha = i / (n_iterations - 1)
+            scaled_dyn = anneal_log_channel(log_dyn_channels, alpha, cond_axis=2)
+            scaled_obs = anneal_log_channel(log_obs_channels, alpha, cond_axis=2)
+        else:
+            scaled_dyn = log_dyn_channels
+            scaled_obs = log_obs_channels
+        log_dyn_kernels = safe_log_div(log_T_kernel[None], scaled_dyn[:, :, :, None, :])
+        log_obs_kernels = safe_log_div(log_B_flat[None], scaled_obs)
 
         # Step 3: Reduced tensors
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)

@@ -104,7 +104,6 @@ def run_minigrid_tests():
     t.test_get_fov_shape_size3()
     t.test_get_fov_key_at_agent_size5()
     t.test_get_fov_door_visible_size5()
-    t.test_observation_indices_shape_size5()
     t.test_observation_tensor_shape_size5()
     print("  Custom FOV size: PASSED")
 
@@ -228,7 +227,7 @@ def run_inference_tests():
     print("Running custom FOV size inference tests...")
     t = TestCustomFOVSizeInference()
     t.setup_method()
-    t.test_obs_idx_shape()
+    t.test_obs_tensor_shape()
     t.test_state_inference_with_fov5()
     t.test_region_extended_with_fov5()
     t.test_reduced_region_extended_with_fov5()

@@ -5,7 +5,7 @@ from typing import Any
 
 import jax.numpy as jnp
 
-from inference.state_inference import state_inference_step, state_inference_step_indexed
+from inference.state_inference import state_inference_step
 from inference.planning import planning
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
@@ -186,20 +186,15 @@ class FlatTensorAgent:
 @dataclass
 class IndexedTensorAgent:
     """
-    Memory-efficient agent using index-based tensor representation for state
-    inference and full probability tensors for planning.
+    Agent using full probability tensors for both state inference and planning.
     """
 
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensors for planning
     transition_tensor: jnp.ndarray  # (n_states, n_states, n_static, n_actions)
-
-    # Index-based tensors for state inference
-    transition_idx: jnp.ndarray  # (n_states, n_static, n_actions) -> next_state
-    observation_idx: jnp.ndarray  # (7, 7, n_states, n_static) -> cell_type
-    orientation_idx: jnp.ndarray  # (n_states,) -> orientation
+    observation_tensors: jnp.ndarray  # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
+    orientation_tensor: jnp.ndarray  # (4, n_states)
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -216,9 +211,8 @@ class IndexedTensorAgent:
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
@@ -246,9 +240,8 @@ class IndexedTensorAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -281,9 +274,8 @@ class IndexedTensorAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -302,15 +294,17 @@ class IndexedTensorAgent:
         """
         Execute one agent step: perceive, infer, plan, act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -330,9 +324,8 @@ class IndexedTensorAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,
@@ -357,13 +350,9 @@ class LoopyBPAgent:
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensor for planning
     transition_tensor: jnp.ndarray  # (n_states, n_states, n_static, n_actions)
-
-    # Indices for state inference
-    transition_idx: jnp.ndarray
-    observation_idx: jnp.ndarray
-    orientation_idx: jnp.ndarray
+    observation_tensors: jnp.ndarray  # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
+    orientation_tensor: jnp.ndarray  # (4, n_states)
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -380,9 +369,8 @@ class LoopyBPAgent:
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
@@ -410,9 +398,8 @@ class LoopyBPAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -445,9 +432,8 @@ class LoopyBPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -466,15 +452,17 @@ class LoopyBPAgent:
         """
         Execute one agent step: perceive (standard BP), plan (loopy BP), act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -494,9 +482,8 @@ class LoopyBPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,
@@ -518,14 +505,9 @@ class RegionExtendedAgent:
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensors for planning
     transition_tensor: jnp.ndarray  # (n_states, n_states, n_static, n_actions)
-    observation_tensor: jnp.ndarray  # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
-
-    # Indices for state inference
-    transition_idx: jnp.ndarray
-    observation_idx: jnp.ndarray
-    orientation_idx: jnp.ndarray
+    observation_tensors: jnp.ndarray  # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
+    orientation_tensor: jnp.ndarray  # (4, n_states)
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -537,19 +519,20 @@ class RegionExtendedAgent:
 
     last_action: int
 
+    anneal_temperature: bool
+
     @classmethod
     def create(
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        observation_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
+        anneal_temperature: bool = False,
     ) -> "RegionExtendedAgent":
         """Create a new region-extended agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -573,10 +556,8 @@ class RegionExtendedAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -584,6 +565,7 @@ class RegionExtendedAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
+            anneal_temperature=anneal_temperature,
         )
 
     def reset(self) -> "RegionExtendedAgent":
@@ -609,10 +591,8 @@ class RegionExtendedAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -620,6 +600,7 @@ class RegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
+            anneal_temperature=self.anneal_temperature,
         )
 
     def step(
@@ -631,15 +612,17 @@ class RegionExtendedAgent:
         """
         Execute one agent step: perceive (standard BP), plan (region-extended), act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -648,10 +631,11 @@ class RegionExtendedAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
+            observation_tensor=self.observation_tensors,
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
+            anneal=self.anneal_temperature,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -660,10 +644,8 @@ class RegionExtendedAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,
@@ -671,6 +653,7 @@ class RegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
+            anneal_temperature=self.anneal_temperature,
         )
 
         return action, new_agent
@@ -685,14 +668,9 @@ class ReducedRegionExtendedAgent:
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensors for planning
     transition_tensor: jnp.ndarray
-    observation_tensor: jnp.ndarray
-
-    # Indices for state inference
-    transition_idx: jnp.ndarray
-    observation_idx: jnp.ndarray
-    orientation_idx: jnp.ndarray
+    observation_tensors: jnp.ndarray
+    orientation_tensor: jnp.ndarray
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -704,19 +682,20 @@ class ReducedRegionExtendedAgent:
 
     last_action: int
 
+    anneal_temperature: bool
+
     @classmethod
     def create(
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        observation_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
+        anneal_temperature: bool = False,
     ) -> "ReducedRegionExtendedAgent":
         """Create a new reduced region-extended agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -740,10 +719,8 @@ class ReducedRegionExtendedAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -751,6 +728,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
+            anneal_temperature=anneal_temperature,
         )
 
     def reset(self) -> "ReducedRegionExtendedAgent":
@@ -776,10 +754,8 @@ class ReducedRegionExtendedAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -787,6 +763,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
+            anneal_temperature=self.anneal_temperature,
         )
 
     def step(
@@ -798,15 +775,17 @@ class ReducedRegionExtendedAgent:
         """
         Execute one agent step: perceive (standard BP), plan (reduced region-extended), act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -815,10 +794,11 @@ class ReducedRegionExtendedAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
+            observation_tensor=self.observation_tensors,
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
+            anneal=self.anneal_temperature,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -827,10 +807,8 @@ class ReducedRegionExtendedAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,
@@ -838,6 +816,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
+            anneal_temperature=self.anneal_temperature,
         )
 
         return action, new_agent
@@ -852,14 +831,9 @@ class NuijtenMPAgent:
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensors for planning
     transition_tensor: jnp.ndarray
-    observation_tensor: jnp.ndarray
-
-    # Indices for state inference
-    transition_idx: jnp.ndarray
-    observation_idx: jnp.ndarray
-    orientation_idx: jnp.ndarray
+    observation_tensors: jnp.ndarray
+    orientation_tensor: jnp.ndarray
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -876,10 +850,8 @@ class NuijtenMPAgent:
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        observation_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
@@ -907,10 +879,8 @@ class NuijtenMPAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -943,10 +913,8 @@ class NuijtenMPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -965,15 +933,17 @@ class NuijtenMPAgent:
         """
         Execute one agent step: perceive (standard BP), plan (Nuijten MP), act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -982,7 +952,7 @@ class NuijtenMPAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
+            observation_tensor=self.observation_tensors,
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -994,10 +964,8 @@ class NuijtenMPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,
@@ -1019,14 +987,9 @@ class ReducedNuijtenMPAgent:
     grid_size: int
     dims: dict[str, int]
 
-    # Full tensors for planning
     transition_tensor: jnp.ndarray
-    observation_tensor: jnp.ndarray
-
-    # Indices for state inference
-    transition_idx: jnp.ndarray
-    observation_idx: jnp.ndarray
-    orientation_idx: jnp.ndarray
+    observation_tensors: jnp.ndarray
+    orientation_tensor: jnp.ndarray
 
     q_state: jnp.ndarray
     q_static: jnp.ndarray
@@ -1043,10 +1006,8 @@ class ReducedNuijtenMPAgent:
         cls,
         grid_size: int,
         transition_tensor: jnp.ndarray,
-        observation_tensor: jnp.ndarray,
-        transition_idx: jnp.ndarray,
-        observation_idx: jnp.ndarray,
-        orientation_idx: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
         goal: jnp.ndarray,
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
@@ -1074,10 +1035,8 @@ class ReducedNuijtenMPAgent:
             grid_size=grid_size,
             dims=dims,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=goal,
@@ -1110,10 +1069,8 @@ class ReducedNuijtenMPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=state_probs,
             q_static=static_probs,
             goal=self.goal,
@@ -1132,15 +1089,17 @@ class ReducedNuijtenMPAgent:
         """
         Execute one agent step: perceive (standard BP), plan (reduced Nuijten MP), act.
         """
-        q_current, q_static = state_inference_step_indexed(
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
             q_old_state=self.q_state,
             q_static_state=self.q_static,
-            transition_idx=self.transition_idx,
-            obs_idx=self.observation_idx,
-            ori_idx=self.orientation_idx,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
             vision_obs=vision_obs,
             ori_obs=orientation_obs,
-            action_idx=self.last_action,
+            action_onehot=action_onehot,
             n_iterations=self.n_inference_iterations,
         )
 
@@ -1149,7 +1108,7 @@ class ReducedNuijtenMPAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
+            observation_tensor=self.observation_tensors,
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1161,10 +1120,8 @@ class ReducedNuijtenMPAgent:
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             q_state=q_current,
             q_static=q_static,
             goal=self.goal,

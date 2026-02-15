@@ -17,9 +17,6 @@ from environments.minigrid import (
     generate_observation_tensor,
     generate_orientation_observation_tensor,
     generate_transition_tensor,
-    generate_transition_indices,
-    generate_observation_indices,
-    generate_orientation_indices,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
 from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
@@ -81,6 +78,8 @@ def main():
                         help="Field-of-view size (must be odd and >= 3, default: 7)")
     parser.add_argument("--no-orientation", action="store_true",
                         help="Replace orientation observation with uniform (agent must infer orientation)")
+    parser.add_argument("--anneal-temperature", action="store_true",
+                        help="Anneal channel influence from uniform to full over planning iterations")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -117,32 +116,13 @@ def main():
     print("Generating tensors (this may take a moment)...")
     t0 = time.time()
 
-    # Always generate full transition tensor (needed for all planning methods)
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     print(f"  Transition tensor: {transition_tensor.shape}")
 
-    if args.full_tensors:
-        # Full tensor representation for state inference (FlatTensorAgent)
-        print("  Using FULL tensor representation for state inference")
-        observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
-        orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
-        print(f"  Observation tensor: {observation_tensor.shape}")
-        print(f"  Orientation tensor: {orientation_tensor.shape}")
-    else:
-        # Index-based representation for state inference (memory-efficient)
-        print("  Using INDEX-based representation for state inference")
-        transition_idx = jnp.array(generate_transition_indices(grid_size))
-        observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
-        orientation_idx = jnp.array(generate_orientation_indices(grid_size))
-        print(f"  Transition indices: {transition_idx.shape} (dtype={transition_idx.dtype})")
-        print(f"  Observation indices: {observation_idx.shape} (dtype={observation_idx.dtype})")
-        print(f"  Orientation indices: {orientation_idx.shape} (dtype={orientation_idx.dtype})")
-
-    # Methods that need observation tensor for planning
-    needs_obs_tensor = args.planning_method in ("region-extended", "reduced-aif", "nuijten", "reduced-nuijten")
-    if needs_obs_tensor and not args.full_tensors:
-        observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
-        print(f"  Observation tensor (for planning): {observation_tensor.shape}")
+    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
+    print(f"  Observation tensor: {observation_tensor.shape}")
+    print(f"  Orientation tensor: {orientation_tensor.shape}")
 
     trans_mb = transition_tensor.nbytes / 1024 / 1024
     print(f"  Transition tensor memory: {trans_mb:.1f} MB")
@@ -171,9 +151,8 @@ def main():
         agent = LoopyBPAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
@@ -183,36 +162,32 @@ def main():
         agent = RegionExtendedAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            anneal_temperature=args.anneal_temperature,
         )
     elif args.planning_method == "reduced-aif":
         agent = ReducedRegionExtendedAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            anneal_temperature=args.anneal_temperature,
         )
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
@@ -222,10 +197,8 @@ def main():
         agent = ReducedNuijtenMPAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            observation_tensor=observation_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
@@ -235,9 +208,8 @@ def main():
         agent = IndexedTensorAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
-            transition_idx=transition_idx,
-            observation_idx=observation_idx,
-            orientation_idx=orientation_idx,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
@@ -249,6 +221,8 @@ def main():
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Inference iterations: {args.inference_iterations}")
     print(f"  Planning iterations: {args.planning_iterations}")
+    if args.anneal_temperature:
+        print(f"  Channel annealing: ENABLED")
     print()
 
     if record_episodes:
@@ -297,6 +271,7 @@ def main():
                 "inference_iterations": args.inference_iterations,
                 "planning_iterations": args.planning_iterations,
                 "no_orientation": args.no_orientation,
+                "anneal_temperature": args.anneal_temperature,
                 "seed_start": args.seed,
             },
             "results": {

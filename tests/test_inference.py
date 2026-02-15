@@ -1228,18 +1228,16 @@ class TestAgentIntegration:
         import jax.numpy as jnp
         from environments.minigrid import (
             generate_transition_tensor,
-            generate_transition_indices,
-            generate_observation_indices,
-            generate_orientation_indices,
+            generate_observation_tensor,
+            generate_orientation_observation_tensor,
         )
         from utils.tensors import get_dimensions
 
         self.grid_size = 4
         self.dims = get_dimensions(self.grid_size)
         self.transition_tensor = jnp.array(generate_transition_tensor(self.grid_size), dtype=jnp.float32)
-        self.transition_idx = jnp.array(generate_transition_indices(self.grid_size))
-        self.observation_idx = jnp.array(generate_observation_indices(self.grid_size))
-        self.orientation_idx = jnp.array(generate_orientation_indices(self.grid_size))
+        self.observation_tensors = jnp.array(generate_observation_tensor(self.grid_size), dtype=jnp.float32)
+        self.orientation_tensor = jnp.array(generate_orientation_observation_tensor(self.grid_size), dtype=jnp.float32)
         self.goal = jnp.zeros(self.dims["n_states"])
         self.goal = self.goal.at[0].set(1.0)
 
@@ -1249,9 +1247,8 @@ class TestAgentIntegration:
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             goal=self.goal,
         )
         assert agent.q_state.shape[0] > 0
@@ -1264,9 +1261,8 @@ class TestAgentIntegration:
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             goal=self.goal,
             planning_horizon=3,
             n_planning_iterations=1,
@@ -1284,9 +1280,8 @@ class TestAgentIntegration:
         agent = IndexedTensorAgent.create(
             grid_size=self.grid_size,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.observation_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
             goal=self.goal,
         )
         new_agent = agent.reset()
@@ -1300,10 +1295,8 @@ class TestCustomFOVSizeInference:
         import jax.numpy as jnp
         from environments.minigrid import (
             generate_transition_tensor,
-            generate_transition_indices,
             generate_observation_tensor,
-            generate_observation_indices,
-            generate_orientation_indices,
+            generate_orientation_observation_tensor,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
         )
@@ -1318,29 +1311,27 @@ class TestCustomFOVSizeInference:
         self.n_actions = 7
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
-        self.transition_idx = jnp.array(generate_transition_indices(self.n))
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n, fov_size=self.fov_size), dtype=jnp.float32)
-        self.obs_idx = jnp.array(generate_observation_indices(self.n, fov_size=self.fov_size))
-        self.orientation_idx = jnp.array(generate_orientation_indices(self.n))
+        self.orientation_tensor = jnp.array(generate_orientation_observation_tensor(self.n), dtype=jnp.float32)
 
-    def test_obs_idx_shape(self):
-        assert self.obs_idx.shape[:2] == (self.fov_size, self.fov_size)
+    def test_obs_tensor_shape(self):
+        assert self.observation_tensor.shape[:2] == (self.fov_size, self.fov_size)
 
     def test_state_inference_with_fov5(self):
         import jax.numpy as jnp
-        from inference.state_inference import state_inference_step_indexed
+        from inference.state_inference import state_inference_step
 
         q_old = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         vision_obs = jnp.zeros((self.fov_size, self.fov_size, 11))
         vision_obs = vision_obs.at[:, :, 1].set(1.0)
         ori_obs = jnp.array([1.0, 0.0, 0.0, 0.0])
+        action = jnp.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-        q_current, q_static_new = state_inference_step_indexed(
+        q_current, q_static_new = state_inference_step(
             q_old, q_static,
-            self.transition_idx, self.obs_idx, self.orientation_idx,
-            vision_obs, ori_obs,
-            action_idx=0,
+            self.transition_tensor, self.observation_tensor, self.orientation_tensor,
+            vision_obs, ori_obs, action,
             n_iterations=2,
         )
 
@@ -1402,9 +1393,8 @@ class TestCustomFOVSizeInference:
         agent = IndexedTensorAgent.create(
             grid_size=self.n,
             transition_tensor=self.transition_tensor,
-            transition_idx=self.transition_idx,
-            observation_idx=self.obs_idx,
-            orientation_idx=self.orientation_idx,
+            observation_tensors=self.observation_tensor,
+            orientation_tensor=self.orientation_tensor,
             goal=goal,
             planning_horizon=3,
             n_planning_iterations=1,
