@@ -519,7 +519,7 @@ class RegionExtendedAgent:
 
     last_action: int
 
-    anneal_temperature: bool
+    damping: float
 
     @classmethod
     def create(
@@ -532,7 +532,7 @@ class RegionExtendedAgent:
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
-        anneal_temperature: bool = False,
+        damping: float = 1.0,
     ) -> "RegionExtendedAgent":
         """Create a new region-extended agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -565,7 +565,7 @@ class RegionExtendedAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
-            anneal_temperature=anneal_temperature,
+            damping=damping,
         )
 
     def reset(self) -> "RegionExtendedAgent":
@@ -600,7 +600,7 @@ class RegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
-            anneal_temperature=self.anneal_temperature,
+            damping=self.damping,
         )
 
     def step(
@@ -635,7 +635,7 @@ class RegionExtendedAgent:
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
-            anneal=self.anneal_temperature,
+            damping=self.damping,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -653,7 +653,7 @@ class RegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
-            anneal_temperature=self.anneal_temperature,
+            damping=self.damping,
         )
 
         return action, new_agent
@@ -682,7 +682,7 @@ class ReducedRegionExtendedAgent:
 
     last_action: int
 
-    anneal_temperature: bool
+    damping: float
 
     @classmethod
     def create(
@@ -695,7 +695,7 @@ class ReducedRegionExtendedAgent:
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
-        anneal_temperature: bool = False,
+        damping: float = 1.0,
     ) -> "ReducedRegionExtendedAgent":
         """Create a new reduced region-extended agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -728,7 +728,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
-            anneal_temperature=anneal_temperature,
+            damping=damping,
         )
 
     def reset(self) -> "ReducedRegionExtendedAgent":
@@ -763,7 +763,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
-            anneal_temperature=self.anneal_temperature,
+            damping=self.damping,
         )
 
     def step(
@@ -798,7 +798,7 @@ class ReducedRegionExtendedAgent:
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
-            anneal=self.anneal_temperature,
+            damping=self.damping,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -816,7 +816,7 @@ class ReducedRegionExtendedAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
-            anneal_temperature=self.anneal_temperature,
+            damping=self.damping,
         )
 
         return action, new_agent

@@ -187,7 +187,7 @@ def print_observation_summary(vision_obs, orientation_obs, fov_size):
 # ---------------------------------------------------------------------------
 
 
-def call_planning(method, q_current, q_static, agent, horizon, anneal=False):
+def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
     """Dispatch to the correct planning function based on method string."""
     if method == "bp":
         return planning(
@@ -216,7 +216,7 @@ def call_planning(method, q_current, q_static, agent, horizon, anneal=False):
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
-            anneal=anneal,
+            damping=damping,
         )
         return result[0]
     elif method == "reduced-aif":
@@ -228,7 +228,7 @@ def call_planning(method, q_current, q_static, agent, horizon, anneal=False):
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
-            anneal=anneal,
+            damping=damping,
         )
         return result[0]
     elif method == "nuijten":
@@ -386,7 +386,7 @@ def run_diagnostic_episode(agent, env, args, dims, grid_size):
 
         t0 = time.time()
         action_dist = call_planning(args.planning_method, q_state, q_static, agent, horizon,
-                                     anneal=args.anneal_temperature)
+                                     damping=args.damping)
         action_dist.block_until_ready()
         planning_ms = (time.time() - t0) * 1000
         print(f"    Planning time: {planning_ms:.1f}ms")
@@ -498,8 +498,8 @@ def main():
     parser.add_argument("--fov-size", type=int, default=7, help="Field-of-view size (odd, >= 3)")
     parser.add_argument("--no-orientation", action="store_true",
                         help="Replace orientation observation with uniform")
-    parser.add_argument("--anneal-temperature", action="store_true",
-                        help="Anneal channel influence from uniform to full over planning iterations")
+    parser.add_argument("--damping", type=float, default=1.0,
+                        help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -522,8 +522,8 @@ def main():
     print(f"FOV size: {args.fov_size}x{args.fov_size}")
     if args.no_orientation:
         print("Orientation observation: DISABLED (uniform)")
-    if args.anneal_temperature:
-        print("Channel annealing: ENABLED")
+    if args.damping < 1.0:
+        print(f"Channel damping: {args.damping}")
     print(f"Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"Inference iterations: {args.inference_iterations}")
     print(f"Planning iterations: {args.planning_iterations}")

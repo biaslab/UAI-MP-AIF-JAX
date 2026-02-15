@@ -31,26 +31,24 @@ from environments.minigrid import N_CELL_TYPES
 
 
 # =============================================================================
-# Channel annealing
+# Channel damping
 # =============================================================================
 
 
-def anneal_log_channel(log_channel, alpha, cond_axis):
-    """Linearly interpolate between uniform-over-valid and channel in prob space.
+def damp_log_channel(log_old, log_new, damping, cond_axis):
+    """Geometric damping: old^(1-d) * new^d in prob-space, renormalized.
 
-    Computes: annealed = (1-alpha) * uniform_valid + alpha * channel
-    in log-space via logaddexp. Structural zeros (LOG_ZERO) are preserved.
+    In log-space: (1-d)*log_old + d*log_new, then normalize over cond_axis.
+
+    damping=1.0 -> new channels (no damping)
+    damping=0.5 -> geometric mean
     """
-    valid = log_channel > LOG_ZERO / 2
-    n_valid = valid.sum(axis=cond_axis, keepdims=True)
-    log_uniform = jnp.where(valid, -jnp.log(jnp.maximum(n_valid, 1)), LOG_ZERO)
-
-    log_alpha = jnp.where(alpha > 0, jnp.log(alpha), LOG_ZERO)
-    log_1_minus_alpha = jnp.where(alpha < 1, jnp.log(1 - alpha), LOG_ZERO)
-
-    return jnp.where(valid,
-        jnp.logaddexp(log_1_minus_alpha + log_uniform, log_alpha + log_channel),
+    valid = log_new > LOG_ZERO / 2
+    damped = jnp.where(valid,
+        (1.0 - damping) * log_old + damping * log_new,
         LOG_ZERO)
+    normalizer = logsumexp(damped, axis=cond_axis, keepdims=True)
+    return jnp.where(valid, damped - normalizer, LOG_ZERO)
 
 
 # =============================================================================
@@ -317,7 +315,7 @@ def compute_obs_channels(log_region_beliefs):
 # =============================================================================
 
 
-@partial(jax.jit, static_argnums=(5, 6, 7))
+@partial(jax.jit, static_argnums=(5, 6))
 def region_extended_loopy_bp_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta
@@ -326,7 +324,7 @@ def region_extended_loopy_bp_planning(
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
-    anneal=False,         # bool (static) - anneal channel influence over iterations
+    damping=1.0,          # float - channel update damping (1.0 = no damping)
 ) -> jnp.ndarray:
     """
     Plan actions via region-extended loopy BP with observation factors.
@@ -374,15 +372,8 @@ def region_extended_loopy_bp_planning(
         )
 
         # Step 2: Inline kernels (factor / channel in log-space)
-        if anneal and n_iterations > 1:
-            alpha = i / (n_iterations - 1)
-            scaled_dyn = anneal_log_channel(log_dyn_channels, alpha, cond_axis=2)
-            scaled_obs = anneal_log_channel(log_obs_channels, alpha, cond_axis=2)
-        else:
-            scaled_dyn = log_dyn_channels
-            scaled_obs = log_obs_channels
-        log_dyn_kernels = safe_log_div(log_T_kernel[None], scaled_dyn[:, :, :, None, :])
-        log_obs_kernels = safe_log_div(log_B_flat[None], scaled_obs)
+        log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+        log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
 
         # Step 3: Reduced tensors
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
@@ -422,9 +413,14 @@ def region_extended_loopy_bp_planning(
             log_cavity_obs
         )
 
-        # Step 10: Channels from region beliefs
-        new_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
-        new_log_obs_channels = compute_obs_channels(log_obs_regions)
+        # Step 10: Channels from region beliefs (with damping)
+        raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+        raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+
+        new_log_dyn_channels = damp_log_channel(
+            log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+        new_log_obs_channels = damp_log_channel(
+            log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
 
         return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
                 new_log_dyn_channels, new_log_obs_channels)

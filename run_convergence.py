@@ -78,7 +78,7 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
 
 
 def call_convergence_planning(method, q_current, q_static, agent, horizon,
-                               n_iterations, anneal=False):
+                               n_iterations, damping=1.0):
     """Dispatch to the correct convergence planning function."""
     if method == "bp":
         action_dist, vfe_trace = planning_convergence(
@@ -109,7 +109,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
-            anneal=anneal,
+            damping=damping,
         )
         return action_dist, vfe_trace
     elif method == "reduced-aif":
@@ -121,7 +121,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
-            anneal=anneal,
+            damping=damping,
         )
         return action_dist, vfe_trace
     elif method == "nuijten":
@@ -166,8 +166,8 @@ def main():
                                  "nuijten", "reduced-nuijten"])
     parser.add_argument("--fov-size", type=int, default=7)
     parser.add_argument("--no-orientation", action="store_true")
-    parser.add_argument("--anneal-temperature", action="store_true",
-                        help="Anneal channel influence over iterations")
+    parser.add_argument("--damping", type=float, default=1.0,
+                        help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
     parser.add_argument("--output", type=str, default=None, help="JSON output file")
     parser.add_argument("--plot", type=str, default=None,
                         help="Save VFE convergence plot (e.g. convergence.png)")
@@ -190,8 +190,8 @@ def main():
     print(f"Method: {args.planning_method}")
     print(f"Grid: {grid_size}x{grid_size}  Horizon: {args.planning_horizon}  "
           f"Iterations: {args.planning_iterations}")
-    if args.anneal_temperature:
-        print("Channel annealing: ENABLED")
+    if args.damping < 1.0:
+        print(f"Channel damping: {args.damping}")
     print()
 
     # Generate tensors
@@ -257,7 +257,7 @@ def main():
     t0 = time.time()
     action_dist, vfe_trace = call_convergence_planning(
         args.planning_method, q_state, q_static, agent, horizon,
-        n_iterations, anneal=args.anneal_temperature,
+        n_iterations, damping=args.damping,
     )
     action_dist.block_until_ready()
     elapsed = time.time() - t0
@@ -291,7 +291,7 @@ def main():
                 "planning_horizon": horizon,
                 "planning_iterations": n_iterations,
                 "fov_size": args.fov_size,
-                "anneal_temperature": args.anneal_temperature,
+                "damping": args.damping,
                 "observe_first": args.observe_first,
                 "seed": args.seed,
             },
@@ -313,9 +313,9 @@ def main():
             ax.plot(range(n_iterations), vfe_values, "o-", markersize=4)
             ax.set_xlabel("Iteration")
             ax.set_ylabel("VFE")
-            anneal_str = " (annealed)" if args.anneal_temperature else ""
+            damp_str = f" (damping={args.damping})" if args.damping < 1.0 else ""
             ax.set_title(
-                f"VFE Convergence: {args.planning_method}{anneal_str}\n"
+                f"VFE Convergence: {args.planning_method}{damp_str}\n"
                 f"grid={grid_size}, horizon={horizon}, iters={n_iterations}"
             )
             ax.grid(True, alpha=0.3)

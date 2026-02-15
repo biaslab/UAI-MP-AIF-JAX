@@ -78,8 +78,8 @@ def main():
                         help="Field-of-view size (must be odd and >= 3, default: 7)")
     parser.add_argument("--no-orientation", action="store_true",
                         help="Replace orientation observation with uniform (agent must infer orientation)")
-    parser.add_argument("--anneal-temperature", action="store_true",
-                        help="Anneal channel influence from uniform to full over planning iterations")
+    parser.add_argument("--damping", type=float, default=1.0,
+                        help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -168,7 +168,7 @@ def main():
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
-            anneal_temperature=args.anneal_temperature,
+            damping=args.damping,
         )
     elif args.planning_method == "reduced-aif":
         agent = ReducedRegionExtendedAgent.create(
@@ -180,7 +180,7 @@ def main():
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
-            anneal_temperature=args.anneal_temperature,
+            damping=args.damping,
         )
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
@@ -221,8 +221,8 @@ def main():
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Inference iterations: {args.inference_iterations}")
     print(f"  Planning iterations: {args.planning_iterations}")
-    if args.anneal_temperature:
-        print(f"  Channel annealing: ENABLED")
+    if args.damping < 1.0:
+        print(f"  Channel damping: {args.damping}")
     print()
 
     if record_episodes:
@@ -271,7 +271,7 @@ def main():
                 "inference_iterations": args.inference_iterations,
                 "planning_iterations": args.planning_iterations,
                 "no_orientation": args.no_orientation,
-                "anneal_temperature": args.anneal_temperature,
+                "damping": args.damping,
                 "seed_start": args.seed,
             },
             "results": {

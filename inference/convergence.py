@@ -38,7 +38,7 @@ from .region_extended_loopy_bp import (
     compute_obs_region_beliefs,
     compute_dyn_channels,
     compute_obs_channels,
-    anneal_log_channel,
+    damp_log_channel,
 )
 from .nuijten_mp import (
     compute_obs_region_beliefs_original,
@@ -578,7 +578,7 @@ def loopy_bp_convergence(
     return q_u[0], vfe_trace
 
 
-@partial(jax.jit, static_argnums=(5, 6, 7))
+@partial(jax.jit, static_argnums=(5, 6))
 def region_extended_convergence(
     q_current_state,
     q_static_state,
@@ -587,7 +587,7 @@ def region_extended_convergence(
     goal,
     horizon,
     n_iterations,
-    anneal=False,
+    damping=1.0,
 ):
     """Region-extended loopy BP planning with per-iteration VFE trace.
 
@@ -628,15 +628,8 @@ def region_extended_convergence(
             log_prior_theta, log_dyn_to_theta, log_obs_to_theta
         )
 
-        if anneal and n_iterations > 1:
-            alpha = i / (n_iterations - 1)
-            scaled_dyn = anneal_log_channel(log_dyn_channels, alpha, cond_axis=2)
-            scaled_obs = anneal_log_channel(log_obs_channels, alpha, cond_axis=2)
-        else:
-            scaled_dyn = log_dyn_channels
-            scaled_obs = log_obs_channels
-        log_dyn_kernels = safe_log_div(log_T_kernel[None], scaled_dyn[:, :, :, None, :])
-        log_obs_kernels = safe_log_div(log_B_flat[None], scaled_obs)
+        log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+        log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
 
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
         log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
@@ -666,8 +659,13 @@ def region_extended_convergence(
             log_cavity_obs
         )
 
-        new_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
-        new_log_obs_channels = compute_obs_channels(log_obs_regions)
+        raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+        raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+
+        new_log_dyn_channels = damp_log_channel(
+            log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+        new_log_obs_channels = damp_log_channel(
+            log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
 
         vfe = compute_region_extended_vfe(
             log_dyn_regions, log_obs_regions,
@@ -693,7 +691,7 @@ def region_extended_convergence(
     return action_dist, log_dyn_channels, log_obs_channels, vfe_trace
 
 
-@partial(jax.jit, static_argnums=(5, 6, 7))
+@partial(jax.jit, static_argnums=(5, 6))
 def reduced_region_extended_convergence(
     q_current_state,
     q_static_state,
@@ -702,7 +700,7 @@ def reduced_region_extended_convergence(
     goal,
     horizon,
     n_iterations,
-    anneal=False,
+    damping=1.0,
 ):
     """Reduced region-extended planning (fixed theta) with per-iteration VFE trace.
 
@@ -739,15 +737,8 @@ def reduced_region_extended_convergence(
     def body_fn(i, carry):
         q_u, log_dyn_channels, log_obs_channels, vfe_trace = carry
 
-        if anneal and n_iterations > 1:
-            alpha = i / (n_iterations - 1)
-            scaled_dyn = anneal_log_channel(log_dyn_channels, alpha, cond_axis=2)
-            scaled_obs = anneal_log_channel(log_obs_channels, alpha, cond_axis=2)
-        else:
-            scaled_dyn = log_dyn_channels
-            scaled_obs = log_obs_channels
-        log_dyn_kernels = safe_log_div(log_T_kernel[None], scaled_dyn[:, :, :, None, :])
-        log_obs_kernels = safe_log_div(log_B_flat[None], scaled_obs)
+        log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+        log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
 
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
         log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
@@ -769,8 +760,13 @@ def reduced_region_extended_convergence(
             log_cavity_obs
         )
 
-        new_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
-        new_log_obs_channels = compute_obs_channels(log_obs_regions)
+        raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+        raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+
+        new_log_dyn_channels = damp_log_channel(
+            log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+        new_log_obs_channels = damp_log_channel(
+            log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
 
         vfe = compute_region_extended_vfe(
             log_dyn_regions, log_obs_regions,
