@@ -19,7 +19,7 @@ from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from inference.nuijten_mp import nuijten_mp_planning
 
 
-def setup_tensors(grid_size=4):
+def setup_tensors(grid_size=4, fov_size=3):
     """Generate shared tensors for all planners."""
     n_loc = grid_size * grid_size
     n_key = n_loc - 2 * grid_size
@@ -32,7 +32,7 @@ def setup_tensors(grid_size=4):
     print("Generating tensors...")
 
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
-    observation_tensor = jnp.array(generate_observation_tensor(grid_size), dtype=jnp.float32)
+    observation_tensor = jnp.array(generate_observation_tensor(grid_size, 3), dtype=jnp.float32)
 
     q_state = jnp.ones(n_states) / n_states
     q_static = jnp.ones(n_static) / n_static
