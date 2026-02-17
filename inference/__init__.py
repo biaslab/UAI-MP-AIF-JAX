@@ -18,3 +18,4 @@ from .loopy_bp import loopy_bp_planning
 from .region_extended_loopy_bp import region_extended_loopy_bp_planning
 from .reduced_region_extended import reduced_region_extended_planning
 from .nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
+from .vbp import vbp_planning
