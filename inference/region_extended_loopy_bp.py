@@ -36,17 +36,25 @@ from environments.minigrid import N_CELL_TYPES
 
 
 def damp_log_channel(log_old, log_new, damping, cond_axis):
-    """Geometric damping: old^(1-d) * new^d in prob-space, renormalized.
+    """Arithmetic damping: (1-d)*old + d*new in probability space.
 
-    In log-space: (1-d)*log_old + d*log_new, then normalize over cond_axis.
+    In log-space: logsumexp([log(1-d) + log_old, log(d) + log_new]).
 
     damping=1.0 -> new channels (no damping)
-    damping=0.5 -> geometric mean
+    damping=0.5 -> arithmetic mean
     """
-    valid = log_new > LOG_ZERO / 2
-    damped = jnp.where(valid,
-        (1.0 - damping) * log_old + damping * log_new,
-        LOG_ZERO)
+    log_d = jnp.log(damping)
+    log_1md = jnp.log(jnp.maximum(1.0 - damping, 1e-30))
+
+    # Arithmetic mix via logsumexp over a 2-element stack
+    stacked = jnp.stack([log_1md + log_old, log_d + log_new])
+    damped = logsumexp(stacked, axis=0)
+
+    # Structural zeros: only zero if BOTH old and new are LOG_ZERO
+    valid = (log_old > LOG_ZERO / 2) | (log_new > LOG_ZERO / 2)
+    damped = jnp.where(valid, damped, LOG_ZERO)
+
+    # Renormalize conditional for numerical stability
     normalizer = logsumexp(damped, axis=cond_axis, keepdims=True)
     return jnp.where(valid, damped - normalizer, LOG_ZERO)
 

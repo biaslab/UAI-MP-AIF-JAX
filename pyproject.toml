@@ -3,7 +3,7 @@ name = "minigridmp-aif-jax"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "gymnasium>=1.2.3",
     "imageio>=2.37.2",
@@ -13,3 +13,6 @@ dependencies = [
     "minigrid>=3.0.0",
     "tqdm>=4.67.3",
 ]
+
+[dependency-groups]
+macos = ["jax-mps>=0.9.6"]
