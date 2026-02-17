@@ -76,7 +76,6 @@ uv run python run_experiment.py --grid-size 3 --episodes 100 \
 - `--receding-horizon` — Decrease horizon as episode time runs out
 - `--fov-size N` — Field-of-view size (odd, >= 3)
 - `--no-orientation` — Replace orientation observation with uniform (agent must infer orientation)
-- `--full-tensors` — Use full tensor representation (debugging only, grid_size <= 3)
 - `--record first,last` — Record episodes to video
 - `--output results.json` — Save results to JSON
 
