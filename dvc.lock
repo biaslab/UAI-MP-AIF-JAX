@@ -1,0 +1,56 @@
+schema: '2.0'
+stages:
+  experiment@bp:
+    cmd: uv run python run_experiment.py --planning-method bp --grid-size 3 
+      --episodes 100 --max-steps 20 --planning-horizon 15 --inference-iterations
+      10 --planning-iterations 1 --seed 0 --fov-size 7 --damping 1.0 --record 
+      "first,last" --video-dir data/videos/bp --output data/results/bp.json
+    deps:
+    - path: agents/
+      hash: md5
+      md5: 7e6c80862a74523c73b5a5fb712e92de.dir
+      size: 96591
+      nfiles: 8
+    - path: environments/
+      hash: md5
+      md5: acb02f80405294e9ce2c040c12b0e688.dir
+      size: 113515
+      nfiles: 12
+    - path: inference/
+      hash: md5
+      md5: 367af9775bb69dffbaad04131ebc9836.dir
+      size: 326752
+      nfiles: 33
+    - path: run_experiment.py
+      hash: md5
+      md5: 73f2b28ef113801ef2b20982f18f8ac3
+      size: 12470
+    - path: utils/
+      hash: md5
+      md5: 9423271c0fa3046ceebec30b525580b8.dir
+      size: 18613
+      nfiles: 8
+    params:
+      params.yaml:
+        experiment:
+          grid_size: 3
+          episodes: 100
+          max_steps: 20
+          planning_horizon: 15
+          inference_iterations: 10
+          planning_iterations: 10
+          seed: 0
+          fov_size: 7
+          damping: 1.0
+        methods.bp:
+          planning_iterations: 1
+    outs:
+    - path: data/results/bp.json
+      hash: md5
+      md5: 74ac9c0bd987b71ddac7871c262ab444
+      size: 523
+    - path: data/videos/bp
+      hash: md5
+      md5: 55710739840d373623797ad2a1cadc01.dir
+      size: 9820
+      nfiles: 2

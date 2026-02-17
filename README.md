@@ -41,7 +41,23 @@ uv run python run_tests.py
 
 ## Experiments
 
-`run_experiment.py` runs multi-episode experiments and reports success rate, average steps, and average reward.
+Experiments are managed with [DVC](https://dvc.org). All shared parameters live in `params.yaml` and the pipeline is defined in `dvc.yaml`.
+
+```bash
+# Install dev dependencies (includes DVC)
+uv sync --group dev
+
+# Run all 6 planning methods
+uv run dvc repro
+
+# Compare results
+uv run dvc metrics show
+uv run dvc metrics diff
+```
+
+To tweak parameters, edit `params.yaml` and re-run `uv run dvc repro` — DVC only re-runs stages whose parameters or code changed. Results (JSON) are git-tracked in `data/results/`; videos are DVC-cached in `data/videos/`.
+
+### Running a single method
 
 ```bash
 uv run python run_experiment.py --grid-size 3 --episodes 100 \
@@ -53,7 +69,7 @@ uv run python run_experiment.py --grid-size 3 --episodes 100 \
     --seed 0
 ```
 
-Key options:
+### Key options
 
 - `--grid-size N` — Internal grid size (MiniGrid size = N+2)
 - `--planning-horizon N` — Lookahead depth

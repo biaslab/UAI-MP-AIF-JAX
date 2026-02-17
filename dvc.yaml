@@ -1,0 +1,33 @@
+stages:
+  experiment:
+    foreach: ${methods}
+    do:
+      cmd: >-
+        uv run python run_experiment.py
+        --planning-method ${key}
+        --grid-size ${experiment.grid_size}
+        --episodes ${experiment.episodes}
+        --max-steps ${experiment.max_steps}
+        --planning-horizon ${experiment.planning_horizon}
+        --inference-iterations ${experiment.inference_iterations}
+        --planning-iterations ${item.planning_iterations}
+        --seed ${experiment.seed}
+        --fov-size ${experiment.fov_size}
+        --damping ${experiment.damping}
+        --record "first,last"
+        --video-dir data/videos/${key}
+        --output data/results/${key}.json
+      deps:
+        - run_experiment.py
+        - agents/
+        - inference/
+        - environments/
+        - utils/
+      params:
+        - experiment
+        - methods.${key}
+      outs:
+        - data/videos/${key}
+      metrics:
+        - data/results/${key}.json:
+            cache: false
