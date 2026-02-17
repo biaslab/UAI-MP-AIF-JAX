@@ -72,6 +72,12 @@ def reduced_region_extended_planning(
     log_cavity_dyn = jnp.tile(log_cavity_fixed, (horizon, 1))
     log_cavity_obs = jnp.tile(log_cavity_fixed, (horizon + 1, 1))
 
+    # Precompute factor_reduced: logsumexp_θ(log_T + log_cavity) → (x_old, x_new, u)
+    # Then transpose to (x_new, x_old, u) to match compute_log_reduced output layout
+    log_factor_reduced = logsumexp(
+        log_T_kernel + log_cavity_fixed[None, None, :, None], axis=2
+    ).transpose(1, 0, 2)  # (x_new, x_old, u)
+
     # Initialize carry
     q_u_init = jnp.zeros((horizon, n_actions))
     log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
@@ -84,8 +90,11 @@ def reduced_region_extended_planning(
         log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
         log_obs_kernels = safe_log_div(log_B_flat[None], log_obs_channels)
 
-        # Reduced tensors
-        log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+        # Reduced tensors: factor_reduced / channel (avoids per-iteration logsumexp over θ)
+        log_reduced_per_t = safe_log_div(
+            log_factor_reduced[None],
+            log_dyn_channels.transpose(0, 2, 1, 3)  # (T, x_new, x_old, u)
+        )
 
         # obs->x messages
         log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)

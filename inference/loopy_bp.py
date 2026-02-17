@@ -129,14 +129,14 @@ def compute_dyn_to_theta_msgs(log_T, log_fwd_msgs, log_bwd_msgs, log_action_prio
     Returns:
         log_dyn_to_theta: (T, n_static) log-space messages
     """
-    def compute_msg_t(t):
-        log_terms = (log_T
-                     + log_fwd_msgs[t][None, :, None, None]
-                     + log_bwd_msgs[t + 1][:, None, None, None]
-                     + log_action_prior[None, None, None, :])
-        return logsumexp(log_terms, axis=(0, 1, 3))
+    log_fwd_t = log_fwd_msgs[:-1][:, None, :, None, None]
+    log_bwd_t1 = log_bwd_msgs[1:][:, :, None, None, None]
 
-    return jax.vmap(compute_msg_t)(jnp.arange(horizon))
+    terms = (log_T[None]
+             + log_fwd_t
+             + log_bwd_t1
+             + log_action_prior[None, None, None, None, :])
+    return logsumexp(terms, axis=(1, 2, 4))
 
 
 def compute_theta_cavities(log_prior_theta, log_dyn_to_theta):
