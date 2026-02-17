@@ -5,6 +5,8 @@ connected to each transition factor via equality constraints. Iterative message
 passing refines the belief on θ while planning, using cavity messages to avoid
 double-counting.
 
+All internal computation is in log-space.
+
 Factor graph:
 
     p(θ)─θ₀──(=)──θ₁──(=)──θ₂── ··· ──(=)──θ_{T-1}
@@ -19,186 +21,155 @@ Factor graph:
 import jax
 import jax.numpy as jnp
 from jax import lax
+from jax.scipy.special import logsumexp
 from functools import partial
 
-from .messages import EPSILON
-from .planning import marginalize_static_indexed
+from .planning import LOG_ZERO, safe_log
 
 
-def compute_reduced_per_t(transition_idx, cavity_theta, n_states):
+def compute_reduced_per_t(log_T, log_cavity_theta):
     """
     Compute per-timestep reduced transition tensors using θ cavity messages.
 
     Args:
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
-        cavity_theta: (T, n_static) per-timestep cavity beliefs on θ
-        n_states: number of dynamic states
+        log_T: (x_new, x_old, θ, u) log-space transition tensor
+        log_cavity_theta: (T, θ) log-space per-timestep cavity beliefs
 
     Returns:
-        (T, n_states, n_states, n_actions) per-timestep reduced tensors
+        (T, x_new, x_old, u) log-space per-timestep reduced tensors
     """
-    def reduce_single(cavity_t):
-        return marginalize_static_indexed(transition_idx, cavity_t, n_states)
+    return logsumexp(
+        log_T[None] + log_cavity_theta[:, None, None, :, None], axis=3
+    )
 
-    return jax.vmap(reduce_single)(cavity_theta)
 
-
-def forward_pass(reduced_per_t, q_x0, action_prior, horizon):
+def forward_pass(log_reduced_per_t, log_q_x0, log_action_prior, horizon):
     """
     Forward pass: propagate state beliefs through time using per-timestep tensors.
 
     Args:
-        reduced_per_t: (T, n_states, n_states, n_actions)
-        q_x0: (n_states,) initial state belief
-        action_prior: (n_actions,) prior over actions
+        log_reduced_per_t: (T, x_new, x_old, u)
+        log_q_x0: (n_states,) log initial state belief
+        log_action_prior: (n_actions,)
         horizon: T
 
     Returns:
-        fwd_msgs: (T+1, n_states) forward messages
+        log_fwd_msgs: (T+1, n_states) log forward messages
     """
-    n_states = q_x0.shape[0]
-    fwd_msgs = jnp.zeros((horizon + 1, n_states))
-    fwd_msgs = fwd_msgs.at[0].set(q_x0)
+    n_states = log_q_x0.shape[0]
+    log_fwd = jnp.zeros((horizon + 1, n_states))
+    log_fwd = log_fwd.at[0].set(log_q_x0)
 
-    def body_fn(t, fwd_msgs):
-        q_next = jnp.einsum("ijk,j,k->i", reduced_per_t[t], fwd_msgs[t], action_prior)
-        q_next = q_next / (q_next.sum() + EPSILON)
-        return fwd_msgs.at[t + 1].set(q_next)
+    def body_fn(t, log_fwd):
+        log_terms = (log_reduced_per_t[t]
+                     + log_fwd[t][None, :, None]
+                     + log_action_prior[None, None, :])
+        log_q_next = logsumexp(log_terms, axis=(1, 2))
+        log_q_next = log_q_next - logsumexp(log_q_next)
+        return log_fwd.at[t + 1].set(log_q_next)
 
-    return lax.fori_loop(0, horizon, body_fn, fwd_msgs)
+    return lax.fori_loop(0, horizon, body_fn, log_fwd)
 
 
-def backward_pass(reduced_per_t, fwd_msgs, goal, action_prior, horizon):
+def backward_pass(log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior, horizon):
     """
     Backward pass: propagate goal backward, compute action marginals.
 
     Args:
-        reduced_per_t: (T, n_states, n_states, n_actions)
-        fwd_msgs: (T+1, n_states) forward messages
-        goal: (n_states,) goal distribution
-        action_prior: (n_actions,) prior over actions
+        log_reduced_per_t: (T, x_new, x_old, u)
+        log_fwd_msgs: (T+1, n_states)
+        log_goal: (n_states,)
+        log_action_prior: (n_actions,)
         horizon: T
 
     Returns:
-        bwd_msgs: (T+1, n_states) backward messages
-        q_u: (T, n_actions) action marginals
+        log_bwd_msgs: (T+1, n_states)
+        q_u: (T, n_actions) action marginals (probability space)
     """
-    n_states = goal.shape[0]
-    n_actions = action_prior.shape[0]
-    bwd_msgs = jnp.zeros((horizon + 1, n_states))
-    bwd_msgs = bwd_msgs.at[horizon].set(goal)
+    n_states = log_goal.shape[0]
+    n_actions = log_action_prior.shape[0]
+    log_bwd = jnp.zeros((horizon + 1, n_states))
+    log_bwd = log_bwd.at[horizon].set(log_goal)
     q_u = jnp.zeros((horizon, n_actions))
 
     def body_fn(carry, t):
-        bwd_msgs, q_u = carry
-        bwd_t1 = bwd_msgs[t + 1]
+        log_bwd, q_u = carry
 
-        # Action marginal: μ_{dyn_t→u_t}
-        msg_to_u = jnp.einsum("ijk,i,j->k", reduced_per_t[t], bwd_t1, fwd_msgs[t])
-        q_u_t = msg_to_u * action_prior
-        q_u_t = q_u_t / (q_u_t.sum() + EPSILON)
+        # Action marginal
+        log_terms = (log_reduced_per_t[t]
+                     + log_bwd[t + 1][:, None, None]
+                     + log_fwd_msgs[t][None, :, None])
+        log_msg_to_u = logsumexp(log_terms, axis=(0, 1))
+        q_u_t = jax.nn.softmax(log_msg_to_u + log_action_prior)
         q_u = q_u.at[t].set(q_u_t)
 
         # Backward message to x_t
-        bwd_t = jnp.einsum("ijk,i,k->j", reduced_per_t[t], bwd_t1, action_prior)
-        bwd_t = bwd_t / (bwd_t.sum() + EPSILON)
-        bwd_msgs = bwd_msgs.at[t].set(bwd_t)
+        log_terms_bwd = (log_reduced_per_t[t]
+                         + log_bwd[t + 1][:, None, None]
+                         + log_action_prior[None, None, :])
+        log_bwd_t = logsumexp(log_terms_bwd, axis=(0, 2))
+        log_bwd_t = log_bwd_t - logsumexp(log_bwd_t)
+        log_bwd = log_bwd.at[t].set(log_bwd_t)
 
-        return (bwd_msgs, q_u), None
+        return (log_bwd, q_u), None
 
-    (bwd_msgs, q_u), _ = lax.scan(
-        body_fn, (bwd_msgs, q_u), jnp.arange(horizon - 1, -1, -1)
+    (log_bwd, q_u), _ = lax.scan(
+        body_fn, (log_bwd, q_u), jnp.arange(horizon - 1, -1, -1)
     )
 
-    return bwd_msgs, q_u
+    return log_bwd, q_u
 
 
-def compute_dyn_to_theta_msgs(transition_idx, fwd_msgs, bwd_msgs, action_prior, horizon):
+def compute_dyn_to_theta_msgs(log_T, log_fwd_msgs, log_bwd_msgs, log_action_prior, horizon):
     """
     Compute messages from each dynamics factor to its θ variable.
 
-    For timestep t:
-        log_msg[θ] = log Σ_{x_t, u_t, x_{t+1}} I[T_idx[x_t, θ, u_t]==x_{t+1}]
-                      · fwd_msg[t](x_t) · p(u_t) · bwd_msg[t+1](x_{t+1})
-
-    Args:
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
-        fwd_msgs: (T+1, n_states) forward messages
-        bwd_msgs: (T+1, n_states) backward messages
-        action_prior: (n_actions,) prior over actions
-        horizon: T
+    log_T: (x_new, x_old, θ, u)
 
     Returns:
         log_dyn_to_theta: (T, n_static) log-space messages
     """
     def compute_msg_t(t):
-        fwd_t = fwd_msgs[t]
-        bwd_t1 = bwd_msgs[t + 1]
-
-        # Gather backward message at transition targets
-        bwd_gathered = bwd_t1[transition_idx]  # (n_states, n_static, n_actions)
-
-        # Weight: fwd[old] * action_prior[action] * bwd[new]
-        weights = fwd_t[:, None, None] * action_prior[None, None, :] * bwd_gathered
-
-        # Sum over old states and actions → message to θ
-        msg = weights.sum(axis=(0, 2))  # (n_static,)
-
-        return jnp.log(msg + EPSILON)
+        log_terms = (log_T
+                     + log_fwd_msgs[t][None, :, None, None]
+                     + log_bwd_msgs[t + 1][:, None, None, None]
+                     + log_action_prior[None, None, None, :])
+        return logsumexp(log_terms, axis=(0, 1, 3))
 
     return jax.vmap(compute_msg_t)(jnp.arange(horizon))
 
 
 def compute_theta_cavities(log_prior_theta, log_dyn_to_theta):
     """
-    Compute cavity messages for θ via forward-backward on the equality chain.
-
-    The θ chain has T copies connected by equality factors. Each node t receives
-    a message from dyn_t. The cavity for dyn_t excludes dyn_t's own message.
-
-    cavity[t] = prior + Σ_{s≠t} log_dyn_to_theta[s]
-
-    Computed efficiently using prefix sums.
-
-    Args:
-        log_prior_theta: (n_static,) log prior on θ
-        log_dyn_to_theta: (T, n_static) per-timestep messages from dynamics
+    Compute log-space cavity messages for θ via forward-backward on the equality chain.
 
     Returns:
-        cavity_theta: (T, n_static) normalized cavity beliefs
+        log_cavity_theta: (T, n_static) log-space normalized cavity beliefs
     """
     n_static = log_dyn_to_theta.shape[1]
 
-    # Forward exclusive prefix sum:
-    #   fwd_excl[0] = log_prior
-    #   fwd_excl[t] = log_prior + Σ_{s=0}^{t-1} log_dyn_to_theta[s]
     log_dyn_cumsum = jnp.cumsum(log_dyn_to_theta, axis=0)
     fwd_exclusive = jnp.concatenate([
         jnp.zeros((1, n_static)),
         log_dyn_cumsum[:-1],
     ], axis=0) + log_prior_theta[None, :]
 
-    # Backward exclusive suffix sum:
-    #   bwd_excl[T-1] = 0
-    #   bwd_excl[t] = Σ_{s=t+1}^{T-1} log_dyn_to_theta[s]
     log_dyn_rev_cumsum = jnp.cumsum(log_dyn_to_theta[::-1], axis=0)[::-1]
     bwd_exclusive = jnp.concatenate([
         log_dyn_rev_cumsum[1:],
         jnp.zeros((1, n_static)),
     ], axis=0)
 
-    # Cavity = all contributions except dyn_t's own message
     log_cavity = fwd_exclusive + bwd_exclusive
-    cavity_theta = jax.nn.softmax(log_cavity, axis=1)
-
-    return cavity_theta
+    log_cavity = log_cavity - logsumexp(log_cavity, axis=1, keepdims=True)
+    return log_cavity
 
 
 @partial(jax.jit, static_argnums=(4, 5))
-def loopy_bp_planning_indexed(
+def loopy_bp_planning(
     q_current_state,    # (n_states,)
     q_static_state,     # (n_static,) prior on θ
-    transition_idx,     # (n_states, n_static, n_actions)
+    transition_tensor,  # (n_states, n_states, n_static, n_actions) probability tensor
     goal,               # (n_states,)
     horizon,            # int (static)
     n_iterations,       # int (static)
@@ -206,17 +177,10 @@ def loopy_bp_planning_indexed(
     """
     Plan actions via loopy BP with θ as a variable in the factor graph.
 
-    Each outer iteration:
-      1. Compute per-timestep reduced tensors from θ cavities
-      2. Forward pass on x-chain
-      3. Backward pass on x-chain (+ action marginals)
-      4. Compute dyn_t → θ_t messages
-      5. Forward-backward on θ equality chain → new cavities
-
     Args:
         q_current_state: (n_states,) current belief over dynamic state
         q_static_state: (n_static,) prior belief over static configuration θ
-        transition_idx: (n_states, n_static, n_actions) -> new_state index
+        transition_tensor: (n_states, n_states, n_static, n_actions) probability tensor
         goal: (n_states,) goal distribution over final state
         horizon: planning horizon T (static for JIT)
         n_iterations: number of loopy BP iterations (static for JIT)
@@ -225,43 +189,39 @@ def loopy_bp_planning_indexed(
         action_dist: (n_actions,) distribution over first action
     """
     n_states = q_current_state.shape[0]
-    n_actions = transition_idx.shape[2]
+    n_static = q_static_state.shape[0]
+    n_actions = transition_tensor.shape[3]
+
+    # Log once at the top
+    log_T = safe_log(transition_tensor)
+    log_prior_theta = safe_log(q_static_state)
+    log_q0 = safe_log(q_current_state)
+    log_goal = safe_log(goal)
+
     action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    log_action_prior = safe_log(action_prior)
 
-    log_prior_theta = jnp.log(q_static_state + EPSILON)
-
-    # Initialize: all timesteps use the prior as cavity
-    cavity_theta = jnp.tile(q_static_state, (horizon, 1))  # (T, n_static)
+    # Initialize: cavity = prior
+    log_cavity_theta = jnp.tile(log_prior_theta, (horizon, 1))
     q_u_init = jnp.zeros((horizon, n_actions))
 
     def body_fn(_, carry):
-        cavity_theta, _ = carry
+        log_cavity_theta, _ = carry
 
-        # Step 1: Per-timestep reduced tensors
-        reduced_per_t = compute_reduced_per_t(
-            transition_idx, cavity_theta, n_states
+        log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+        log_fwd = forward_pass(log_reduced_per_t, log_q0, log_action_prior, horizon)
+        log_bwd, q_u = backward_pass(
+            log_reduced_per_t, log_fwd, log_goal, log_action_prior, horizon
         )
-
-        # Step 2: Forward pass
-        fwd_msgs = forward_pass(reduced_per_t, q_current_state, action_prior, horizon)
-
-        # Step 3: Backward pass + action marginals
-        bwd_msgs, q_u = backward_pass(
-            reduced_per_t, fwd_msgs, goal, action_prior, horizon
-        )
-
-        # Step 4: dyn_t → θ_t messages
         log_dyn_to_theta = compute_dyn_to_theta_msgs(
-            transition_idx, fwd_msgs, bwd_msgs, action_prior, horizon
+            log_T, log_fwd, log_bwd, log_action_prior, horizon
         )
+        new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
 
-        # Step 5: θ cavities for next iteration
-        new_cavity_theta = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
+        return new_log_cavity, q_u
 
-        return new_cavity_theta, q_u
-
-    cavity_theta, q_u = lax.fori_loop(
-        0, n_iterations, body_fn, (cavity_theta, q_u_init)
+    log_cavity_theta, q_u = lax.fori_loop(
+        0, n_iterations, body_fn, (log_cavity_theta, q_u_init)
     )
 
     return q_u[0]

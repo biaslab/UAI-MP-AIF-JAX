@@ -104,7 +104,6 @@ def run_minigrid_tests():
     t.test_get_fov_shape_size3()
     t.test_get_fov_key_at_agent_size5()
     t.test_get_fov_door_visible_size5()
-    t.test_observation_indices_shape_size5()
     t.test_observation_tensor_shape_size5()
     print("  Custom FOV size: PASSED")
 
@@ -116,7 +115,9 @@ def run_inference_tests():
         TestPlanning,
         TestLoopyBPPlanning,
         TestRegionExtendedLoopyBP,
+        TestNumericalStability,
         TestReducedRegionExtended,
+        TestNuijtenMP,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
     )
@@ -174,6 +175,19 @@ def run_inference_tests():
     t.test_theta_cavities_extended_shape()
     print("  Region-Extended Loopy BP: PASSED")
 
+    print("Running numerical stability tests...")
+    t = TestNumericalStability()
+    t.test_safe_log_div_zero_over_zero()
+    t.test_dyn_channel_with_deterministic_transitions()
+    t.test_dyn_channel_naive_division_creates_bogus_transitions()
+    t.test_obs_channel_with_deterministic_observations()
+    t.test_naive_subtraction_produces_zero_for_impossible()
+    t.test_safe_log_on_float16_tensor()
+    t.test_safe_log_on_float32_tensor()
+    t.test_region_extended_multi_iteration_no_nan()
+    t.test_reduced_region_extended_multi_iteration_no_nan()
+    print("  Numerical stability: PASSED")
+
     print("Running reduced region-extended tests...")
     t = TestReducedRegionExtended()
     t.setup_method()
@@ -181,6 +195,26 @@ def run_inference_tests():
     t.test_respects_action_mask()
     t.test_single_iter_matches_region_extended()
     print("  Reduced Region-Extended: PASSED")
+
+    print("Running Nuijten MP tests...")
+    t = TestNuijtenMP()
+    t.setup_method()
+    t.test_obs_region_beliefs_shape_and_normalization()
+    t.test_obs_region_beliefs_matches_reference()
+    t.test_efe_action_prior_shape_and_valid()
+    t.test_efe_action_prior_matches_reference()
+    t.test_obs_efe_to_x_shape_and_normalized()
+    t.test_obs_efe_to_x_matches_reference()
+    t.test_obs_efe_to_theta_shape_and_finite()
+    t.test_obs_efe_to_theta_matches_reference()
+    t.test_nuijten_output_shape()
+    t.test_nuijten_respects_action_mask()
+    t.test_nuijten_multi_iteration_no_nan()
+    t.test_nuijten_region_beliefs_shapes()
+    t.test_reduced_nuijten_output_shape()
+    t.test_reduced_nuijten_respects_action_mask()
+    t.test_reduced_nuijten_multi_iteration_no_nan()
+    print("  Nuijten MP: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()
@@ -193,7 +227,7 @@ def run_inference_tests():
     print("Running custom FOV size inference tests...")
     t = TestCustomFOVSizeInference()
     t.setup_method()
-    t.test_obs_idx_shape()
+    t.test_obs_tensor_shape()
     t.test_state_inference_with_fov5()
     t.test_region_extended_with_fov5()
     t.test_reduced_region_extended_with_fov5()

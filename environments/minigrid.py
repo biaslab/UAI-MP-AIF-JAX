@@ -370,64 +370,6 @@ def generate_observation_tensor(n: int, fov_size: int = 7, dtype=np.float16) -> 
     return B
 
 
-def generate_observation_indices(n: int, fov_size: int = 7) -> np.ndarray:
-    """
-    Generate index-based observation tensor (memory-efficient).
-
-    Instead of storing B[fov_x, fov_y, cell_type, state, static] as one-hot,
-    store obs_idx[fov_x, fov_y, state, static] -> cell_type directly.
-
-    Returns:
-        obs_idx: (fov_size, fov_size, n_total_states, n_static_states) uint8 array
-        where obs_idx[i, j, state, static] = expected cell type at FOV position (i,j)
-    """
-    n_location_states = n * n
-    n_key_positions = n_location_states - 2 * n
-    n_door_positions = n_location_states - 2 * n
-    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-    n_static_states = n_key_positions * n_door_positions
-
-    # Index array: for each (fov_x, fov_y, state, static), store the cell type
-    obs_idx = np.zeros((fov_size, fov_size, n_total_states, n_static_states), dtype=np.uint8)
-
-    for agent_state in range(n_location_states):
-        agent_x, agent_y = state_to_coords(agent_state, n)
-
-        for orientation in range(N_ORIENTATIONS):
-            for key_pos in range(n_key_positions):
-                key_x, key_y = key_position(key_pos, n)
-
-                for door_pos in range(n_door_positions):
-                    door_x, door_y = door_position(door_pos, n)
-
-                    for door_key_state in range(N_DOOR_KEY_STATES):
-                        fov = get_fov(
-                            agent_x,
-                            agent_y,
-                            orientation,
-                            key_x,
-                            key_y,
-                            door_x,
-                            door_y,
-                            door_key_state,
-                            n,
-                            fov_size,
-                        )
-                        flat_state = flatten_state_index(
-                            agent_state,
-                            orientation,
-                            door_key_state,
-                            n_location_states,
-                            N_ORIENTATIONS,
-                            N_DOOR_KEY_STATES,
-                        )
-                        flat_static = flatten_position_index(
-                            key_pos, door_pos, n_key_positions, n_door_positions
-                        )
-                        obs_idx[:, :, flat_state, flat_static] = fov
-
-    return obs_idx
-
 
 def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
     """Generate full orientation observation tensor (for reference/testing)."""
@@ -444,30 +386,6 @@ def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndar
 
     return B
 
-
-def generate_orientation_indices(n: int) -> np.ndarray:
-    """
-    Generate index-based orientation tensor (memory-efficient).
-    
-    Instead of storing B[orientation, state] as one-hot,
-    store ori_idx[state] -> orientation directly.
-    
-    Returns:
-        ori_idx: (n_total_states,) uint8 array
-        where ori_idx[state] = orientation of that state
-    """
-    n_location_states = n * n
-    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-
-    ori_idx = np.zeros(n_total_states, dtype=np.uint8)
-
-    for state_idx in range(n_total_states):
-        _, orientation, _ = unflatten_state_index(
-            state_idx, n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES
-        )
-        ori_idx[state_idx] = orientation
-
-    return ori_idx
 
 
 def generate_transition_tensor(n: int, dtype=np.float16) -> np.ndarray:
@@ -548,96 +466,6 @@ def generate_transition_tensor(n: int, dtype=np.float16) -> np.ndarray:
 
     return T
 
-
-def generate_transition_indices(n: int) -> np.ndarray:
-    """
-    Generate index-based transition tensor (memory-efficient).
-    
-    Instead of storing T[new_state, old_state, static, action] as a one-hot tensor,
-    store next_state_idx[old_state, static, action] -> new_state directly.
-    
-    Returns:
-        next_state_idx: (n_total_states, n_static_states, N_ACTIONS) int32 array
-        where next_state_idx[old, static, action] = new_state
-    """
-    n_location_states = n * n
-    n_key_positions = n_location_states - 2 * n
-    n_door_positions = n_location_states - 2 * n
-    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-    n_static_states = n_key_positions * n_door_positions
-
-    # Index array: for each (old_state, static, action), store the new_state
-    next_state_idx = np.zeros(
-        (n_total_states, n_static_states, N_ACTIONS), dtype=np.int32
-    )
-
-    for old_agent_state in range(n_location_states):
-        agent_x, agent_y = state_to_coords(old_agent_state, n)
-
-        for orientation in range(N_ORIENTATIONS):
-            for door_key_state in range(N_DOOR_KEY_STATES):
-                old_idx = flatten_state_index(
-                    old_agent_state,
-                    orientation,
-                    door_key_state,
-                    n_location_states,
-                    N_ORIENTATIONS,
-                    N_DOOR_KEY_STATES,
-                )
-
-                for door_pos in range(n_door_positions):
-                    door_x, door_y = door_position(door_pos, n)
-
-                    for key_pos in range(n_key_positions):
-                        key_x, key_y = key_position(key_pos, n)
-
-                        static_idx = flatten_position_index(
-                            key_pos, door_pos, n_key_positions, n_door_positions
-                        )
-
-                        # Invalid configurations: stay in place
-                        if key_x == door_x or (
-                            agent_x == door_x and agent_y != door_y
-                        ):
-                            next_state_idx[old_idx, static_idx, :] = old_idx
-                            continue
-
-                        for action in range(N_ACTIONS):
-                            new_agent_state = get_next_agent_position(
-                                agent_x,
-                                agent_y,
-                                orientation,
-                                door_x,
-                                door_y,
-                                key_x,
-                                key_y,
-                                door_key_state,
-                                action,
-                                n,
-                            )
-                            new_door_key_state = get_next_door_key_state(
-                                agent_x,
-                                agent_y,
-                                orientation,
-                                key_x,
-                                key_y,
-                                door_x,
-                                door_y,
-                                action,
-                                door_key_state,
-                            )
-                            new_orientation = get_next_orientation(orientation, action)
-                            new_idx = flatten_state_index(
-                                new_agent_state,
-                                new_orientation,
-                                new_door_key_state,
-                                n_location_states,
-                                N_ORIENTATIONS,
-                                N_DOOR_KEY_STATES,
-                            )
-                            next_state_idx[old_idx, static_idx, action] = new_idx
-
-    return next_state_idx
 
 
 def observation_to_onehot(image: np.ndarray) -> np.ndarray:

@@ -623,24 +623,6 @@ class TestCustomFOVSize:
         fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 0, n, fov_size=5)
         assert fov[2, 3] == CellType.DOOR
 
-    def test_observation_indices_shape_size5(self):
-        from environments.minigrid import (
-            generate_observation_indices,
-            N_ORIENTATIONS,
-            N_DOOR_KEY_STATES,
-        )
-
-        n = 3
-        fov_size = 5
-        n_location_states = n * n
-        n_key_positions = n_location_states - 2 * n
-        n_door_positions = n_location_states - 2 * n
-        n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-        n_static_states = n_key_positions * n_door_positions
-
-        obs_idx = generate_observation_indices(n, fov_size=fov_size)
-        assert obs_idx.shape == (fov_size, fov_size, n_total_states, n_static_states)
-
     def test_observation_tensor_shape_size5(self):
         from environments.minigrid import (
             generate_observation_tensor,

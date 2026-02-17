@@ -13,7 +13,9 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from environments.minigrid import (
+    generate_transition_tensor,
     generate_transition_indices,
+    generate_observation_tensor,
     generate_observation_indices,
     generate_orientation_indices,
     N_CELL_TYPES,
@@ -24,11 +26,11 @@ from agents.flat_tensor_agent import (
     ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent,
 )
 from inference.state_inference import state_inference_step_indexed
-from inference.planning import planning_indexed
-from inference.loopy_bp import loopy_bp_planning_indexed
-from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning_indexed
-from inference.reduced_region_extended import reduced_region_extended_planning_indexed
-from inference.nuijten_mp import nuijten_mp_planning_indexed, reduced_nuijten_mp_planning_indexed
+from inference.planning import planning
+from inference.loopy_bp import loopy_bp_planning
+from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
+from inference.reduced_region_extended import reduced_region_extended_planning
+from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
 from utils.tensors import (
     get_dimensions, flatten_state_index, unflatten_state_index,
     unflatten_static_index, location_to_coords,
@@ -185,65 +187,67 @@ def print_observation_summary(vision_obs, orientation_obs, fov_size):
 # ---------------------------------------------------------------------------
 
 
-def call_planning(method, q_current, q_static, agent, horizon):
+def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
     """Dispatch to the correct planning function based on method string."""
     if method == "bp":
-        return planning_indexed(
+        return planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
+            transition_tensor=agent.transition_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
         )
     elif method == "loopy":
-        return loopy_bp_planning_indexed(
+        return loopy_bp_planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
+            transition_tensor=agent.transition_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
         )
     elif method == "region-extended":
-        result = region_extended_loopy_bp_planning_indexed(
+        result = region_extended_loopy_bp_planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
-            obs_idx=agent.observation_idx,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
+            damping=damping,
         )
         return result[0]
     elif method == "reduced-aif":
-        result = reduced_region_extended_planning_indexed(
+        result = reduced_region_extended_planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
-            obs_idx=agent.observation_idx,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
+            damping=damping,
         )
         return result[0]
     elif method == "nuijten":
-        result = nuijten_mp_planning_indexed(
+        result = nuijten_mp_planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
-            obs_idx=agent.observation_idx,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
         )
         return result[0]
     elif method == "reduced-nuijten":
-        result = reduced_nuijten_mp_planning_indexed(
+        result = reduced_nuijten_mp_planning(
             q_current_state=q_current,
             q_static_state=q_static,
-            transition_idx=agent.transition_idx,
-            obs_idx=agent.observation_idx,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -381,7 +385,8 @@ def run_diagnostic_episode(agent, env, args, dims, grid_size):
         print(f"    Horizon: {horizon} (time_remaining={time_remaining})")
 
         t0 = time.time()
-        action_dist = call_planning(args.planning_method, q_state, q_static, agent, horizon)
+        action_dist = call_planning(args.planning_method, q_state, q_static, agent, horizon,
+                                     damping=args.damping)
         action_dist.block_until_ready()
         planning_ms = (time.time() - t0) * 1000
         print(f"    Planning time: {planning_ms:.1f}ms")
@@ -446,7 +451,8 @@ def create_goal_distribution(grid_size, goal_x, goal_y):
     return goal / goal.sum()
 
 
-def create_agent(args, transition_idx, observation_idx, orientation_idx, goal):
+def create_agent(args, transition_tensor, transition_idx, observation_tensor,
+                  observation_idx, orientation_idx, goal):
     """Create the appropriate agent based on planning method."""
     method = args.planning_method
     common = dict(
@@ -460,17 +466,21 @@ def create_agent(args, transition_idx, observation_idx, orientation_idx, goal):
         n_planning_iterations=args.planning_iterations,
     )
     if method == "loopy":
-        return LoopyBPAgent.create(**common)
+        return LoopyBPAgent.create(transition_tensor=transition_tensor, **common)
     elif method == "region-extended":
-        return RegionExtendedAgent.create(**common)
+        return RegionExtendedAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     elif method == "reduced-aif":
-        return ReducedRegionExtendedAgent.create(**common)
+        return ReducedRegionExtendedAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     elif method == "nuijten":
-        return NuijtenMPAgent.create(**common)
+        return NuijtenMPAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     elif method == "reduced-nuijten":
-        return ReducedNuijtenMPAgent.create(**common)
+        return ReducedNuijtenMPAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     else:  # bp
-        return IndexedTensorAgent.create(**common)
+        return IndexedTensorAgent.create(transition_tensor=transition_tensor, **common)
 
 
 def main():
@@ -488,6 +498,8 @@ def main():
     parser.add_argument("--fov-size", type=int, default=7, help="Field-of-view size (odd, >= 3)")
     parser.add_argument("--no-orientation", action="store_true",
                         help="Replace orientation observation with uniform")
+    parser.add_argument("--damping", type=float, default=1.0,
+                        help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -510,6 +522,8 @@ def main():
     print(f"FOV size: {args.fov_size}x{args.fov_size}")
     if args.no_orientation:
         print("Orientation observation: DISABLED (uniform)")
+    if args.damping < 1.0:
+        print(f"Channel damping: {args.damping}")
     print(f"Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"Inference iterations: {args.inference_iterations}")
     print(f"Planning iterations: {args.planning_iterations}")
@@ -518,10 +532,14 @@ def main():
 
     print("Generating tensors...")
     t0 = time.time()
+    transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     transition_idx = jnp.array(generate_transition_indices(grid_size))
+    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
     observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
     orientation_idx = jnp.array(generate_orientation_indices(grid_size))
+    print(f"  Transition tensor: {transition_tensor.shape}")
     print(f"  Transition indices: {transition_idx.shape}")
+    print(f"  Observation tensor: {observation_tensor.shape}")
     print(f"  Observation indices: {observation_idx.shape}")
     print(f"  Orientation indices: {orientation_idx.shape}")
     print(f"  Generated in {time.time() - t0:.2f}s")
@@ -536,7 +554,8 @@ def main():
     print(f"Goal: position ({goal_x}, {goal_y}) with door open")
     print()
 
-    agent = create_agent(args, transition_idx, observation_idx, orientation_idx, goal)
+    agent = create_agent(args, transition_tensor, transition_idx, observation_tensor,
+                         observation_idx, orientation_idx, goal)
     env = MiniGridWrapper(env_name=env_name, max_steps=args.max_steps, fov_size=args.fov_size)
 
     run_diagnostic_episode(agent, env, args, dims, grid_size)
