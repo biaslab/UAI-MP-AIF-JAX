@@ -14,6 +14,7 @@ stages:
         --seed ${experiment.seed}
         --fov-size ${experiment.fov_size}
         --damping ${experiment.damping}
+        --obs-alpha ${experiment.obs_alpha}
         --record "first,last"
         --video-dir data/videos/${key}
         --output data/results/${key}.json

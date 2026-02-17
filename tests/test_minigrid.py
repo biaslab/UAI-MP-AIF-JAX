@@ -19,9 +19,12 @@ from environments.minigrid import (
     in_fov,
     relative_to_fov_coords,
     get_fov,
+    generate_observation_tensor,
+    soften_observation_tensor,
     ActionType,
     Orientation,
     CellType,
+    N_CELL_TYPES,
 )
 
 
@@ -625,8 +628,6 @@ class TestCustomFOVSize:
 
     def test_observation_tensor_shape_size5(self):
         from environments.minigrid import (
-            generate_observation_tensor,
-            N_CELL_TYPES,
             N_ORIENTATIONS,
             N_DOOR_KEY_STATES,
         )
@@ -641,3 +642,73 @@ class TestCustomFOVSize:
 
         B = generate_observation_tensor(n, fov_size=fov_size)
         assert B.shape == (fov_size, fov_size, N_CELL_TYPES, n_total_states, n_static_states)
+
+
+class TestObservationSoftening:
+    def setup_method(self):
+        self.n = 3
+        self.fov_size = 7
+        self.B_hard = generate_observation_tensor(self.n, fov_size=self.fov_size)
+
+    def test_shape_preserved(self):
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=0.1)
+        assert B_soft.shape == self.B_hard.shape
+
+    def test_sums_to_one(self):
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=0.1)
+        # Sum over cell-type axis (axis=2) should be 1 for every (fov_x, fov_y, state, static)
+        sums = np.sum(B_soft.astype(np.float64), axis=2)
+        assert np.allclose(sums, 1.0, atol=1e-3), f"Max deviation: {np.max(np.abs(sums - 1.0))}"
+
+    def test_reference_cell_unchanged(self):
+        """Cell directly in front of agent (d=0) should be unchanged."""
+        alpha = 0.15
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=alpha)
+        half = self.fov_size // 2
+        ref_x, ref_y = half, self.fov_size - 2
+        np.testing.assert_array_equal(
+            B_soft[ref_x, ref_y, :, :, :],
+            self.B_hard[ref_x, ref_y, :, :, :],
+        )
+
+    def test_alpha_zero_recovers_hard(self):
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=0.0)
+        np.testing.assert_array_equal(B_soft, self.B_hard)
+
+    def test_large_alpha_approaches_uniform(self):
+        """Visible cells far from reference should approach uniform with large alpha."""
+        alpha = 0.5  # At d>=2, precision=0 → fully uniform
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=alpha)
+        uniform = 1.0 / N_CELL_TYPES
+
+        # Check a far-away visible cell (corner at (0,0), d = 3+5 = 8 from ref (3,5))
+        # But only if it's not UNSEEN in the hard tensor
+        for s in range(B_soft.shape[3]):
+            for th in range(B_soft.shape[4]):
+                if self.B_hard[0, 0, CellType.UNSEEN, s, th] == 1.0:
+                    continue  # skip occluded
+                cell_probs = B_soft[0, 0, :, s, th].astype(np.float64)
+                assert np.allclose(cell_probs, uniform, atol=1e-3), \
+                    f"Far cell not uniform: {cell_probs}"
+                break  # one visible example is enough
+            else:
+                continue
+            break
+
+    def test_unseen_preserved(self):
+        """UNSEEN entries must stay exactly as in the hard tensor."""
+        alpha = 0.2
+        B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=alpha)
+
+        unseen_mask = self.B_hard[:, :, CellType.UNSEEN, :, :] == 1.0
+        # Where hard tensor had UNSEEN=1, soft tensor should be identical
+        for s in range(B_soft.shape[3]):
+            for th in range(B_soft.shape[4]):
+                for i in range(self.fov_size):
+                    for j in range(self.fov_size):
+                        if unseen_mask[i, j, s, th]:
+                            np.testing.assert_array_equal(
+                                B_soft[i, j, :, s, th],
+                                self.B_hard[i, j, :, s, th],
+                            )
+                            return  # one example is enough

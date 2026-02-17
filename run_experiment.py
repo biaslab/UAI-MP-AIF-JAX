@@ -17,6 +17,7 @@ from environments.minigrid import (
     generate_observation_tensor,
     generate_orientation_observation_tensor,
     generate_transition_tensor,
+    soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
 from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
@@ -80,6 +81,8 @@ def main():
                         help="Replace orientation observation with uniform (agent must infer orientation)")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -109,6 +112,8 @@ def main():
     print(f"\nInternal grid size: {grid_size}x{grid_size}")
     print(f"MiniGrid environment: {env_name} (includes outer walls)")
     print(f"FOV size: {args.fov_size}x{args.fov_size}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     if args.no_orientation:
         print(f"Orientation observation: DISABLED (uniform)")
     print()
@@ -119,7 +124,10 @@ def main():
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     print(f"  Transition tensor: {transition_tensor.shape}")
 
-    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
     print(f"  Observation tensor: {observation_tensor.shape}")
     print(f"  Orientation tensor: {orientation_tensor.shape}")
@@ -245,6 +253,7 @@ def main():
         video_dir=args.video_dir if record_episodes else None,
         fov_size=args.fov_size,
         no_orientation=args.no_orientation,
+        obs_alpha=args.obs_alpha,
     )
     elapsed = time.time() - t0
 
@@ -272,6 +281,7 @@ def main():
                 "planning_iterations": args.planning_iterations,
                 "no_orientation": args.no_orientation,
                 "damping": args.damping,
+                "obs_alpha": args.obs_alpha,
                 "seed_start": args.seed,
             },
             "results": {

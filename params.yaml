@@ -7,6 +7,7 @@ experiment:
   seed: 0
   fov_size: 3
   damping: 0.75
+  obs_alpha: 0.1
 
 methods:
   bp:

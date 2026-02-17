@@ -100,6 +100,7 @@ class MiniGridWrapper:
         render_mode: Optional[str] = None,
         max_steps: Optional[int] = None,
         fov_size: int = 7,
+        obs_alpha: float = 0.0,
     ):
         # Ensure the environment is registered (needed for non-standard sizes)
         env_name = ensure_env_registered(env_name)
@@ -112,8 +113,24 @@ class MiniGridWrapper:
             self.env = gym.wrappers.TimeLimit(self.env, max_episode_steps=max_steps)
         self.env_name = env_name
         self.fov_size = fov_size
+        self.obs_alpha = obs_alpha
+
+        # Precompute distance and precision grids for noisy observations
+        if obs_alpha > 0.0:
+            half = fov_size // 2
+            ref_j = fov_size - 2  # cell directly in front of the agent
+            dist = np.zeros((fov_size, fov_size), dtype=np.float64)
+            for i in range(fov_size):
+                for j in range(fov_size):
+                    dist[i, j] = abs(i - half) + abs(ref_j - j)
+            self._obs_precision = np.maximum(0.0, 1.0 - obs_alpha * dist)
+        else:
+            self._obs_precision = None
+        self._obs_rng = np.random.default_rng(0)
 
     def reset(self, seed: Optional[int] = None) -> StepResult:
+        if seed is not None:
+            self._obs_rng = np.random.default_rng(seed)
         obs, info = self.env.reset(seed=seed)
         return self._convert_observation(obs, 0.0, False, False, info)
 
@@ -145,7 +162,14 @@ class MiniGridWrapper:
         for i in range(fov_w):
             for j in range(fov_h):
                 cell_type = int(image[i, j])
-                onehot[i, j, cell_type] = 1.0
+                if self.obs_alpha > 0.0 and cell_type != 0:  # 0 = UNSEEN
+                    prec = self._obs_precision[i, j]
+                    p = np.full(N_CELL_TYPES, (1.0 - prec) / N_CELL_TYPES)
+                    p[cell_type] += prec
+                    sampled = self._obs_rng.choice(N_CELL_TYPES, p=p)
+                    onehot[i, j, sampled] = 1.0
+                else:
+                    onehot[i, j, cell_type] = 1.0
         return onehot
 
     def _direction_to_onehot(self, direction: int) -> np.ndarray:
@@ -278,6 +302,7 @@ def run_experiment(
     video_dir: Optional[str] = None,
     fov_size: int = 7,
     no_orientation: bool = False,
+    obs_alpha: float = 0.0,
 ) -> dict:
     """
     Run multiple episodes and collect statistics.
@@ -301,7 +326,7 @@ def run_experiment(
         record_episodes = []
     
     actual_render_mode = "rgb_array" if record_episodes else render_mode
-    env = MiniGridWrapper(env_name=env_name, render_mode=actual_render_mode, max_steps=max_steps, fov_size=fov_size)
+    env = MiniGridWrapper(env_name=env_name, render_mode=actual_render_mode, max_steps=max_steps, fov_size=fov_size, obs_alpha=obs_alpha)
 
     results = []
     successes = 0

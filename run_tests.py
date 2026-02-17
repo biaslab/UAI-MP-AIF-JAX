@@ -17,6 +17,7 @@ def run_minigrid_tests():
         TestFOV,
         TestTensorGeneration,
         TestCustomFOVSize,
+        TestObservationSoftening,
     )
 
     print("=" * 60)
@@ -106,6 +107,17 @@ def run_minigrid_tests():
     t.test_get_fov_door_visible_size5()
     t.test_observation_tensor_shape_size5()
     print("  Custom FOV size: PASSED")
+
+    print("Running observation softening tests...")
+    t = TestObservationSoftening()
+    t.setup_method()
+    t.test_shape_preserved()
+    t.test_sums_to_one()
+    t.test_reference_cell_unchanged()
+    t.test_alpha_zero_recovers_hard()
+    t.test_large_alpha_approaches_uniform()
+    t.test_unseen_preserved()
+    print("  Observation softening: PASSED")
 
 
 def run_inference_tests():

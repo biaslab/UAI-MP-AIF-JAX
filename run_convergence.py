@@ -17,6 +17,7 @@ from environments.minigrid import (
     generate_transition_tensor,
     generate_observation_tensor,
     generate_orientation_observation_tensor,
+    soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
@@ -173,6 +174,8 @@ def main():
                         help="Save VFE convergence plot (e.g. convergence.png)")
     parser.add_argument("--observe-first", action="store_true",
                         help="Take 1 observation + inference step before planning")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -192,14 +195,18 @@ def main():
           f"Iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     print()
 
     # Generate tensors
     print("Generating tensors...")
     t0 = time.time()
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
-    observation_tensor = jnp.array(
-        generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     orientation_tensor = jnp.array(
         generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
     print(f"  Done in {time.time() - t0:.2f}s")
@@ -218,7 +225,7 @@ def main():
     # Optional: observe first to get non-uniform beliefs
     if args.observe_first:
         print("Taking initial observation...")
-        env = MiniGridWrapper(env_name=env_name, max_steps=100, fov_size=args.fov_size)
+        env = MiniGridWrapper(env_name=env_name, max_steps=100, fov_size=args.fov_size, obs_alpha=args.obs_alpha)
         result = env.reset(seed=args.seed)
 
         if args.no_orientation:
@@ -292,6 +299,7 @@ def main():
                 "planning_iterations": n_iterations,
                 "fov_size": args.fov_size,
                 "damping": args.damping,
+                "obs_alpha": args.obs_alpha,
                 "observe_first": args.observe_first,
                 "seed": args.seed,
             },

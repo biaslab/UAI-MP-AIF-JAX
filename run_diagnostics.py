@@ -18,6 +18,7 @@ from environments.minigrid import (
     generate_observation_tensor,
     generate_observation_indices,
     generate_orientation_indices,
+    soften_observation_tensor,
     N_CELL_TYPES,
 )
 from environments.gym_wrapper import MiniGridWrapper, StepResult
@@ -500,6 +501,8 @@ def main():
                         help="Replace orientation observation with uniform")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -524,6 +527,8 @@ def main():
         print("Orientation observation: DISABLED (uniform)")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     print(f"Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"Inference iterations: {args.inference_iterations}")
     print(f"Planning iterations: {args.planning_iterations}")
@@ -534,7 +539,10 @@ def main():
     t0 = time.time()
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     transition_idx = jnp.array(generate_transition_indices(grid_size))
-    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
     orientation_idx = jnp.array(generate_orientation_indices(grid_size))
     print(f"  Transition tensor: {transition_tensor.shape}")
@@ -556,7 +564,7 @@ def main():
 
     agent = create_agent(args, transition_tensor, transition_idx, observation_tensor,
                          observation_idx, orientation_idx, goal)
-    env = MiniGridWrapper(env_name=env_name, max_steps=args.max_steps, fov_size=args.fov_size)
+    env = MiniGridWrapper(env_name=env_name, max_steps=args.max_steps, fov_size=args.fov_size, obs_alpha=args.obs_alpha)
 
     run_diagnostic_episode(agent, env, args, dims, grid_size)
 
