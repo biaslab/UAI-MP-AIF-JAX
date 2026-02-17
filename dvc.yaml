@@ -18,6 +18,8 @@ stages:
         --record "first,last"
         --video-dir data/videos/${key}
         --output data/results/${key}.json
+        --receding-horizon
+        --no-orientation
       deps:
         - run_experiment.py
         - agents/
