@@ -119,10 +119,13 @@ class MiniGridWrapper:
         if obs_alpha > 0.0:
             half = fov_size // 2
             ref_j = fov_size - 2  # cell directly in front of the agent
+            agent_j = fov_size - 1  # agent row
             dist = np.zeros((fov_size, fov_size), dtype=np.float64)
             for i in range(fov_size):
                 for j in range(fov_size):
-                    dist[i, j] = abs(i - half) + abs(ref_j - j)
+                    d_ref = abs(i - half) + abs(ref_j - j)
+                    d_agent = abs(i - half) + abs(agent_j - j)
+                    dist[i, j] = min(d_ref, d_agent)
             self._obs_precision = np.maximum(0.0, 1.0 - obs_alpha * dist)
         else:
             self._obs_precision = None
