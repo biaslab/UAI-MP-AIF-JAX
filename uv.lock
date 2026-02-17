@@ -185,6 +185,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jax-mps"
+version = "0.9.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jax" },
+    { name = "jaxlib" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/a0/002bffadd4d765df3469a3cb1973d4e0e6cdadfec1bcf133ff4ffb0b7e5f/jax_mps-0.9.6-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:add4015e8ced02e0e7b21343d22f64f872b45aad8932837d7b1b4734dde75ac6", size = 7019000, upload-time = "2026-02-15T23:39:10.974Z" },
+]
+
+[[package]]
 name = "jaxlib"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -344,6 +356,14 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+cuda = [
+    { name = "jax" },
+]
+macos = [
+    { name = "jax-mps" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "gymnasium", specifier = ">=1.2.3" },
@@ -354,6 +374,10 @@ requires-dist = [
     { name = "minigrid", specifier = ">=3.0.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
 ]
+
+[package.metadata.requires-dev]
+cuda = [{ name = "jax", extras = ["cuda12-pip"], specifier = ">=0.9.0" }]
+macos = [{ name = "jax-mps", specifier = ">=0.9.6" }]
 
 [[package]]
 name = "ml-dtypes"

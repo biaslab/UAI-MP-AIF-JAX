@@ -15,4 +15,7 @@ dependencies = [
 ]
 
 [dependency-groups]
+cuda = [
+    "jax[cuda12-pip]>=0.9.0",
+]
 macos = ["jax-mps>=0.9.6"]
