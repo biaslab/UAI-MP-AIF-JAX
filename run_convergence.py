@@ -17,11 +17,13 @@ from environments.minigrid import (
     generate_transition_tensor,
     generate_observation_tensor,
     generate_orientation_observation_tensor,
+    soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
     IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent,
-    ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent,
+    ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent,
+    NuijtenMPAgent, ReducedNuijtenMPAgent,
 )
 from inference.state_inference import state_inference_step
 from inference.convergence import (
@@ -29,6 +31,8 @@ from inference.convergence import (
     loopy_bp_convergence,
     region_extended_convergence,
     reduced_region_extended_convergence,
+    dyn_channel_convergence,
+    reduced_dyn_channel_convergence,
     nuijten_mp_convergence,
     reduced_nuijten_mp_convergence,
 )
@@ -66,6 +70,12 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
             transition_tensor=transition_tensor, **common)
     elif method == "reduced-aif":
         return ReducedRegionExtendedAgent.create(
+            transition_tensor=transition_tensor, **common)
+    elif method == "dyn-channel":
+        return DynChannelLoopyBPAgent.create(
+            transition_tensor=transition_tensor, **common)
+    elif method == "reduced-dyn-channel":
+        return ReducedDynChannelAgent.create(
             transition_tensor=transition_tensor, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(
@@ -124,6 +134,30 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             damping=damping,
         )
         return action_dist, vfe_trace
+    elif method == "dyn-channel":
+        action_dist, _, vfe_trace = dyn_channel_convergence(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensors,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=n_iterations,
+            damping=damping,
+        )
+        return action_dist, vfe_trace
+    elif method == "reduced-dyn-channel":
+        action_dist, _, vfe_trace = reduced_dyn_channel_convergence(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensors,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=n_iterations,
+            damping=damping,
+        )
+        return action_dist, vfe_trace
     elif method == "nuijten":
         action_dist, _, _, vfe_trace = nuijten_mp_convergence(
             q_current_state=q_current,
@@ -163,6 +197,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--planning-method", type=str, default="bp",
                         choices=["bp", "loopy", "region-extended", "reduced-aif",
+                                 "dyn-channel", "reduced-dyn-channel",
                                  "nuijten", "reduced-nuijten"])
     parser.add_argument("--fov-size", type=int, default=7)
     parser.add_argument("--no-orientation", action="store_true")
@@ -173,6 +208,8 @@ def main():
                         help="Save VFE convergence plot (e.g. convergence.png)")
     parser.add_argument("--observe-first", action="store_true",
                         help="Take 1 observation + inference step before planning")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -192,14 +229,18 @@ def main():
           f"Iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     print()
 
     # Generate tensors
     print("Generating tensors...")
     t0 = time.time()
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
-    observation_tensor = jnp.array(
-        generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     orientation_tensor = jnp.array(
         generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
     print(f"  Done in {time.time() - t0:.2f}s")
@@ -218,7 +259,7 @@ def main():
     # Optional: observe first to get non-uniform beliefs
     if args.observe_first:
         print("Taking initial observation...")
-        env = MiniGridWrapper(env_name=env_name, max_steps=100, fov_size=args.fov_size)
+        env = MiniGridWrapper(env_name=env_name, max_steps=100, fov_size=args.fov_size, obs_alpha=args.obs_alpha)
         result = env.reset(seed=args.seed)
 
         if args.no_orientation:
@@ -292,6 +333,7 @@ def main():
                 "planning_iterations": n_iterations,
                 "fov_size": args.fov_size,
                 "damping": args.damping,
+                "obs_alpha": args.obs_alpha,
                 "observe_first": args.observe_first,
                 "seed": args.seed,
             },

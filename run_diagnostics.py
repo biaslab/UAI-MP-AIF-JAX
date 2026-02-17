@@ -18,18 +18,22 @@ from environments.minigrid import (
     generate_observation_tensor,
     generate_observation_indices,
     generate_orientation_indices,
+    soften_observation_tensor,
     N_CELL_TYPES,
 )
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
     IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent,
-    ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent,
+    ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent,
+    NuijtenMPAgent, ReducedNuijtenMPAgent,
 )
 from inference.state_inference import state_inference_step_indexed
 from inference.planning import planning
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 from inference.reduced_region_extended import reduced_region_extended_planning
+from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
+from inference.reduced_dyn_channel import reduced_dyn_channel_planning
 from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
 from utils.tensors import (
     get_dimensions, flatten_state_index, unflatten_state_index,
@@ -221,6 +225,30 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
         return result[0]
     elif method == "reduced-aif":
         result = reduced_region_extended_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=agent.n_planning_iterations,
+            damping=damping,
+        )
+        return result[0]
+    elif method == "dyn-channel":
+        result = dyn_channel_loopy_bp_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=agent.n_planning_iterations,
+            damping=damping,
+        )
+        return result[0]
+    elif method == "reduced-dyn-channel":
+        result = reduced_dyn_channel_planning(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
@@ -473,6 +501,12 @@ def create_agent(args, transition_tensor, transition_idx, observation_tensor,
     elif method == "reduced-aif":
         return ReducedRegionExtendedAgent.create(
             transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
+    elif method == "dyn-channel":
+        return DynChannelLoopyBPAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
+    elif method == "reduced-dyn-channel":
+        return ReducedDynChannelAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(
             transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
@@ -493,13 +527,15 @@ def main():
     parser.add_argument("--planning-iterations", type=int, default=10, help="Planning iterations")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy", "region-extended", "reduced-aif", "nuijten", "reduced-nuijten"],
+                        choices=["bp", "loopy", "region-extended", "reduced-aif", "dyn-channel", "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
                         help="Planning method")
     parser.add_argument("--fov-size", type=int, default=7, help="Field-of-view size (odd, >= 3)")
     parser.add_argument("--no-orientation", action="store_true",
                         help="Replace orientation observation with uniform")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -524,6 +560,8 @@ def main():
         print("Orientation observation: DISABLED (uniform)")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     print(f"Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"Inference iterations: {args.inference_iterations}")
     print(f"Planning iterations: {args.planning_iterations}")
@@ -534,7 +572,10 @@ def main():
     t0 = time.time()
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     transition_idx = jnp.array(generate_transition_indices(grid_size))
-    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     observation_idx = jnp.array(generate_observation_indices(grid_size, fov_size=args.fov_size))
     orientation_idx = jnp.array(generate_orientation_indices(grid_size))
     print(f"  Transition tensor: {transition_tensor.shape}")
@@ -556,7 +597,7 @@ def main():
 
     agent = create_agent(args, transition_tensor, transition_idx, observation_tensor,
                          observation_idx, orientation_idx, goal)
-    env = MiniGridWrapper(env_name=env_name, max_steps=args.max_steps, fov_size=args.fov_size)
+    env = MiniGridWrapper(env_name=env_name, max_steps=args.max_steps, fov_size=args.fov_size, obs_alpha=args.obs_alpha)
 
     run_diagnostic_episode(agent, env, args, dims, grid_size)
 

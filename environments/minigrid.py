@@ -370,6 +370,45 @@ def generate_observation_tensor(n: int, fov_size: int = 7, dtype=np.float16) -> 
     return B
 
 
+def soften_observation_tensor(B_hard: np.ndarray, fov_size: int, alpha: float) -> np.ndarray:
+    """Soften observation tensor based on Manhattan distance from the cell in front of the agent.
+
+    Nearby cells keep high precision (near one-hot), distant cells approach uniform.
+    UNSEEN entries (occluded cells) are preserved unchanged.
+
+    Args:
+        B_hard: Hard one-hot observation tensor, shape (fov, fov, N_CELL_TYPES, n_states, n_static).
+        fov_size: FOV grid size (must be odd).
+        alpha: Noise rate per unit Manhattan distance. 0 = no softening.
+
+    Returns:
+        Softened observation tensor with same shape and dtype as B_hard.
+    """
+    if alpha == 0.0:
+        return B_hard
+
+    half = fov_size // 2
+    ref_x, ref_y = half, fov_size - 2  # cell directly in front of agent
+
+    # Manhattan distance grid: shape (fov_size, fov_size)
+    ix = np.arange(fov_size)
+    dist = np.abs(ix[:, None] - ref_x) + np.abs(ref_y - ix[None, :])  # (fov, fov)
+
+    precision = np.maximum(0.0, 1.0 - alpha * dist)  # (fov, fov)
+
+    # Broadcast to (fov, fov, 1, 1, 1) for element-wise ops
+    p = precision[:, :, None, None, None]
+    uniform = np.float64(1.0 / N_CELL_TYPES)
+
+    B_soft = (p * B_hard + (1.0 - p) * uniform).astype(B_hard.dtype)
+
+    # Preserve UNSEEN entries: where B_hard has 1.0 on the UNSEEN channel, keep B_hard
+    unseen_mask = B_hard[:, :, CellType.UNSEEN, :, :] == 1.0  # (fov, fov, states, static)
+    unseen_mask = unseen_mask[:, :, None, :, :]  # (fov, fov, 1, states, static)
+    B_soft = np.where(unseen_mask, B_hard, B_soft)
+
+    return B_soft
+
 
 def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
     """Generate full orientation observation tensor (for reference/testing)."""

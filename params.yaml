@@ -1,23 +1,32 @@
 experiment:
   grid_size: 3
-  episodes: 100
-  max_steps: 20
+  episodes: 10
+  max_steps: 15
   planning_horizon: 15
   inference_iterations: 10
   seed: 0
   fov_size: 3
-  damping: 0.75
+  damping: 0.5
+  obs_alpha: 0.05
 
 methods:
   bp:
     planning_iterations: 1
+  vbp:
+    planning_iterations: 1
+  loopy-vbp:
+    planning_iterations: 10
   loopy:
     planning_iterations: 10
   region-extended:
-    planning_iterations: 10
+    planning_iterations: 20
   reduced-aif:
-    planning_iterations: 10
+    planning_iterations: 20
+  dyn-channel:
+    planning_iterations: 20
+  reduced-dyn-channel:
+    planning_iterations: 20
   nuijten:
-    planning_iterations: 10
+    planning_iterations: 20
   reduced-nuijten:
-    planning_iterations: 10
+    planning_iterations: 20

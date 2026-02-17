@@ -17,9 +17,10 @@ from environments.minigrid import (
     generate_observation_tensor,
     generate_orientation_observation_tensor,
     generate_transition_tensor,
+    soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
+from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, VBPAgent, LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -70,8 +71,8 @@ def main():
     parser.add_argument("--record", type=str, default=None,
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "loopy", "region-extended", "reduced-aif", "nuijten", "reduced-nuijten"],
-                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization), 'nuijten' (region beliefs, no kernels, θ inferred), 'reduced-nuijten' (region beliefs, no kernels, θ fixed)")
+    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "vbp", "loopy-vbp", "loopy", "region-extended", "reduced-aif", "dyn-channel", "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
+                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'vbp' (value BP, ε→0 value iteration), 'loopy-vbp' (loopy VBP with θ as variable), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization), 'dyn-channel' (obs factors + dyn channels, θ inferred), 'reduced-dyn-channel' (obs factors + dyn channels, θ fixed), 'nuijten' (region beliefs, no kernels, θ inferred), 'reduced-nuijten' (region beliefs, no kernels, θ fixed)")
     parser.add_argument("--full-tensors", action="store_true",
                         help="Use full tensor representation for state inference (FlatTensorAgent)")
     parser.add_argument("--fov-size", type=int, default=7,
@@ -80,6 +81,8 @@ def main():
                         help="Replace orientation observation with uniform (agent must infer orientation)")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
+    parser.add_argument("--obs-alpha", type=float, default=0.0,
+                        help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
 
     if args.fov_size < 3 or args.fov_size % 2 == 0:
@@ -109,6 +112,8 @@ def main():
     print(f"\nInternal grid size: {grid_size}x{grid_size}")
     print(f"MiniGrid environment: {env_name} (includes outer walls)")
     print(f"FOV size: {args.fov_size}x{args.fov_size}")
+    if args.obs_alpha > 0.0:
+        print(f"Observation softening: alpha={args.obs_alpha}")
     if args.no_orientation:
         print(f"Orientation observation: DISABLED (uniform)")
     print()
@@ -119,7 +124,10 @@ def main():
     transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
     print(f"  Transition tensor: {transition_tensor.shape}")
 
-    observation_tensor = jnp.array(generate_observation_tensor(grid_size, fov_size=args.fov_size), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    if args.obs_alpha > 0.0:
+        obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
+    observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
     orientation_tensor = jnp.array(generate_orientation_observation_tensor(grid_size), dtype=jnp.float32)
     print(f"  Observation tensor: {observation_tensor.shape}")
     print(f"  Orientation tensor: {orientation_tensor.shape}")
@@ -138,6 +146,28 @@ def main():
     print("Creating agent...")
     if args.full_tensors:
         agent = FlatTensorAgent.create(
+            grid_size=grid_size,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
+    elif args.planning_method == "vbp":
+        agent = VBPAgent.create(
+            grid_size=grid_size,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+        )
+    elif args.planning_method == "loopy-vbp":
+        agent = LoopyVBPAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
             observation_tensors=observation_tensor,
@@ -172,6 +202,30 @@ def main():
         )
     elif args.planning_method == "reduced-aif":
         agent = ReducedRegionExtendedAgent.create(
+            grid_size=grid_size,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+        )
+    elif args.planning_method == "dyn-channel":
+        agent = DynChannelLoopyBPAgent.create(
+            grid_size=grid_size,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+        )
+    elif args.planning_method == "reduced-dyn-channel":
+        agent = ReducedDynChannelAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
             observation_tensors=observation_tensor,
@@ -245,6 +299,7 @@ def main():
         video_dir=args.video_dir if record_episodes else None,
         fov_size=args.fov_size,
         no_orientation=args.no_orientation,
+        obs_alpha=args.obs_alpha,
     )
     elapsed = time.time() - t0
 
@@ -272,6 +327,7 @@ def main():
                 "planning_iterations": args.planning_iterations,
                 "no_orientation": args.no_orientation,
                 "damping": args.damping,
+                "obs_alpha": args.obs_alpha,
                 "seed_start": args.seed,
             },
             "results": {
