@@ -2,29 +2,30 @@ schema: '2.0'
 stages:
   experiment@bp:
     cmd: uv run python run_experiment.py --planning-method bp --grid-size 3 
-      --episodes 100 --max-steps 20 --planning-horizon 15 --inference-iterations
-      10 --planning-iterations 1 --seed 0 --fov-size 7 --damping 1.0 --record 
-      "first,last" --video-dir data/videos/bp --output data/results/bp.json
+      --episodes 10 --max-steps 15 --planning-horizon 15 --inference-iterations 
+      10 --planning-iterations 1 --seed 0 --fov-size 3 --damping 0.5 --obs-alpha
+      0.05 --record "first,last" --video-dir data/videos/bp --output 
+      data/results/bp.json --receding-horizon --no-orientation
     deps:
     - path: agents/
       hash: md5
-      md5: 7e6c80862a74523c73b5a5fb712e92de.dir
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
       size: 96591
       nfiles: 8
     - path: environments/
       hash: md5
-      md5: acb02f80405294e9ce2c040c12b0e688.dir
-      size: 113515
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
       nfiles: 12
     - path: inference/
       hash: md5
-      md5: 367af9775bb69dffbaad04131ebc9836.dir
+      md5: 28fc5e937caab838ee137a2257a88054.dir
       size: 326752
       nfiles: 33
     - path: run_experiment.py
       hash: md5
-      md5: 73f2b28ef113801ef2b20982f18f8ac3
-      size: 12470
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
     - path: utils/
       hash: md5
       md5: 9423271c0fa3046ceebec30b525580b8.dir
@@ -34,52 +35,52 @@ stages:
       params.yaml:
         experiment:
           grid_size: 3
-          episodes: 100
-          max_steps: 20
+          episodes: 10
+          max_steps: 15
           planning_horizon: 15
           inference_iterations: 10
-          planning_iterations: 10
           seed: 0
-          fov_size: 7
-          damping: 1.0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
         methods.bp:
           planning_iterations: 1
     outs:
     - path: data/results/bp.json
       hash: md5
-      md5: 74ac9c0bd987b71ddac7871c262ab444
-      size: 523
+      md5: e349b712d9fac55da7197e9c996e7503
+      size: 540
     - path: data/videos/bp
       hash: md5
-      md5: 55710739840d373623797ad2a1cadc01.dir
-      size: 9820
+      md5: eb73d10894eb045c563b93c41eaa4220.dir
+      size: 9590
       nfiles: 2
   experiment@loopy:
     cmd: uv run python run_experiment.py --planning-method loopy --grid-size 3 
-      --episodes 100 --max-steps 20 --planning-horizon 15 --inference-iterations
-      10 --planning-iterations 10 --seed 0 --fov-size 7 --damping 1.0 --record 
-      "first,last" --video-dir data/videos/loopy --output 
-      data/results/loopy.json
+      --episodes 10 --max-steps 15 --planning-horizon 15 --inference-iterations 
+      10 --planning-iterations 10 --seed 0 --fov-size 3 --damping 0.5 
+      --obs-alpha 0.05 --record "first,last" --video-dir data/videos/loopy 
+      --output data/results/loopy.json --receding-horizon --no-orientation
     deps:
     - path: agents/
       hash: md5
-      md5: 7e6c80862a74523c73b5a5fb712e92de.dir
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
       size: 96591
       nfiles: 8
     - path: environments/
       hash: md5
-      md5: acb02f80405294e9ce2c040c12b0e688.dir
-      size: 113515
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
       nfiles: 12
     - path: inference/
       hash: md5
-      md5: 367af9775bb69dffbaad04131ebc9836.dir
+      md5: 28fc5e937caab838ee137a2257a88054.dir
       size: 326752
       nfiles: 33
     - path: run_experiment.py
       hash: md5
-      md5: 73f2b28ef113801ef2b20982f18f8ac3
-      size: 12470
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
     - path: utils/
       hash: md5
       md5: 9423271c0fa3046ceebec30b525580b8.dir
@@ -89,23 +90,246 @@ stages:
       params.yaml:
         experiment:
           grid_size: 3
-          episodes: 100
-          max_steps: 20
+          episodes: 10
+          max_steps: 15
           planning_horizon: 15
           inference_iterations: 10
-          planning_iterations: 10
           seed: 0
-          fov_size: 7
-          damping: 1.0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
         methods.loopy:
           planning_iterations: 10
     outs:
     - path: data/results/loopy.json
       hash: md5
-      md5: 55aa4641cb44b71a43013ffd3e048e29
-      size: 536
+      md5: 412b376dbe950b25029ecb013662a8a5
+      size: 544
     - path: data/videos/loopy
       hash: md5
-      md5: 55710739840d373623797ad2a1cadc01.dir
-      size: 9820
+      md5: eb73d10894eb045c563b93c41eaa4220.dir
+      size: 9590
+      nfiles: 2
+  experiment@region-extended:
+    cmd: uv run python run_experiment.py --planning-method region-extended 
+      --grid-size 3 --episodes 10 --max-steps 15 --planning-horizon 15 
+      --inference-iterations 10 --planning-iterations 20 --seed 0 --fov-size 3 
+      --damping 0.5 --obs-alpha 0.05 --record "first,last" --video-dir 
+      data/videos/region-extended --output data/results/region-extended.json 
+      --receding-horizon --no-orientation
+    deps:
+    - path: agents/
+      hash: md5
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
+      size: 96591
+      nfiles: 8
+    - path: environments/
+      hash: md5
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
+      nfiles: 12
+    - path: inference/
+      hash: md5
+      md5: 28fc5e937caab838ee137a2257a88054.dir
+      size: 326752
+      nfiles: 33
+    - path: run_experiment.py
+      hash: md5
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
+    - path: utils/
+      hash: md5
+      md5: 9423271c0fa3046ceebec30b525580b8.dir
+      size: 18613
+      nfiles: 8
+    params:
+      params.yaml:
+        experiment:
+          grid_size: 3
+          episodes: 10
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
+        methods.region-extended:
+          planning_iterations: 20
+    outs:
+    - path: data/results/region-extended.json
+      hash: md5
+      md5: dae801f8774872c11c2d407c24187525
+      size: 566
+    - path: data/videos/region-extended
+      hash: md5
+      md5: 7328c9ae2541eaf1c4b72ed842bc938f.dir
+      size: 10137
+      nfiles: 2
+  experiment@reduced-aif:
+    cmd: uv run python run_experiment.py --planning-method reduced-aif 
+      --grid-size 3 --episodes 10 --max-steps 15 --planning-horizon 15 
+      --inference-iterations 10 --planning-iterations 20 --seed 0 --fov-size 3 
+      --damping 0.5 --obs-alpha 0.05 --record "first,last" --video-dir 
+      data/videos/reduced-aif --output data/results/reduced-aif.json 
+      --receding-horizon --no-orientation
+    deps:
+    - path: agents/
+      hash: md5
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
+      size: 96591
+      nfiles: 8
+    - path: environments/
+      hash: md5
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
+      nfiles: 12
+    - path: inference/
+      hash: md5
+      md5: 28fc5e937caab838ee137a2257a88054.dir
+      size: 326752
+      nfiles: 33
+    - path: run_experiment.py
+      hash: md5
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
+    - path: utils/
+      hash: md5
+      md5: 9423271c0fa3046ceebec30b525580b8.dir
+      size: 18613
+      nfiles: 8
+    params:
+      params.yaml:
+        experiment:
+          grid_size: 3
+          episodes: 10
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
+        methods.reduced-aif:
+          planning_iterations: 20
+    outs:
+    - path: data/results/reduced-aif.json
+      hash: md5
+      md5: 8d8140d90395fbba12c7589dbb636a12
+      size: 561
+    - path: data/videos/reduced-aif
+      hash: md5
+      md5: 7328c9ae2541eaf1c4b72ed842bc938f.dir
+      size: 10137
+      nfiles: 2
+  experiment@nuijten:
+    cmd: uv run python run_experiment.py --planning-method nuijten --grid-size 3
+      --episodes 10 --max-steps 15 --planning-horizon 15 --inference-iterations 
+      10 --planning-iterations 20 --seed 0 --fov-size 3 --damping 0.5 
+      --obs-alpha 0.05 --record "first,last" --video-dir data/videos/nuijten 
+      --output data/results/nuijten.json --receding-horizon --no-orientation
+    deps:
+    - path: agents/
+      hash: md5
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
+      size: 96591
+      nfiles: 8
+    - path: environments/
+      hash: md5
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
+      nfiles: 12
+    - path: inference/
+      hash: md5
+      md5: 28fc5e937caab838ee137a2257a88054.dir
+      size: 326752
+      nfiles: 33
+    - path: run_experiment.py
+      hash: md5
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
+    - path: utils/
+      hash: md5
+      md5: 9423271c0fa3046ceebec30b525580b8.dir
+      size: 18613
+      nfiles: 8
+    params:
+      params.yaml:
+        experiment:
+          grid_size: 3
+          episodes: 10
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
+        methods.nuijten:
+          planning_iterations: 20
+    outs:
+    - path: data/results/nuijten.json
+      hash: md5
+      md5: 3239738d69632c83b90d5e0339b0684a
+      size: 545
+    - path: data/videos/nuijten
+      hash: md5
+      md5: 79ce79dd65de5e41827a8105ed80ddf7.dir
+      size: 9335
+      nfiles: 2
+  experiment@reduced-nuijten:
+    cmd: uv run python run_experiment.py --planning-method reduced-nuijten 
+      --grid-size 3 --episodes 10 --max-steps 15 --planning-horizon 15 
+      --inference-iterations 10 --planning-iterations 20 --seed 0 --fov-size 3 
+      --damping 0.5 --obs-alpha 0.05 --record "first,last" --video-dir 
+      data/videos/reduced-nuijten --output data/results/reduced-nuijten.json 
+      --receding-horizon --no-orientation
+    deps:
+    - path: agents/
+      hash: md5
+      md5: 780d42b01bd7a399bb5a6bc6c2829289.dir
+      size: 96591
+      nfiles: 8
+    - path: environments/
+      hash: md5
+      md5: 9a7c3789dbaae0db010c2ab01674e931.dir
+      size: 121299
+      nfiles: 12
+    - path: inference/
+      hash: md5
+      md5: 28fc5e937caab838ee137a2257a88054.dir
+      size: 326752
+      nfiles: 33
+    - path: run_experiment.py
+      hash: md5
+      md5: 14f483148f4a1cefd09285a93bc7f6db
+      size: 12971
+    - path: utils/
+      hash: md5
+      md5: 9423271c0fa3046ceebec30b525580b8.dir
+      size: 18613
+      nfiles: 8
+    params:
+      params.yaml:
+        experiment:
+          grid_size: 3
+          episodes: 10
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+          fov_size: 3
+          damping: 0.5
+          obs_alpha: 0.05
+        methods.reduced-nuijten:
+          planning_iterations: 20
+    outs:
+    - path: data/results/reduced-nuijten.json
+      hash: md5
+      md5: 226c19eec3b0f596d8acdd69308b25ce
+      size: 565
+    - path: data/videos/reduced-nuijten
+      hash: md5
+      md5: 719c7c53a3ec22a74075357aee62af5e.dir
+      size: 10059
       nfiles: 2

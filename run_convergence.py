@@ -22,7 +22,8 @@ from environments.minigrid import (
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
     IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent,
-    ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent,
+    ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent,
+    NuijtenMPAgent, ReducedNuijtenMPAgent,
 )
 from inference.state_inference import state_inference_step
 from inference.convergence import (
@@ -30,6 +31,8 @@ from inference.convergence import (
     loopy_bp_convergence,
     region_extended_convergence,
     reduced_region_extended_convergence,
+    dyn_channel_convergence,
+    reduced_dyn_channel_convergence,
     nuijten_mp_convergence,
     reduced_nuijten_mp_convergence,
 )
@@ -67,6 +70,12 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
             transition_tensor=transition_tensor, **common)
     elif method == "reduced-aif":
         return ReducedRegionExtendedAgent.create(
+            transition_tensor=transition_tensor, **common)
+    elif method == "dyn-channel":
+        return DynChannelLoopyBPAgent.create(
+            transition_tensor=transition_tensor, **common)
+    elif method == "reduced-dyn-channel":
+        return ReducedDynChannelAgent.create(
             transition_tensor=transition_tensor, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(
@@ -125,6 +134,30 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             damping=damping,
         )
         return action_dist, vfe_trace
+    elif method == "dyn-channel":
+        action_dist, _, vfe_trace = dyn_channel_convergence(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensors,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=n_iterations,
+            damping=damping,
+        )
+        return action_dist, vfe_trace
+    elif method == "reduced-dyn-channel":
+        action_dist, _, vfe_trace = reduced_dyn_channel_convergence(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensors,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=n_iterations,
+            damping=damping,
+        )
+        return action_dist, vfe_trace
     elif method == "nuijten":
         action_dist, _, _, vfe_trace = nuijten_mp_convergence(
             q_current_state=q_current,
@@ -164,6 +197,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--planning-method", type=str, default="bp",
                         choices=["bp", "loopy", "region-extended", "reduced-aif",
+                                 "dyn-channel", "reduced-dyn-channel",
                                  "nuijten", "reduced-nuijten"])
     parser.add_argument("--fov-size", type=int, default=7)
     parser.add_argument("--no-orientation", action="store_true")

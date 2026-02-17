@@ -24,13 +24,16 @@ from environments.minigrid import (
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
     IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent,
-    ReducedRegionExtendedAgent, NuijtenMPAgent, ReducedNuijtenMPAgent,
+    ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent,
+    NuijtenMPAgent, ReducedNuijtenMPAgent,
 )
 from inference.state_inference import state_inference_step_indexed
 from inference.planning import planning
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 from inference.reduced_region_extended import reduced_region_extended_planning
+from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
+from inference.reduced_dyn_channel import reduced_dyn_channel_planning
 from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
 from utils.tensors import (
     get_dimensions, flatten_state_index, unflatten_state_index,
@@ -222,6 +225,30 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
         return result[0]
     elif method == "reduced-aif":
         result = reduced_region_extended_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=agent.n_planning_iterations,
+            damping=damping,
+        )
+        return result[0]
+    elif method == "dyn-channel":
+        result = dyn_channel_loopy_bp_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=agent.observation_tensor,
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=agent.n_planning_iterations,
+            damping=damping,
+        )
+        return result[0]
+    elif method == "reduced-dyn-channel":
+        result = reduced_dyn_channel_planning(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
@@ -474,6 +501,12 @@ def create_agent(args, transition_tensor, transition_idx, observation_tensor,
     elif method == "reduced-aif":
         return ReducedRegionExtendedAgent.create(
             transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
+    elif method == "dyn-channel":
+        return DynChannelLoopyBPAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
+    elif method == "reduced-dyn-channel":
+        return ReducedDynChannelAgent.create(
+            transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(
             transition_tensor=transition_tensor, observation_tensor=observation_tensor, **common)
@@ -494,7 +527,7 @@ def main():
     parser.add_argument("--planning-iterations", type=int, default=10, help="Planning iterations")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy", "region-extended", "reduced-aif", "nuijten", "reduced-nuijten"],
+                        choices=["bp", "loopy", "region-extended", "reduced-aif", "dyn-channel", "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
                         help="Planning method")
     parser.add_argument("--fov-size", type=int, default=7, help="Field-of-view size (odd, >= 3)")
     parser.add_argument("--no-orientation", action="store_true",
