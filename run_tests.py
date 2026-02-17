@@ -132,6 +132,7 @@ def run_inference_tests():
         TestNuijtenMP,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
+        TestPerformanceRefactorEquivalence,
     )
 
     print()
@@ -245,6 +246,15 @@ def run_inference_tests():
     t.test_reduced_region_extended_with_fov5()
     t.test_agent_step_with_fov5()
     print("  Custom FOV size inference: PASSED")
+
+    print("Running performance refactor equivalence tests...")
+    t = TestPerformanceRefactorEquivalence()
+    t.setup_method()
+    t.test_region_extended_equivalence()
+    t.test_reduced_region_extended_equivalence()
+    t.test_loopy_bp_equivalence()
+    t.test_loopy_vbp_equivalence()
+    print("  Performance refactor equivalence: PASSED")
 
 
 def run_groundtruth_tests():

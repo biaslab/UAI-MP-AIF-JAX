@@ -1406,3 +1406,69 @@ class TestCustomFOVSizeInference:
 
         action, new_agent = agent.step(vision_obs, ori_obs, time_remaining=10)
         assert 0 <= action < 7
+
+
+class TestPerformanceRefactorEquivalence:
+    """Equivalence tests for performance refactors.
+
+    Reference values captured before refactoring with fixed inputs
+    (grid_size=4, uniform priors, goal at state 0, horizon=5, 3 iterations).
+    """
+
+    def setup_method(self):
+        import jax.numpy as jnp
+        from environments.minigrid import generate_transition_tensor, generate_observation_tensor
+
+        self.n = 4
+        n_states = self.n * self.n * 4 * 3
+        n_static = (self.n * self.n - 2 * self.n) ** 2
+
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+        self.q_current = jnp.ones(n_states) / n_states
+        self.q_static = jnp.ones(n_static) / n_static
+        self.goal = jnp.zeros(n_states).at[0].set(1.0)
+
+    def test_region_extended_equivalence(self):
+        import jax.numpy as jnp
+        from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
+
+        ref = jnp.array([0.28529316, 0.28473705, 0.15433712, 0.13547038, 0.0, 0.1401623, 0.0])
+        action_dist, _, _ = region_extended_loopy_bp_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor, self.goal, horizon=5, n_iterations=3)
+        assert np.allclose(action_dist, ref, atol=1e-5), (
+            f"region_extended mismatch:\n  got:      {action_dist}\n  expected: {ref}")
+
+    def test_reduced_region_extended_equivalence(self):
+        import jax.numpy as jnp
+        from inference.reduced_region_extended import reduced_region_extended_planning
+
+        ref = jnp.array([0.27358004, 0.2739623, 0.184954, 0.13003711, 0.0, 0.1374666, 0.0])
+        action_dist, _, _ = reduced_region_extended_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor, self.goal, horizon=5, n_iterations=3)
+        assert np.allclose(action_dist, ref, atol=1e-5), (
+            f"reduced_region_extended mismatch:\n  got:      {action_dist}\n  expected: {ref}")
+
+    def test_loopy_bp_equivalence(self):
+        import jax.numpy as jnp
+        from inference.loopy_bp import loopy_bp_planning
+
+        ref = jnp.array([0.20261735, 0.20261735, 0.19984041, 0.19230758, 0.0, 0.20261735, 0.0])
+        action_dist = loopy_bp_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.goal, horizon=5, n_iterations=3)
+        assert np.allclose(action_dist, ref, atol=1e-5), (
+            f"loopy_bp mismatch:\n  got:      {action_dist}\n  expected: {ref}")
+
+    def test_loopy_vbp_equivalence(self):
+        import jax.numpy as jnp
+        from inference.loopy_vbp import loopy_vbp_planning
+
+        ref = jnp.array([0.9062488, 0.03125, 0.05208333, 0.0, 0.01041667, 0.0, 0.0])
+        action_dist = loopy_vbp_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.goal, horizon=5, n_iterations=3)
+        assert np.allclose(action_dist, ref, atol=1e-5), (
+            f"loopy_vbp mismatch:\n  got:      {action_dist}\n  expected: {ref}")

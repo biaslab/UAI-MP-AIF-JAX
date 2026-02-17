@@ -389,10 +389,13 @@ def soften_observation_tensor(B_hard: np.ndarray, fov_size: int, alpha: float) -
 
     half = fov_size // 2
     ref_x, ref_y = half, fov_size - 2  # cell directly in front of agent
+    agent_x, agent_y = half, fov_size - 1  # agent position
 
-    # Manhattan distance grid: shape (fov_size, fov_size)
+    # Manhattan distance grid: min distance to agent or cell in front
     ix = np.arange(fov_size)
-    dist = np.abs(ix[:, None] - ref_x) + np.abs(ref_y - ix[None, :])  # (fov, fov)
+    dist_ref = np.abs(ix[:, None] - ref_x) + np.abs(ref_y - ix[None, :])
+    dist_agent = np.abs(ix[:, None] - agent_x) + np.abs(agent_y - ix[None, :])
+    dist = np.minimum(dist_ref, dist_agent)  # (fov, fov)
 
     precision = np.maximum(0.0, 1.0 - alpha * dist)  # (fov, fov)
 

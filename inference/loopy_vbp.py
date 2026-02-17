@@ -106,14 +106,14 @@ def compute_dyn_to_theta_msgs_vbp(log_T, log_fwd_msgs, log_V, horizon):
     Returns:
         log_dyn_to_theta: (T, n_static) log-space messages
     """
-    def compute_msg_t(t):
-        log_terms = (log_T
-                     + log_fwd_msgs[t][None, :, None, None]
-                     + log_V[t + 1][:, None, None, None])
-        # Max over u (ε→0), then sum over x_new and x_old
-        return logsumexp(jnp.max(log_terms, axis=3), axis=(0, 1))
+    log_fwd_t = log_fwd_msgs[:-1][:, None, :, None, None]
+    log_V_t1 = log_V[1:][:, :, None, None, None]
 
-    return jax.vmap(compute_msg_t)(jnp.arange(horizon))
+    terms = (log_T[None]
+             + log_fwd_t
+             + log_V_t1)
+    # Max over u (ε→0), then sum over x_new and x_old
+    return logsumexp(jnp.max(terms, axis=4), axis=(1, 2))
 
 
 @partial(jax.jit, static_argnums=(4, 5))

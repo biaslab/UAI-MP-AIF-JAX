@@ -46,9 +46,8 @@ def damp_log_channel(log_old, log_new, damping, cond_axis):
     log_d = jnp.log(damping)
     log_1md = jnp.log(jnp.maximum(1.0 - damping, 1e-30))
 
-    # Arithmetic mix via logsumexp over a 2-element stack
-    stacked = jnp.stack([log_1md + log_old, log_d + log_new])
-    damped = logsumexp(stacked, axis=0)
+    # Arithmetic mix via logaddexp (avoids stack + logsumexp overhead)
+    damped = jnp.logaddexp(log_1md + log_old, log_d + log_new)
 
     # Structural zeros: only zero if BOTH old and new are LOG_ZERO
     valid = (log_old > LOG_ZERO / 2) | (log_new > LOG_ZERO / 2)
@@ -178,17 +177,14 @@ def compute_dyn_to_theta_msgs(log_dyn_kernels, log_fwd_msgs, log_bwd_msgs,
     Returns:
         log_dyn_to_theta: (T, n_static) log-space messages
     """
-    def compute_msg_t(t):
-        log_fwd_t = log_fwd_msgs[t] + log_obs_to_x[t]
-        log_bwd_t1 = log_bwd_msgs[t + 1] + log_obs_to_x[t + 1]
+    log_fwd_t = (log_fwd_msgs[:-1] + log_obs_to_x[:-1])[:, :, None, None, None]
+    log_bwd_t1 = (log_bwd_msgs[1:] + log_obs_to_x[1:])[:, None, :, None, None]
 
-        terms = (log_dyn_kernels[t]
-                 + log_fwd_t[:, None, None, None]
-                 + log_bwd_t1[None, :, None, None]
-                 + log_action_prior[None, None, None, :])
-        return logsumexp(terms, axis=(0, 1, 3))
-
-    return jax.vmap(compute_msg_t)(jnp.arange(horizon))
+    terms = (log_dyn_kernels
+             + log_fwd_t
+             + log_bwd_t1
+             + log_action_prior[None, None, None, None, :])
+    return logsumexp(terms, axis=(1, 2, 4))
 
 
 def compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs):
@@ -217,33 +213,39 @@ def compute_obs_to_theta_msgs(log_obs_kernels, log_fwd_msgs, log_bwd_msgs,
     Returns:
         log_obs_to_theta: (T+1, n_static) log-space messages
     """
-    T_plus_1 = log_fwd_msgs.shape[0]
+    log_x_msg = (log_fwd_msgs + log_bwd_msgs)[:, None, None, :, None]
 
-    def compute_msg_t(t):
-        log_x_msg = log_fwd_msgs[t] + log_bwd_msgs[t]
-        log_x_msg = log_x_msg - logsumexp(log_x_msg)
-
-        terms = log_obs_kernels[t] + log_x_msg[None, None, :, None]
-        log_per_k = logsumexp(terms, axis=(1, 2))  # (n_fov, n_static)
-        return log_per_k.sum(axis=0)
-
-    return jax.vmap(compute_msg_t)(jnp.arange(T_plus_1))
+    terms = log_obs_kernels + log_x_msg
+    log_per_k = logsumexp(terms, axis=(2, 3))  # (T+1, n_fov, n_static)
+    return log_per_k.sum(axis=1)
 
 
 def compute_theta_cavities_extended(log_prior, log_dyn_to_theta, log_obs_to_theta):
     """
-    Compute cavity messages for theta via total-minus-self (log-space).
+    Compute cavity messages for theta via forward-backward prefix sums (log-space).
+
+    More numerically stable than total-minus-self: avoids subtracting large
+    accumulated sums. There are T dyn messages and T+1 obs messages.
 
     Returns:
         log_cavity_dyn: (T, n_static) log-normalized cavity beliefs for dynamics
         log_cavity_obs: (T+1, n_static) log-normalized cavity beliefs for obs
     """
-    total = log_prior + log_dyn_to_theta.sum(axis=0) + log_obs_to_theta.sum(axis=0)
+    n_static = log_dyn_to_theta.shape[1]
+    zeros = jnp.zeros((1, n_static))
 
-    log_cavity_dyn = total[None, :] - log_dyn_to_theta
+    # Dyn cavities: exclude dyn[t], include all obs
+    total_obs = log_obs_to_theta.sum(axis=0)
+    dyn_fwd = jnp.concatenate([zeros, jnp.cumsum(log_dyn_to_theta, axis=0)[:-1]]) + log_prior + total_obs
+    dyn_bwd = jnp.concatenate([jnp.cumsum(log_dyn_to_theta[::-1], axis=0)[::-1][1:], zeros])
+    log_cavity_dyn = dyn_fwd + dyn_bwd
     log_cavity_dyn = log_cavity_dyn - logsumexp(log_cavity_dyn, axis=1, keepdims=True)
 
-    log_cavity_obs = total[None, :] - log_obs_to_theta
+    # Obs cavities: exclude obs[t], include all dyn
+    total_dyn = log_dyn_to_theta.sum(axis=0)
+    obs_fwd = jnp.concatenate([zeros, jnp.cumsum(log_obs_to_theta, axis=0)[:-1]]) + log_prior + total_dyn
+    obs_bwd = jnp.concatenate([jnp.cumsum(log_obs_to_theta[::-1], axis=0)[::-1][1:], zeros])
+    log_cavity_obs = obs_fwd + obs_bwd
     log_cavity_obs = log_cavity_obs - logsumexp(log_cavity_obs, axis=1, keepdims=True)
 
     return log_cavity_dyn, log_cavity_obs
@@ -262,19 +264,14 @@ def compute_dyn_region_beliefs(log_dyn_kernels, log_fwd_msgs, log_bwd_msgs,
     Returns:
         (T, x_old, x_new, θ, u) unnormalized log beliefs
     """
-    T = log_cavity_dyn.shape[0]
+    log_fwd_t = (log_fwd_msgs[:-1] + log_obs_to_x[:-1])[:, :, None, None, None]
+    log_bwd_t1 = (log_bwd_msgs[1:] + log_obs_to_x[1:])[:, None, :, None, None]
 
-    def compute_single_t(t):
-        log_fwd_t = log_fwd_msgs[t] + log_obs_to_x[t]
-        log_bwd_t1 = log_bwd_msgs[t + 1] + log_obs_to_x[t + 1]
-
-        return (log_dyn_kernels[t]
-                + log_fwd_t[:, None, None, None]
-                + log_bwd_t1[None, :, None, None]
-                + log_cavity_dyn[t][None, None, :, None]
-                + log_action_prior[None, None, None, :])
-
-    return jax.vmap(compute_single_t)(jnp.arange(T))
+    return (log_dyn_kernels
+            + log_fwd_t
+            + log_bwd_t1
+            + log_cavity_dyn[:, None, None, :, None]
+            + log_action_prior[None, None, None, None, :])
 
 
 def compute_dyn_channels(log_region_beliefs):
@@ -296,16 +293,11 @@ def compute_obs_region_beliefs(log_obs_kernels, log_fwd_msgs, log_bwd_msgs,
     Returns:
         (T+1, n_fov, N_CELL_TYPES, n_states, n_static) unnormalized log beliefs
     """
-    T_plus_1 = log_cavity_obs.shape[0]
+    log_x_belief = (log_fwd_msgs + log_bwd_msgs)[:, None, None, :, None]
 
-    def compute_single_t(t):
-        log_x_belief = log_fwd_msgs[t] + log_bwd_msgs[t]
-
-        return (log_obs_kernels[t]
-                + log_x_belief[None, None, :, None]
-                + log_cavity_obs[t][None, None, None, :])
-
-    return jax.vmap(compute_single_t)(jnp.arange(T_plus_1))
+    return (log_obs_kernels
+            + log_x_belief
+            + log_cavity_obs[:, None, None, None, :])
 
 
 def compute_obs_channels(log_region_beliefs):
