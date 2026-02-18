@@ -1,13 +1,13 @@
 experiment:
   grid_size: 3
   episodes: 10
-  max_steps: 15
+  max_steps: 20
   planning_horizon: 15
   inference_iterations: 10
   seed: 0
   fov_size: 3
   damping: 0.5
-  obs_alpha: 0.05
+  obs_alpha: 0.6
 
 methods:
   bp:
@@ -29,4 +29,194 @@ methods:
   nuijten:
     planning_iterations: 20
   reduced-nuijten:
+    planning_iterations: 20
+
+convergence:
+  planning_iterations: 100
+  planning_horizon: 20
+  method: region-extended
+  seed: 0
+
+convergence_matrix:
+  alpha_0.0_damp_0.01:
+    obs_alpha: 0.0
+    damping: 0.01
+  alpha_0.0_damp_0.1:
+    obs_alpha: 0.0
+    damping: 0.1
+  alpha_0.0_damp_0.25:
+    obs_alpha: 0.0
+    damping: 0.25
+  alpha_0.0_damp_0.5:
+    obs_alpha: 0.0
+    damping: 0.5
+  alpha_0.0_damp_0.75:
+    obs_alpha: 0.0
+    damping: 0.75
+  alpha_0.0_damp_0.9:
+    obs_alpha: 0.0
+    damping: 0.9
+  alpha_0.0_damp_0.99:
+    obs_alpha: 0.0
+    damping: 0.99
+  alpha_0.0_damp_1.0:
+    obs_alpha: 0.0
+    damping: 1.0
+  alpha_0.01_damp_0.01:
+    obs_alpha: 0.01
+    damping: 0.01
+  alpha_0.01_damp_0.1:
+    obs_alpha: 0.01
+    damping: 0.1
+  alpha_0.01_damp_0.25:
+    obs_alpha: 0.01
+    damping: 0.25
+  alpha_0.01_damp_0.5:
+    obs_alpha: 0.01
+    damping: 0.5
+  alpha_0.01_damp_0.75:
+    obs_alpha: 0.01
+    damping: 0.75
+  alpha_0.01_damp_0.9:
+    obs_alpha: 0.01
+    damping: 0.9
+  alpha_0.01_damp_0.99:
+    obs_alpha: 0.01
+    damping: 0.99
+  alpha_0.01_damp_1.0:
+    obs_alpha: 0.01
+    damping: 1.0
+  alpha_0.05_damp_0.01:
+    obs_alpha: 0.05
+    damping: 0.01
+  alpha_0.05_damp_0.1:
+    obs_alpha: 0.05
+    damping: 0.1
+  alpha_0.05_damp_0.25:
+    obs_alpha: 0.05
+    damping: 0.25
+  alpha_0.05_damp_0.5:
+    obs_alpha: 0.05
+    damping: 0.5
+  alpha_0.05_damp_0.75:
+    obs_alpha: 0.05
+    damping: 0.75
+  alpha_0.05_damp_0.9:
+    obs_alpha: 0.05
+    damping: 0.9
+  alpha_0.05_damp_0.99:
+    obs_alpha: 0.05
+    damping: 0.99
+  alpha_0.05_damp_1.0:
+    obs_alpha: 0.05
+    damping: 1.0
+  alpha_0.1_damp_0.01:
+    obs_alpha: 0.1
+    damping: 0.01
+  alpha_0.1_damp_0.1:
+    obs_alpha: 0.1
+    damping: 0.1
+  alpha_0.1_damp_0.25:
+    obs_alpha: 0.1
+    damping: 0.25
+  alpha_0.1_damp_0.5:
+    obs_alpha: 0.1
+    damping: 0.5
+  alpha_0.1_damp_0.75:
+    obs_alpha: 0.1
+    damping: 0.75
+  alpha_0.1_damp_0.9:
+    obs_alpha: 0.1
+    damping: 0.9
+  alpha_0.1_damp_0.99:
+    obs_alpha: 0.1
+    damping: 0.99
+  alpha_0.1_damp_1.0:
+    obs_alpha: 0.1
+    damping: 1.0
+  alpha_0.2_damp_0.01:
+    obs_alpha: 0.2
+    damping: 0.01
+  alpha_0.2_damp_0.1:
+    obs_alpha: 0.2
+    damping: 0.1
+  alpha_0.2_damp_0.25:
+    obs_alpha: 0.2
+    damping: 0.25
+  alpha_0.2_damp_0.5:
+    obs_alpha: 0.2
+    damping: 0.5
+  alpha_0.2_damp_0.75:
+    obs_alpha: 0.2
+    damping: 0.75
+  alpha_0.2_damp_0.9:
+    obs_alpha: 0.2
+    damping: 0.9
+  alpha_0.2_damp_0.99:
+    obs_alpha: 0.2
+    damping: 0.99
+  alpha_0.2_damp_1.0:
+    obs_alpha: 0.2
+    damping: 1.0
+  alpha_0.3_damp_0.01:
+    obs_alpha: 0.3
+    damping: 0.01
+  alpha_0.3_damp_0.1:
+    obs_alpha: 0.3
+    damping: 0.1
+  alpha_0.3_damp_0.25:
+    obs_alpha: 0.3
+    damping: 0.25
+  alpha_0.3_damp_0.5:
+    obs_alpha: 0.3
+    damping: 0.5
+  alpha_0.3_damp_0.75:
+    obs_alpha: 0.3
+    damping: 0.75
+  alpha_0.3_damp_0.9:
+    obs_alpha: 0.3
+    damping: 0.9
+  alpha_0.3_damp_0.99:
+    obs_alpha: 0.3
+    damping: 0.99
+  alpha_0.3_damp_1.0:
+    obs_alpha: 0.3
+    damping: 1.0
+  alpha_0.5_damp_0.01:
+    obs_alpha: 0.5
+    damping: 0.01
+  alpha_0.5_damp_0.1:
+    obs_alpha: 0.5
+    damping: 0.1
+  alpha_0.5_damp_0.25:
+    obs_alpha: 0.5
+    damping: 0.25
+  alpha_0.5_damp_0.5:
+    obs_alpha: 0.5
+    damping: 0.5
+  alpha_0.5_damp_0.75:
+    obs_alpha: 0.5
+    damping: 0.75
+  alpha_0.5_damp_0.9:
+    obs_alpha: 0.5
+    damping: 0.9
+  alpha_0.5_damp_0.99:
+    obs_alpha: 0.5
+    damping: 0.99
+  alpha_0.5_damp_1.0:
+    obs_alpha: 0.5
+    damping: 1.0
+
+deterioration:
+  alphas: [0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5]
+  episodes: 10
+  max_steps: 20
+  planning_horizon: 15
+  inference_iterations: 10
+  seed: 0
+
+deterioration_methods:
+  loopy:
+    planning_iterations: 10
+  region-extended:
     planning_iterations: 20
