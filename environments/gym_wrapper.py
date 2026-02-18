@@ -346,6 +346,8 @@ def run_experiment(
         
         if should_record and "frames" in episode_result and video_dir:
             frames = episode_result.pop("frames")
+            frames_dir = str(Path(video_dir) / f"frames_episode_{i:03d}")
+            save_frames(frames, frames_dir, i)
             video_path = str(Path(video_dir) / f"episode_{i:03d}.mp4")
             save_video(frames, video_path)
         
