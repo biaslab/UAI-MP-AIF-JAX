@@ -1466,7 +1466,7 @@ class TestPerformanceRefactorEquivalence:
         import jax.numpy as jnp
         from inference.loopy_vbp import loopy_vbp_planning
 
-        ref = jnp.array([0.9062488, 0.03125, 0.05208333, 0.0, 0.01041667, 0.0, 0.0])
+        ref = jnp.array([0.3606784, 0.19943862, 0.33667472, 0.0, 0.10320825, 0.0, 0.0])
         action_dist = loopy_vbp_planning(
             self.q_current, self.q_static, self.transition_tensor,
             self.goal, horizon=5, n_iterations=3)

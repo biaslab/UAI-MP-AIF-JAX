@@ -75,11 +75,27 @@ def vbp_planning(
 
     log_V, log_Q = lax.fori_loop(0, horizon, backward_body, (log_V, log_Q))
 
-    # Action selection: greedy policy weighted by state belief
-    # For each state, find the best action
+    # Forward pass: propagate belief under argmax policy
+    log_fwd = jnp.full((horizon + 1, n_states), LOG_ZERO)
+    log_fwd = log_fwd.at[0].set(log_q0)
+
+    def forward_body(t, log_fwd):
+        best_actions = jnp.argmax(log_Q[t], axis=-1)
+        log_policy = safe_log(nn.one_hot(best_actions, n_actions))
+        log_terms = (log_reduced
+                     + log_fwd[t][None, :, None]
+                     + log_policy[None, :, :])
+        log_q_next = logsumexp(log_terms, axis=(1, 2))
+        log_q_next = log_q_next - logsumexp(log_q_next)
+        return log_fwd.at[t + 1].set(log_q_next)
+
+    log_fwd = lax.fori_loop(0, horizon, forward_body, log_fwd)
+
+    # Action selection: greedy policy weighted by belief and value
+    # q(a_0) ∝ Σ_{x_0} δ(a, a*(x_0)) · P(x_0) · V(x_0)
     best_actions = jnp.argmax(log_Q[0], axis=-1)  # (n_states,)
-    # action_dist[a] = Σ_x p(x_0) * δ(a, argmax_a' Q(x, a'))
-    q0_probs = nn.softmax(log_q0)
-    action_dist = jnp.zeros(n_actions).at[best_actions].add(q0_probs)
+    log_weights = log_q0 + log_V[0]
+    weights = nn.softmax(log_weights)
+    action_dist = jnp.zeros(n_actions).at[best_actions].add(weights)
 
     return action_dist

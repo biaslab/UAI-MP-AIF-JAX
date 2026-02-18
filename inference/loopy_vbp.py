@@ -156,7 +156,7 @@ def loopy_vbp_planning(
     log_Q_init = jnp.full((horizon, n_states, n_actions), LOG_ZERO)
 
     def body_fn(_, carry):
-        log_cavity_theta, _ = carry
+        log_cavity_theta, _, _ = carry
 
         log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
 
@@ -170,15 +170,18 @@ def loopy_vbp_planning(
         )
         new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
 
-        return new_log_cavity, log_Q
+        return new_log_cavity, log_Q, log_V
 
-    log_cavity_theta, log_Q = lax.fori_loop(
-        0, n_iterations, body_fn, (log_cavity_theta, log_Q_init)
+    log_V_init = jnp.full((horizon + 1, n_states), LOG_ZERO)
+    log_cavity_theta, log_Q, log_V = lax.fori_loop(
+        0, n_iterations, body_fn, (log_cavity_theta, log_Q_init, log_V_init)
     )
 
-    # Action selection: greedy policy weighted by state belief
+    # Action selection: greedy policy weighted by belief and value
+    # q(a_0) ∝ Σ_{x_0} δ(a, a*(x_0)) · P(x_0) · V(x_0)
     best_actions = jnp.argmax(log_Q[0], axis=-1)  # (n_states,)
-    q0_probs = nn.softmax(log_q0)
-    action_dist = jnp.zeros(n_actions).at[best_actions].add(q0_probs)
+    log_weights = log_q0 + log_V[0]
+    weights = nn.softmax(log_weights)
+    action_dist = jnp.zeros(n_actions).at[best_actions].add(weights)
 
     return action_dist
