@@ -116,7 +116,7 @@ def run_minigrid_tests():
     t.test_reference_cell_unchanged()
     t.test_alpha_zero_recovers_hard()
     t.test_large_alpha_approaches_uniform()
-    t.test_unseen_preserved()
+    t.test_unseen_softened()
     print("  Observation softening: PASSED")
 
 

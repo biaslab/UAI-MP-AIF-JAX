@@ -165,7 +165,7 @@ class MiniGridWrapper:
         for i in range(fov_w):
             for j in range(fov_h):
                 cell_type = int(image[i, j])
-                if self.obs_alpha > 0.0 and cell_type != 0:  # 0 = UNSEEN
+                if self.obs_alpha > 0.0:
                     prec = self._obs_precision[i, j]
                     p = np.full(N_CELL_TYPES, (1.0 - prec) / N_CELL_TYPES)
                     p[cell_type] += prec

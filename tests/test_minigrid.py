@@ -695,20 +695,25 @@ class TestObservationSoftening:
                 continue
             break
 
-    def test_unseen_preserved(self):
-        """UNSEEN entries must stay exactly as in the hard tensor."""
+    def test_unseen_softened(self):
+        """UNSEEN entries are softened like any other cell type."""
         alpha = 0.2
         B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=alpha)
 
         unseen_mask = self.B_hard[:, :, CellType.UNSEEN, :, :] == 1.0
-        # Where hard tensor had UNSEEN=1, soft tensor should be identical
+        # Where hard tensor had UNSEEN=1, soft tensor should NOT be identical
         for s in range(B_soft.shape[3]):
             for th in range(B_soft.shape[4]):
                 for i in range(self.fov_size):
                     for j in range(self.fov_size):
                         if unseen_mask[i, j, s, th]:
-                            np.testing.assert_array_equal(
+                            soft_probs = B_soft[i, j, :, s, th].astype(np.float64)
+                            assert np.allclose(soft_probs.sum(), 1.0, atol=1e-2), \
+                                f"UNSEEN soft probs don't sum to 1: {soft_probs.sum()}"
+                            assert soft_probs[CellType.UNSEEN] > soft_probs.max() - 1e-3, \
+                                "UNSEEN should still be the most likely cell type"
+                            assert not np.array_equal(
                                 B_soft[i, j, :, s, th],
                                 self.B_hard[i, j, :, s, th],
-                            )
+                            ), "UNSEEN entry should be softened, not preserved exactly"
                             return  # one example is enough

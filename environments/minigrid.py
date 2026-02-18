@@ -405,11 +405,6 @@ def soften_observation_tensor(B_hard: np.ndarray, fov_size: int, alpha: float) -
 
     B_soft = (p * B_hard + (1.0 - p) * uniform).astype(B_hard.dtype)
 
-    # Preserve UNSEEN entries: where B_hard has 1.0 on the UNSEEN channel, keep B_hard
-    unseen_mask = B_hard[:, :, CellType.UNSEEN, :, :] == 1.0  # (fov, fov, states, static)
-    unseen_mask = unseen_mask[:, :, None, :, :]  # (fov, fov, 1, states, static)
-    B_soft = np.where(unseen_mask, B_hard, B_soft)
-
     return B_soft
 
 
