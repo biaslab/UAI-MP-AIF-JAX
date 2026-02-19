@@ -1,13 +1,13 @@
 experiment:
-  grid_size: 3
-  episodes: 10
-  max_steps: 20
-  planning_horizon: 15
+  grid_size: 4
+  episodes: 1000
+  max_steps: 25
+  planning_horizon: 20
   inference_iterations: 10
   seed: 0
   fov_size: 3
-  damping: 0.5
-  obs_alpha: 0.6
+  damping: 0.25
+  obs_alpha: 0.01
 
 methods:
   loopy-vbp:
