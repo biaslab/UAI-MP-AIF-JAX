@@ -19,7 +19,6 @@ stages:
         --video-dir data/videos/${key}
         --output data/results/${key}.json
         --receding-horizon
-        --no-orientation
       deps:
         - run_experiment.py
         - agents/
@@ -76,7 +75,6 @@ stages:
       --fov-size ${experiment.fov_size}
       --damping ${experiment.damping}
       --receding-horizon
-      --no-orientation
       --output-dir data/deterioration
     deps:
       - run_deterioration.py
