@@ -1124,7 +1124,7 @@ stages:
   frozen_lake@reduced-region-extended:
     cmd: uv run python run_frozen_lake.py --planning-method 
       reduced-region-extended --grid-size 4 --n-configs 15 --hole-fraction 0.2 
-      --min-hamming 4 --base-noise 0.5 --noise-range 0.1 --slip-prob 0.1 
+      --min-hamming 4 --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 
       --episodes 100 --max-steps 15 --planning-horizon 15 --planning-iterations 
       30 --damping 0.3 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1
       --seed 0 --output data/results/frozen_lake/reduced-region-extended.json
@@ -1169,5 +1169,5 @@ stages:
     outs:
     - path: data/results/frozen_lake/reduced-region-extended.json
       hash: md5
-      md5: 67af19ae105f4fd5efae8d64fc402f22
+      md5: 18ebf70e0ae71c37460b6051b1255893
       size: 624
