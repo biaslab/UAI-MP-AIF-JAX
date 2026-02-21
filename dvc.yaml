@@ -88,9 +88,9 @@ stages:
         --damping ${item.damping}
         --hole-penalty ${frozen_lake.hole_penalty}
         --goal-temperature ${frozen_lake.goal_temperature}
+        --scan-cost ${frozen_lake.scan_cost}
         --seed ${frozen_lake.seed}
         --output data/results/frozen_lake/${key}.json
-        --receding-horizon
       deps:
         - run_frozen_lake.py
         - agents/frozen_lake_agent.py
@@ -119,6 +119,7 @@ stages:
         --planning-horizon ${wumpus_world.planning_horizon}
         --planning-iterations ${item.planning_iterations}
         --damping ${wumpus_world.damping}
+        --scan-cost ${wumpus_world.scan_cost}
         --seed ${wumpus_world.seed}
         --output data/results/wumpus_world/${key}.json
         --receding-horizon

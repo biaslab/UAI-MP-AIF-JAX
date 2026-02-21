@@ -1,23 +1,25 @@
-"""Wumpus World environment with hidden pits and wumpus.
+"""Wumpus World environment with hidden pits, wumpus, and SCAN action.
 
 Grid world where the agent must reach the gold while avoiding hidden pits and
 the wumpus. The agent perceives breeze (adjacent to pit), stench (adjacent to
 wumpus), and glitter (on the gold cell). Static state θ represents sampled
 (pits, wumpus, gold) configurations.
 
-State space:
-    x: agent position (row * grid_size + col), flat index 0..n_states-1
-    θ: configuration index, one of k pre-sampled configs
+State space (doubled for scan mode):
+    x: state_index(pos, scanned, n_pos) where pos = row * grid_size + col
+    mode 0 = unscanned (noisy observations), mode 1 = scanned (near-deterministic)
+    Total states: 2 * n_pos
 
 Actions:
-    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP
+    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP, 4: SCAN
 
 Observations:
     3 binary channels:
         - channel 0: breeze  (0=no, 1=yes) — adjacent to a pit
         - channel 1: stench  (0=no, 1=yes) — adjacent to the wumpus
         - channel 2: glitter (0=no, 1=yes) — on the gold cell
-    Observation tensor shape: (3, 2, n_states, n_static)
+    Noisy when unscanned, near-deterministic when scanned.
+    Observation tensor shape: (3, 2, 2*n_pos, n_static)
 """
 
 import numpy as np
@@ -28,7 +30,9 @@ LEFT = 0
 DOWN = 1
 RIGHT = 2
 UP = 3
-N_ACTIONS = 4
+SCAN = 4
+N_ACTIONS = 5
+N_MOVEMENT_ACTIONS = 4
 
 # Observation channels
 BREEZE = 0
@@ -44,6 +48,18 @@ MOVEMENT = {
     RIGHT: (0, 1),
     UP: (-1, 0),
 }
+
+
+def state_index(pos: int, scanned: int, n_pos: int) -> int:
+    """Compute flat state index: x = pos + scanned * n_pos."""
+    return pos + scanned * n_pos
+
+
+def unpack_state(x: int, n_pos: int) -> tuple[int, int]:
+    """Unpack flat state index into (pos, scanned)."""
+    scanned = x // n_pos
+    pos = x % n_pos
+    return pos, scanned
 
 
 def pos_to_rc(pos: int, grid_size: int) -> tuple[int, int]:
@@ -140,49 +156,60 @@ def generate_transition_tensor(
 ) -> np.ndarray:
     """Generate transition tensor T(x_new, x_old, θ, action).
 
-    Pits and wumpus cells are absorbing (death).
+    State space is doubled: x = pos + scanned * n_pos.
+    Pits and wumpus cells are absorbing (death). Gold is NOT absorbing in T.
+    Movement preserves scan mode. SCAN switches to scanned (deterministic, no slip).
 
     Args:
         grid_size: Grid size
-        pits: (n_configs, n_states) pit configurations
-        wumpus: (n_configs, n_states) wumpus configurations
-        slip_prob: Movement noise probability
+        pits: (n_configs, n_pos) pit configurations
+        wumpus: (n_configs, n_pos) wumpus configurations
+        slip_prob: Movement noise probability (only affects movement actions)
 
     Returns:
-        T: (n_states, n_states, n_static, n_actions)
+        T: (2*n_pos, 2*n_pos, n_static, 5)
     """
-    n_states = grid_size * grid_size
+    n_pos = grid_size * grid_size
+    n_states = 2 * n_pos
     n_static = pits.shape[0]
 
     T = np.zeros((n_states, n_states, n_static, N_ACTIONS), dtype=np.float32)
 
     for theta in range(n_static):
         for x_old in range(n_states):
-            # Absorbing: pits and wumpus
-            if pits[theta, x_old] == 1.0 or wumpus[theta, x_old] == 1.0:
+            pos_old, scanned_old = unpack_state(x_old, n_pos)
+
+            # Absorbing: pits and wumpus (in both modes)
+            if pits[theta, pos_old] == 1.0 or wumpus[theta, pos_old] == 1.0:
                 T[x_old, x_old, theta, :] = 1.0
                 continue
 
-            for intended_action in range(N_ACTIONS):
-                for actual_action in range(N_ACTIONS):
+            # Movement actions (0-3): preserve scan mode, apply slip
+            for intended_action in range(N_MOVEMENT_ACTIONS):
+                for actual_action in range(N_MOVEMENT_ACTIONS):
                     if actual_action == intended_action:
                         prob = 1.0 - slip_prob
                     else:
-                        prob = slip_prob / (N_ACTIONS - 1)
+                        prob = slip_prob / (N_MOVEMENT_ACTIONS - 1)
 
                     if prob == 0.0:
                         continue
 
-                    row, col = pos_to_rc(x_old, grid_size)
+                    row, col = pos_to_rc(pos_old, grid_size)
                     dr, dc = MOVEMENT[actual_action]
                     new_row, new_col = row + dr, col + dc
 
                     if 0 <= new_row < grid_size and 0 <= new_col < grid_size:
-                        x_new = rc_to_pos(new_row, new_col, grid_size)
+                        pos_new = rc_to_pos(new_row, new_col, grid_size)
                     else:
-                        x_new = x_old
+                        pos_new = pos_old
 
+                    x_new = state_index(pos_new, scanned_old, n_pos)
                     T[x_new, x_old, theta, intended_action] += prob
+
+            # SCAN action (4): deterministic, no slip
+            x_new_scan = state_index(pos_old, 1, n_pos)
+            T[x_new_scan, x_old, theta, SCAN] = 1.0
 
     return T
 
@@ -196,54 +223,66 @@ def generate_observation_tensor(
 ) -> np.ndarray:
     """Generate observation tensor B(channel, obs_type, x, θ).
 
-    3 binary observation channels with noise:
-        - breeze:  P(breeze=1 | x, θ) = p_tp if adjacent to pit, p_fp otherwise
-        - stench:  P(stench=1 | x, θ) = p_tp if adjacent to wumpus, p_fp otherwise
-        - glitter: P(glitter=1 | x, θ) = p_tp if on gold, p_fp otherwise
+    State space is doubled (2*n_pos) for scan mode. Channel count stays 3.
 
-    where p_tp = 1 - obs_noise (true positive rate) and
-          p_fp = obs_noise * 0.1 (false positive rate).
+    3 binary observation channels:
+        - breeze:  adjacent to pit
+        - stench:  adjacent to wumpus
+        - glitter: on gold cell
+
+    Unscanned mode: p_tp = 1 - obs_noise, p_fp = obs_noise * 0.1
+    Scanned mode: p_tp = 0.999, p_fp = 0.001
 
     Args:
         grid_size: Grid size
-        pits: (n_configs, n_states) pit configs
-        wumpus: (n_configs, n_states) wumpus configs
-        gold: (n_configs, n_states) gold configs
-        obs_noise: Noise level in [0, 1]. 0 = nearly deterministic.
+        pits: (n_configs, n_pos) pit configs
+        wumpus: (n_configs, n_pos) wumpus configs
+        gold: (n_configs, n_pos) gold configs
+        obs_noise: Noise level for unscanned mode
 
     Returns:
-        B: (3, 2, n_states, n_static) observation tensor.
-           B[channel, obs_value, x, θ] = P(obs=obs_value | x, θ)
+        B: (3, 2, 2*n_pos, n_static) observation tensor.
     """
-    n_states = grid_size * grid_size
+    n_pos = grid_size * grid_size
+    n_states = 2 * n_pos
     n_static = pits.shape[0]
 
-    p_tp = np.clip(1.0 - obs_noise, 0.01, 0.99)  # true positive
-    p_fp = np.clip(obs_noise * 0.1, 0.01, 0.99)   # false positive
+    # Unscanned noise parameters
+    p_tp = np.clip(1.0 - obs_noise, 0.01, 0.99)
+    p_fp = np.clip(obs_noise * 0.1, 0.01, 0.99)
+
+    # Scanned (near-deterministic) parameters
+    p_tp_s = 0.999
+    p_fp_s = 0.001
 
     B = np.zeros((N_OBS_CHANNELS, N_OBS_TYPES, n_states, n_static), dtype=np.float32)
 
     for theta in range(n_static):
-        for x in range(n_states):
-            neighbors = get_neighbors(x, grid_size)
+        for pos in range(n_pos):
+            neighbors = get_neighbors(pos, grid_size)
 
-            # Breeze: adjacent to any pit
             has_breeze = any(pits[theta, n] == 1.0 for n in neighbors)
-            p_b = p_tp if has_breeze else p_fp
-            B[BREEZE, 1, x, theta] = p_b
-            B[BREEZE, 0, x, theta] = 1.0 - p_b
-
-            # Stench: adjacent to wumpus
             has_stench = any(wumpus[theta, n] == 1.0 for n in neighbors)
-            p_s = p_tp if has_stench else p_fp
-            B[STENCH, 1, x, theta] = p_s
-            B[STENCH, 0, x, theta] = 1.0 - p_s
+            has_glitter = gold[theta, pos] == 1.0
 
-            # Glitter: on gold
-            has_glitter = gold[theta, x] == 1.0
-            p_g = p_tp if has_glitter else p_fp
-            B[GLITTER, 1, x, theta] = p_g
-            B[GLITTER, 0, x, theta] = 1.0 - p_g
+            for scanned in range(2):
+                x = state_index(pos, scanned, n_pos)
+                if scanned == 0:
+                    tp, fp = p_tp, p_fp
+                else:
+                    tp, fp = p_tp_s, p_fp_s
+
+                p_b = tp if has_breeze else fp
+                B[BREEZE, 1, x, theta] = p_b
+                B[BREEZE, 0, x, theta] = 1.0 - p_b
+
+                p_s = tp if has_stench else fp
+                B[STENCH, 1, x, theta] = p_s
+                B[STENCH, 0, x, theta] = 1.0 - p_s
+
+                p_g = tp if has_glitter else fp
+                B[GLITTER, 1, x, theta] = p_g
+                B[GLITTER, 0, x, theta] = 1.0 - p_g
 
     return B
 
@@ -253,16 +292,20 @@ def generate_goal(
 ) -> np.ndarray:
     """Generate goal distribution: reach the gold cell.
 
-    Since gold position varies by config θ, the goal is the marginal
-    probability over gold positions (uniform over configs).
+    State space is doubled (2*n_pos). Gold is reachable in both scan modes.
+    The marginal over gold positions is replicated for both modes.
 
     Args:
-        gold: (n_configs, n_states) gold configurations
+        gold: (n_configs, n_pos) gold configurations
 
     Returns:
-        goal: (n_states,) goal distribution
+        goal: (2*n_pos,) goal distribution
     """
-    goal = gold.mean(axis=0)
+    n_pos = gold.shape[1]
+    gold_marginal = gold.mean(axis=0)  # (n_pos,)
+
+    # Replicate for both modes
+    goal = np.concatenate([gold_marginal, gold_marginal])  # (2*n_pos,)
     total = goal.sum()
     if total > 0:
         goal = goal / total
@@ -283,14 +326,18 @@ class WumpusStepResult:
 
 
 class WumpusWorldEnv:
-    """Simple Wumpus World simulator.
+    """Simple Wumpus World simulator with SCAN action.
+
+    State includes scan mode: agent starts unscanned, SCAN action switches
+    to scanned mode with near-deterministic observations.
 
     Args:
         grid_size: Grid size
-        pits: (n_configs, n_states) pit configurations
-        wumpus: (n_configs, n_states) wumpus configurations
-        gold: (n_configs, n_states) gold configurations
-        slip_prob: Movement noise
+        pits: (n_configs, n_pos) pit configurations
+        wumpus: (n_configs, n_pos) wumpus configurations
+        gold: (n_configs, n_pos) gold configurations
+        obs_tensor: (3, 2, 2*n_pos, n_static) observation tensor
+        slip_prob: Movement noise (only affects movement actions, not SCAN)
         max_steps: Maximum steps per episode
     """
 
@@ -305,7 +352,7 @@ class WumpusWorldEnv:
         max_steps: int = 100,
     ):
         self.grid_size = grid_size
-        self.n_states = grid_size * grid_size
+        self.n_pos = grid_size * grid_size
         self.pits = pits
         self.wumpus = wumpus
         self.gold = gold
@@ -316,6 +363,7 @@ class WumpusWorldEnv:
 
         self._rng = np.random.default_rng(0)
         self._position = self.start_pos
+        self._scanned = 0  # 0 = unscanned, 1 = scanned
         self._config_idx = 0
         self._steps = 0
 
@@ -327,6 +375,11 @@ class WumpusWorldEnv:
     def config_idx(self) -> int:
         return self._config_idx
 
+    @property
+    def _state_idx(self) -> int:
+        """Current flat state index (pos + scanned * n_pos)."""
+        return state_index(self._position, self._scanned, self.n_pos)
+
     def reset(self, seed: int | None = None, config_idx: int | None = None) -> WumpusStepResult:
         if seed is not None:
             self._rng = np.random.default_rng(seed)
@@ -337,6 +390,7 @@ class WumpusWorldEnv:
             self._config_idx = int(self._rng.integers(0, self.pits.shape[0]))
 
         self._position = self.start_pos
+        self._scanned = 0
         self._steps = 0
 
         return WumpusStepResult(
@@ -349,18 +403,22 @@ class WumpusWorldEnv:
     def step(self, action: int) -> WumpusStepResult:
         self._steps += 1
 
-        # Slip
-        if self.slip_prob > 0 and self._rng.random() < self.slip_prob:
-            other_actions = [a for a in range(N_ACTIONS) if a != action]
-            action = int(self._rng.choice(other_actions))
+        if action == SCAN:
+            # SCAN: switch to scanned mode, no movement, no slip
+            self._scanned = 1
+        else:
+            # Movement action: apply slip (only among movement actions 0-3)
+            if self.slip_prob > 0 and self._rng.random() < self.slip_prob:
+                other_actions = [a for a in range(N_MOVEMENT_ACTIONS) if a != action]
+                action = int(self._rng.choice(other_actions))
 
-        # Move
-        row, col = pos_to_rc(self._position, self.grid_size)
-        dr, dc = MOVEMENT[action]
-        new_row, new_col = row + dr, col + dc
+            # Move
+            row, col = pos_to_rc(self._position, self.grid_size)
+            dr, dc = MOVEMENT[action]
+            new_row, new_col = row + dr, col + dc
 
-        if 0 <= new_row < self.grid_size and 0 <= new_col < self.grid_size:
-            self._position = rc_to_pos(new_row, new_col, self.grid_size)
+            if 0 <= new_row < self.grid_size and 0 <= new_col < self.grid_size:
+                self._position = rc_to_pos(new_row, new_col, self.grid_size)
 
         # Termination
         theta = self._config_idx
@@ -382,10 +440,11 @@ class WumpusWorldEnv:
 
     def _get_obs(self) -> np.ndarray:
         """Sample binary observations [breeze, stench, glitter] from obs model."""
+        x = self._state_idx
         if self.obs_tensor is not None:
             obs = np.zeros(N_OBS_CHANNELS, dtype=np.float32)
             for c in range(N_OBS_CHANNELS):
-                p_fire = self.obs_tensor[c, 1, self._position, self._config_idx]
+                p_fire = self.obs_tensor[c, 1, x, self._config_idx]
                 obs[c] = float(self._rng.random() < p_fire)
             return obs
         else:
@@ -401,6 +460,8 @@ class WumpusWorldEnv:
         """Render current state as ASCII grid."""
         lines = []
         theta = self._config_idx
+        mode_str = "SCANNED" if self._scanned else "UNSCANNED"
+        lines.append(f"[{mode_str}]")
         for r in range(self.grid_size):
             row_chars = []
             for c in range(self.grid_size):

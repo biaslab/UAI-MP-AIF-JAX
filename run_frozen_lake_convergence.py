@@ -91,7 +91,8 @@ def main():
     args = parser.parse_args()
 
     grid_size = args.grid_size
-    n_states = grid_size * grid_size
+    n_pos = grid_size * grid_size
+    n_states = 2 * n_pos  # doubled for scan mode
 
     print(f"JAX devices: {jax.devices()}")
     print(f"Frozen Lake {grid_size}x{grid_size}  method={args.method}")
@@ -139,7 +140,7 @@ def main():
     # Print configs summary
     print("Hole configurations (sample):")
     for i in range(min(5, n_static)):
-        hpos = [pos_to_rc(j, grid_size) for j in range(n_states) if holes[i, j] == 1.0]
+        hpos = [pos_to_rc(j, grid_size) for j in range(n_pos) if holes[i, j] == 1.0]
         print(f"  #{i}: {hpos}")
     if n_static > 5:
         print(f"  ... ({n_static} total)")

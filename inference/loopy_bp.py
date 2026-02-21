@@ -170,7 +170,7 @@ def loopy_bp_planning(
     q_current_state,    # (n_states,)
     q_static_state,     # (n_static,) prior on θ
     transition_tensor,  # (n_states, n_states, n_static, n_actions) probability tensor
-    goal,               # (n_states,)
+    goal,               # (n_states,) or (n_states, n_static)
     horizon,            # int (static)
     n_iterations,       # int (static)
     action_prior=None,  # (n_actions,) prior over actions. If None, uniform.
@@ -182,7 +182,10 @@ def loopy_bp_planning(
         q_current_state: (n_states,) current belief over dynamic state
         q_static_state: (n_static,) prior belief over static configuration θ
         transition_tensor: (n_states, n_states, n_static, n_actions) probability tensor
-        goal: (n_states,) goal distribution over final state
+        goal: (n_states,) goal distribution over final state, or
+              (n_states, n_static) per-config preference C(x, θ).
+              2D: marginalized with current θ belief each iteration and
+              injected at every forward/backward step.
         horizon: planning horizon T (static for JIT)
         n_iterations: number of loopy BP iterations (static for JIT)
         action_prior: (n_actions,) prior over actions. If None, uniform.
@@ -198,7 +201,6 @@ def loopy_bp_planning(
     log_T = safe_log(transition_tensor)
     log_prior_theta = safe_log(q_static_state)
     log_q0 = safe_log(q_current_state)
-    log_goal = safe_log(goal)
 
     if action_prior is None:
         action_prior = jnp.ones(n_actions) / n_actions
@@ -208,23 +210,108 @@ def loopy_bp_planning(
     log_cavity_theta = jnp.tile(log_prior_theta, (horizon, 1))
     q_u_init = jnp.zeros((horizon, n_actions))
 
-    def body_fn(_, carry):
-        log_cavity_theta, _ = carry
+    if goal.ndim == 2:
+        # 2D goal: per-config preference C(x, θ)
+        # Each iteration: compute full θ belief from prior + dyn_to_theta messages,
+        # marginalize C with it, and inject as per-step preference.
+        log_C = safe_log(goal)
+        log_dyn_to_theta_init = jnp.zeros((horizon, n_static))
 
-        log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
-        log_fwd = forward_pass(log_reduced_per_t, log_q0, log_action_prior, horizon)
-        log_bwd, q_u = backward_pass(
-            log_reduced_per_t, log_fwd, log_goal, log_action_prior, horizon
+        def body_fn(_, carry):
+            log_cavity_theta, _, log_dyn_to_theta_prev = carry
+
+            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+
+            # Full theta belief from previous iteration's messages
+            log_q_theta = log_prior_theta + log_dyn_to_theta_prev.sum(axis=0)
+            log_q_theta = log_q_theta - logsumexp(log_q_theta)
+
+            # Per-step preference: marginalize C(x,θ) with full theta belief
+            log_pref = logsumexp(log_C + log_q_theta[None, :], axis=1)
+            log_pref = log_pref - logsumexp(log_pref)
+
+            # Forward pass with per-step preference injected
+            log_fwd = jnp.zeros((horizon + 1, n_states))
+            log_fwd = log_fwd.at[0].set(log_q0)
+
+            def fwd_body(t, lf):
+                log_terms = (log_reduced_per_t[t]
+                             + (lf[t] + log_pref)[None, :, None]
+                             + log_action_prior[None, None, :])
+                log_q_next = logsumexp(log_terms, axis=(1, 2))
+                log_q_next = log_q_next - logsumexp(log_q_next)
+                return lf.at[t + 1].set(log_q_next)
+
+            log_fwd = lax.fori_loop(0, horizon, fwd_body, log_fwd)
+
+            # Backward pass with per-step preference, uniform terminal
+            def bwd_body(carry, t):
+                log_bwd_val, q_u, log_bwd_arr = carry
+                log_bwd_with_pref = log_bwd_val + log_pref
+
+                # Action marginal
+                log_terms = (log_reduced_per_t[t]
+                             + log_bwd_with_pref[:, None, None]
+                             + (log_fwd[t] + log_pref)[None, :, None])
+                log_msg_to_u = logsumexp(log_terms, axis=(0, 1))
+                q_u_t = jax.nn.softmax(log_msg_to_u + log_action_prior)
+                q_u = q_u.at[t].set(q_u_t)
+
+                # Backward message to x_t
+                log_terms_bwd = (log_reduced_per_t[t]
+                                 + log_bwd_with_pref[:, None, None]
+                                 + log_action_prior[None, None, :])
+                log_bwd_t = logsumexp(log_terms_bwd, axis=(0, 2))
+                log_bwd_t = log_bwd_t - logsumexp(log_bwd_t)
+                log_bwd_arr = log_bwd_arr.at[t].set(log_bwd_t)
+
+                return (log_bwd_t, q_u, log_bwd_arr), None
+
+            log_bwd_init = jnp.zeros((horizon + 1, n_states))
+            (_, q_u, log_bwd), _ = lax.scan(
+                bwd_body,
+                (jnp.zeros(n_states), jnp.zeros((horizon, n_actions)), log_bwd_init),
+                jnp.arange(horizon - 1, -1, -1),
+            )
+
+            # dyn_to_theta: include preference in x beliefs
+            log_fwd_t = (log_fwd[:-1] + log_pref[None, :])[:, None, :, None, None]
+            log_bwd_t1 = (log_bwd[1:] + log_pref[None, :])[:, :, None, None, None]
+            terms = (log_T[None]
+                     + log_fwd_t
+                     + log_bwd_t1
+                     + log_action_prior[None, None, None, None, :])
+            new_dyn_to_theta = logsumexp(terms, axis=(1, 2, 4))
+
+            new_log_cavity = compute_theta_cavities(log_prior_theta, new_dyn_to_theta)
+
+            return new_log_cavity, q_u, new_dyn_to_theta
+
+        log_cavity_theta, q_u, _ = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_cavity_theta, q_u_init, log_dyn_to_theta_init),
         )
-        log_dyn_to_theta = compute_dyn_to_theta_msgs(
-            log_T, log_fwd, log_bwd, log_action_prior, horizon
+    else:
+        # 1D goal: original terminal-goal behavior
+        log_goal = safe_log(goal)
+
+        def body_fn(_, carry):
+            log_cavity_theta, _ = carry
+
+            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+            log_fwd = forward_pass(log_reduced_per_t, log_q0, log_action_prior, horizon)
+            log_bwd, q_u = backward_pass(
+                log_reduced_per_t, log_fwd, log_goal, log_action_prior, horizon
+            )
+            log_dyn_to_theta = compute_dyn_to_theta_msgs(
+                log_T, log_fwd, log_bwd, log_action_prior, horizon
+            )
+            new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
+
+            return new_log_cavity, q_u
+
+        log_cavity_theta, q_u = lax.fori_loop(
+            0, n_iterations, body_fn, (log_cavity_theta, q_u_init)
         )
-        new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
-
-        return new_log_cavity, q_u
-
-    log_cavity_theta, q_u = lax.fori_loop(
-        0, n_iterations, body_fn, (log_cavity_theta, q_u_init)
-    )
 
     return q_u[0]

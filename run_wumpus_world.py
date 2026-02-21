@@ -73,6 +73,7 @@ def main():
     parser.add_argument("--n-pits", type=int, default=2, help="Number of pits per configuration")
     parser.add_argument("--obs-noise", type=float, default=0.1, help="Observation noise level")
     parser.add_argument("--slip-prob", type=float, default=0.0, help="Movement slip probability")
+    parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight (lower = more costly)")
     parser.add_argument("--episodes", type=int, default=100, help="Number of episodes")
     parser.add_argument("--max-steps", type=int, default=50, help="Maximum steps per episode")
     parser.add_argument("--planning-horizon", type=int, default=10, help="Planning horizon")
@@ -96,6 +97,7 @@ def main():
     print(f"\nWumpus World {args.grid_size}x{args.grid_size}")
     print(f"  Configs: {args.n_configs}, pits: {args.n_pits}")
     print(f"  Obs noise: {args.obs_noise}, slip prob: {args.slip_prob}")
+    print(f"  Scan cost: {args.scan_cost}")
     print()
 
     print("Generating tensors...")
@@ -129,11 +131,16 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
+    # Construct action prior: [1, 1, 1, 1, scan_cost] normalized
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    action_prior = action_prior / action_prior.sum()
+
     print("Creating agent...")
     agent = create_agent(
         method_key, T, B, goal,
         planning_horizon=args.planning_horizon,
         planning_iterations=args.planning_iterations,
+        action_prior=action_prior,
         damping=args.damping,
     )
     print(f"  Method: {args.planning_method}")
@@ -192,6 +199,7 @@ def main():
                 "n_pits": args.n_pits,
                 "obs_noise": args.obs_noise,
                 "slip_prob": args.slip_prob,
+                "scan_cost": args.scan_cost,
                 "planning_method": args.planning_method,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,

@@ -94,8 +94,8 @@ def _infer_state(
 @dataclass(frozen=True)
 class _FrozenLakeAgentBase:
     transition_tensor: jnp.ndarray   # (n_states, n_states, n_static, n_actions)
-    observation_tensor: jnp.ndarray  # (n_states + 4, 2, n_states, n_static) position + directional sensors
-    goal: jnp.ndarray               # (n_states,)
+    observation_tensor: jnp.ndarray  # (n_states + n_pos, 2, n_states, n_static) position + grid cell sensors
+    goal: jnp.ndarray               # (n_states,) or (n_states, n_static)
     holes: jnp.ndarray              # (n_static, n_states)
     q_current_state: jnp.ndarray    # (n_states,)
     q_static_state: jnp.ndarray     # (n_static,)
@@ -112,11 +112,11 @@ class _FrozenLakeAgentBase:
         Planners with observation factors only need the θ-dependent
         directional channels, not the θ-independent position channels.
         """
-        n_states = self.goal.shape[0]
+        n_states = self.transition_tensor.shape[0]
         return self.observation_tensor[n_states:]
 
     def reset(self):
-        n_states = self.goal.shape[0]
+        n_states = self.transition_tensor.shape[0]
         n_static = self.holes.shape[0]
         # Agent always starts at position 0 (known)
         q_start = jnp.zeros(n_states, dtype=jnp.float32).at[0].set(1.0)
@@ -173,7 +173,7 @@ class _FrozenLakeAgentBase:
 def _create(cls, transition_tensor, observation_tensor, goal, holes,
             planning_horizon, planning_iterations, action_prior, damping=1.0):
     """Shared factory for all Frozen Lake agents."""
-    n_states = goal.shape[0]
+    n_states = transition_tensor.shape[0]
     n_static = holes.shape[0]
     return cls(
         transition_tensor=jnp.array(transition_tensor, dtype=jnp.float32),

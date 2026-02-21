@@ -16,10 +16,12 @@ class TestFrozenLakeTensors:
             generate_transition_tensor,
             generate_observation_tensor,
             generate_goal,
+            N_ACTIONS,
         )
 
         self.grid_size = 4
-        self.n_states = 16
+        self.n_pos = 16
+        self.n_states = 2 * self.n_pos  # doubled for scan mode
         self.n_configs = 10
         self.goal_pos = 15
         self.start_pos = 0
@@ -37,7 +39,7 @@ class TestFrozenLakeTensors:
         self.goal = generate_goal(self.grid_size, self.holes)
 
     def test_config_shapes(self):
-        assert self.holes.shape == (self.n_configs, self.n_states)
+        assert self.holes.shape == (self.n_configs, self.n_pos)
 
     def test_configs_start_goal_safe(self):
         """Start and goal positions should never be holes."""
@@ -46,7 +48,7 @@ class TestFrozenLakeTensors:
             assert self.holes[theta, self.goal_pos] == 0.0
 
     def test_transition_shape(self):
-        assert self.T.shape == (self.n_states, self.n_states, self.n_configs, 4)
+        assert self.T.shape == (self.n_states, self.n_states, self.n_configs, 5)
 
     def test_transition_stochastic(self):
         """T should sum to 1 over x_new for each (x_old, θ, action)."""
@@ -55,31 +57,53 @@ class TestFrozenLakeTensors:
 
     def test_transition_deterministic_no_slip(self):
         """Without slip, deterministic movement for non-absorbing states."""
-        from environments.frozen_lake import LEFT, DOWN, RIGHT, UP, pos_to_rc, rc_to_pos
+        from environments.frozen_lake import unpack_state
 
         theta = 0
         for x_old in range(self.n_states):
-            if self.holes[theta, x_old] == 1.0 or x_old == self.goal_pos:
+            pos, scanned = unpack_state(x_old, self.n_pos)
+            if self.holes[theta, pos] == 1.0 or pos == self.goal_pos:
                 continue
-            for action in range(4):
-                # Exactly one x_new should have probability 1
+            for action in range(4):  # movement actions only
                 probs = self.T[:, x_old, theta, action]
                 assert np.isclose(probs.max(), 1.0, atol=1e-6)
                 assert np.isclose(probs.sum(), 1.0, atol=1e-6)
 
     def test_holes_absorbing(self):
         """Holes should be absorbing: T[hole, hole, θ, :] = 1."""
+        from environments.frozen_lake import state_index
+
         for theta in range(self.n_configs):
-            for x in range(self.n_states):
-                if self.holes[theta, x] == 1.0:
-                    for a in range(4):
-                        assert np.isclose(self.T[x, x, theta, a], 1.0)
+            for pos in range(self.n_pos):
+                if self.holes[theta, pos] == 1.0:
+                    for mode in range(2):
+                        x = state_index(pos, mode, self.n_pos)
+                        for a in range(5):
+                            assert np.isclose(self.T[x, x, theta, a], 1.0)
 
     def test_goal_absorbing(self):
-        """Goal should be absorbing."""
+        """Goal should be absorbing in both scan modes."""
+        from environments.frozen_lake import state_index
+
         for theta in range(self.n_configs):
-            for a in range(4):
-                assert np.isclose(self.T[self.goal_pos, self.goal_pos, theta, a], 1.0)
+            for mode in range(2):
+                x = state_index(self.goal_pos, mode, self.n_pos)
+                for a in range(5):
+                    assert np.isclose(self.T[x, x, theta, a], 1.0)
+
+    def test_scan_transitions(self):
+        """SCAN should transition unscanned→scanned deterministically."""
+        from environments.frozen_lake import state_index, SCAN
+
+        theta = 0
+        for pos in range(self.n_pos):
+            if self.holes[theta, pos] == 1.0 or pos == self.goal_pos:
+                continue
+            x_unscanned = state_index(pos, 0, self.n_pos)
+            x_scanned = state_index(pos, 1, self.n_pos)
+            assert np.isclose(self.T[x_scanned, x_unscanned, theta, SCAN], 1.0)
+            # Already scanned stays scanned
+            assert np.isclose(self.T[x_scanned, x_scanned, theta, SCAN], 1.0)
 
     def test_slip_stochastic(self):
         """With slip, non-absorbing states should have spread probability."""
@@ -87,8 +111,8 @@ class TestFrozenLakeTensors:
         assert np.allclose(sums, 1.0, atol=1e-6)
 
     def test_observation_shape(self):
-        # n_states position channels + 4 directional channels
-        n_channels = self.n_states + 4
+        # 2*n_pos position channels + n_pos grid cell channels = 3*n_pos
+        n_channels = 3 * self.n_pos
         assert self.B.shape == (n_channels, 2, self.n_states, self.n_configs)
 
     def test_observation_is_stochastic(self):
@@ -108,50 +132,79 @@ class TestFrozenLakeTensors:
                 if other != x:
                     assert self.B[x, 1, other, 0] < 0.01
 
-    def test_goal_shape(self):
-        assert self.goal.shape == (self.n_states,)
-        assert np.isclose(self.goal.sum(), 1.0)
-        # Goal position should have highest probability (not necessarily 1.0)
-        assert self.goal[self.goal_pos] == self.goal.max()
+    def test_grid_cell_channels_scanned_deterministic(self):
+        """In scanned mode, grid cell channels should be near-deterministic."""
+        from environments.frozen_lake import state_index
 
-    def test_line_of_sight_correctness(self):
-        """Verify line-of-sight sensors fire correctly for known hole positions."""
+        for theta in range(self.n_configs):
+            for pos in range(self.n_pos):
+                x_scanned = state_index(pos, 1, self.n_pos)
+                for cell in range(self.n_pos):
+                    ch = self.n_states + cell
+                    has_hole = self.holes[theta, cell] == 1.0
+                    if has_hole:
+                        assert self.B[ch, 1, x_scanned, theta] > 0.99
+                    else:
+                        assert self.B[ch, 1, x_scanned, theta] < 0.01
+
+    def test_grid_cell_channels_unscanned_noisy(self):
+        """In unscanned mode, nearby cells should be less noisy than distant cells."""
         from environments.frozen_lake import (
-            generate_observation_tensor, sample_configs, LEFT, DOWN, RIGHT, UP,
-            get_cells_in_direction,
+            generate_observation_tensor, sample_configs, state_index,
+        )
+
+        grid_size = 5
+        n_pos = 25
+        holes = np.zeros((1, n_pos), dtype=np.float32)
+        holes[0, 12] = 1.0  # hole at center (2,2)
+
+        B = generate_observation_tensor(grid_size, holes, base_noise=0.05, noise_range=0.3)
+
+        # Agent at pos 11 = (2,1), distance 1 from hole at 12 = (2,2)
+        x_near = state_index(11, 0, n_pos)
+        p_near = B[2 * n_pos + 12, 1, x_near, 0]
+
+        # Agent at pos 0 = (0,0), distance 4 from hole at 12
+        x_far = state_index(0, 0, n_pos)
+        p_far = B[2 * n_pos + 12, 1, x_far, 0]
+
+        # Closer agent should detect hole more reliably
+        assert p_near > p_far, f"Near p={p_near} should exceed far p={p_far}"
+
+    def test_goal_shape(self):
+        assert self.goal.shape == (self.n_states, self.n_configs)
+        # Each config column should sum to 1 (per-config softmax normalization)
+        for theta in range(self.n_configs):
+            assert np.isclose(self.goal[:, theta].sum(), 1.0, atol=1e-6)
+
+    def test_grid_cell_correctness(self):
+        """Verify grid cell sensors fire correctly for known hole positions."""
+        from environments.frozen_lake import (
+            generate_observation_tensor, state_index,
         )
 
         grid_size = 4
-        n_states = 16
+        n_pos = 16
+        n_states = 2 * n_pos
         # Create a single known config: hole at position 2 = (0, 2)
         holes = np.zeros((1, 16), dtype=np.float32)
         holes[0, 2] = 1.0  # hole at (row=0, col=2)
 
         B = generate_observation_tensor(grid_size, holes, base_noise=0.01, noise_range=0.0)
 
-        # Directional channels start at index n_states
-        # From position 0 = (0,0), looking RIGHT along row 0:
-        # cells in RIGHT direction: 1, 2, 3. Position 2 is a hole.
-        p_fire_right = B[n_states + RIGHT, 1, 0, 0]
-        assert p_fire_right > 0.9, f"RIGHT sensor at (0,0) should fire: p={p_fire_right}"
+        # Agent at pos 0, unscanned: grid cell channel for cell 2 should fire
+        x_unscanned = state_index(0, 0, n_pos)
+        p_fire = B[n_states + 2, 1, x_unscanned, 0]
+        assert p_fire > 0.9, f"Cell 2 sensor should fire (hole): p={p_fire}"
 
-        # From position 0, looking DOWN along col 0: cells 4, 8, 12. No holes.
-        p_fire_down = B[n_states + DOWN, 1, 0, 0]
-        assert p_fire_down < 0.1, f"DOWN sensor at (0,0) should not fire: p={p_fire_down}"
+        # Grid cell channel for cell 5 (no hole) should NOT fire
+        p_nofire = B[n_states + 5, 1, x_unscanned, 0]
+        assert p_nofire < 0.1, f"Cell 5 sensor should not fire: p={p_nofire}"
 
-        # From position 3 = (0,3), looking LEFT along row 0:
-        # cells in LEFT direction: 2, 1, 0. Position 2 is a hole.
-        p_fire_left = B[n_states + LEFT, 1, 3, 0]
-        assert p_fire_left > 0.9, f"LEFT sensor at (0,3) should fire: p={p_fire_left}"
-
-        # From position 8 = (2,0), looking RIGHT along row 2: no holes
-        p_fire_right_r2 = B[n_states + RIGHT, 1, 8, 0]
-        assert p_fire_right_r2 < 0.1, f"RIGHT sensor at (2,0) should not fire: p={p_fire_right_r2}"
-
-        # From position 6 = (1,2), looking UP along col 2:
-        # cells in UP direction: 2. Position 2 is a hole.
-        p_fire_up = B[n_states + UP, 1, 6, 0]
-        assert p_fire_up > 0.9, f"UP sensor at (1,2) should fire: p={p_fire_up}"
+        # Agent at pos 0, scanned: should be near-deterministic
+        x_scanned = state_index(0, 1, n_pos)
+        p_scanned = B[n_states + 2, 1, x_scanned, 0]
+        assert p_scanned > 0.99, f"Scanned cell 2 should fire: p={p_scanned}"
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +222,8 @@ class TestFrozenLakeEnv:
         )
 
         self.grid_size = 4
-        self.n_states = 16
+        self.n_pos = 16
+        self.n_states = 2 * self.n_pos
         self.holes = sample_configs(self.grid_size, 10, seed=42)
         self.obs_tensor = generate_observation_tensor(self.grid_size, self.holes)
         self.env = FrozenLakeEnv(
@@ -182,7 +236,7 @@ class TestFrozenLakeEnv:
 
     def test_reset(self):
         result = self.env.reset(seed=0)
-        n_channels = self.n_states + 4
+        n_channels = 3 * self.n_pos
         assert result.obs.shape == (n_channels,)
         # Binary sensor vector: values should be 0 or 1
         assert all(v in (0.0, 1.0) for v in result.obs)
@@ -190,13 +244,13 @@ class TestFrozenLakeEnv:
         assert not result.truncated
 
     def test_movement(self):
-        """Moving RIGHT from (0,0) should go to (0,1) — verify via internal position."""
+        """Moving RIGHT from (0,0) should go to (0,1)."""
         from environments.frozen_lake import RIGHT
 
         self.env.reset(seed=0, config_idx=0)
         result = self.env.step(RIGHT)
-        assert self.env._position == 1  # position (0,1) = index 1
-        n_channels = self.n_states + 4
+        assert self.env._position == 1
+        n_channels = 3 * self.n_pos
         assert result.obs.shape == (n_channels,)
 
     def test_wall_collision(self):
@@ -205,9 +259,19 @@ class TestFrozenLakeEnv:
 
         self.env.reset(seed=0, config_idx=0)
         result = self.env.step(LEFT)
-        assert self.env._position == 0  # still at start
-        n_channels = self.n_states + 4
+        assert self.env._position == 0
+        n_channels = 3 * self.n_pos
         assert result.obs.shape == (n_channels,)
+
+    def test_scan_action(self):
+        """SCAN should switch to scanned mode."""
+        from environments.frozen_lake import SCAN
+
+        self.env.reset(seed=0, config_idx=0)
+        assert self.env._scanned == 0
+        self.env.step(SCAN)
+        assert self.env._scanned == 1
+        assert self.env._position == 0  # position unchanged
 
     def test_goal_termination(self):
         """Reaching the goal should terminate with reward 1."""
@@ -252,7 +316,8 @@ class TestFrozenLakeAgents:
         )
 
         self.grid_size = 4
-        self.n_states = 16
+        self.n_pos = 16
+        self.n_states = 2 * self.n_pos
         self.n_configs = 10
 
         self.holes = sample_configs(self.grid_size, self.n_configs, seed=42)
@@ -261,16 +326,17 @@ class TestFrozenLakeAgents:
         self.goal = generate_goal(self.grid_size, self.holes)
 
     def _make_obs(self, pos, config_idx):
-        """Build an observation vector: position one-hot + directional sensors."""
+        """Build an observation vector: position one-hot + grid cell sensors."""
         import jax.numpy as jnp
         n_channels = self.B.shape[0]
         obs = jnp.zeros(n_channels)
-        # Position channels: one-hot
+        # Position channels: one-hot for state (pos, unscanned)
         obs = obs.at[pos].set(1.0)
-        # Directional channels: sample from B
-        for d in range(4):
-            obs = obs.at[self.n_states + d].set(
-                1.0 if self.B[self.n_states + d, 1, pos, config_idx] > 0.5 else 0.0
+        # Grid cell channels: threshold from B
+        for cell in range(self.n_pos):
+            ch = self.n_states + cell
+            obs = obs.at[ch].set(
+                1.0 if self.B[ch, 1, pos, config_idx] > 0.5 else 0.0
             )
         return obs
 
@@ -284,7 +350,7 @@ class TestFrozenLakeAgents:
         )
         obs = self._make_obs(0, 0)
         action, agent = agent.step(obs, time_remaining=10)
-        assert 0 <= action < 4
+        assert 0 <= action < 5
 
     def test_loopy_bp_agent_produces_valid_action(self):
         import jax.numpy as jnp
@@ -296,7 +362,7 @@ class TestFrozenLakeAgents:
         )
         obs = self._make_obs(0, 0)
         action, agent = agent.step(obs, time_remaining=10)
-        assert 0 <= action < 4
+        assert 0 <= action < 5
 
     def test_region_extended_agent_produces_valid_action(self):
         import jax.numpy as jnp
@@ -308,13 +374,13 @@ class TestFrozenLakeAgents:
         )
         obs = self._make_obs(0, 0)
         action, agent = agent.step(obs, time_remaining=10)
-        assert 0 <= action < 4
+        assert 0 <= action < 5
 
     def test_static_belief_update(self):
-        """Observation likelihood should differentiate configs via directional sensors.
+        """Observation likelihood should differentiate configs via grid cell sensors.
 
-        The line-of-sight sensor model is θ-dependent (different hole configs
-        trigger different directional patterns), so repeated observations should
+        The grid cell sensor model is θ-dependent (different hole configs
+        trigger different patterns), so repeated observations should
         shift static belief toward configs consistent with the sensor pattern.
         """
         import jax.numpy as jnp
@@ -335,10 +401,11 @@ class TestFrozenLakeAgents:
         # Build observation from position 0 under config 0
         n_channels = B_low_noise.shape[0]
         obs_start = jnp.zeros(n_channels)
-        obs_start = obs_start.at[0].set(1.0)  # position channel: at pos 0
-        for d in range(4):
-            obs_start = obs_start.at[self.n_states + d].set(
-                1.0 if B_low_noise[self.n_states + d, 1, 0, 0] > 0.5 else 0.0
+        obs_start = obs_start.at[0].set(1.0)  # position channel: at state 0 (pos 0, unscanned)
+        for cell in range(self.n_pos):
+            ch = self.n_states + cell
+            obs_start = obs_start.at[ch].set(
+                1.0 if B_low_noise[ch, 1, 0, 0] > 0.5 else 0.0
             )
         _, agent = agent.step(obs_start, time_remaining=10)
 
@@ -347,10 +414,11 @@ class TestFrozenLakeAgents:
 
         # Observation from position 5 under config 0
         obs_5 = jnp.zeros(n_channels)
-        obs_5 = obs_5.at[5].set(1.0)  # position channel: at pos 5
-        for d in range(4):
-            obs_5 = obs_5.at[self.n_states + d].set(
-                1.0 if B_low_noise[self.n_states + d, 1, 5, 0] > 0.5 else 0.0
+        obs_5 = obs_5.at[5].set(1.0)  # position channel: at state 5
+        for cell in range(self.n_pos):
+            ch = self.n_states + cell
+            obs_5 = obs_5.at[ch].set(
+                1.0 if B_low_noise[ch, 1, 5, 0] > 0.5 else 0.0
             )
         _, agent = agent.step(obs_5, time_remaining=9)
 
@@ -371,7 +439,7 @@ class TestFrozenLakeAgents:
                 planning_horizon=3, planning_iterations=2,
             )
             action, _ = agent.step(obs, time_remaining=5)
-            assert 0 <= action < 4, f"Method {method_name} returned invalid action {action}"
+            assert 0 <= action < 5, f"Method {method_name} returned invalid action {action}"
 
 
 # ---------------------------------------------------------------------------

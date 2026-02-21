@@ -198,18 +198,19 @@ convergence_matrix:
     damping: 1.0
 
 frozen_lake:
-  grid_size: 5
-  n_configs: 4
+  grid_size: 4
+  n_configs: 15
   hole_fraction: 0.2
   min_hamming: 4
-  base_noise: 0.05
-  noise_range: 0.15
+  base_noise: 0.4
+  noise_range: 0.1
   slip_prob: 0.1
   episodes: 100
-  max_steps: 30
+  max_steps: 15
   planning_horizon: 15
-  hole_penalty: 0.1
-  goal_temperature: 0.1
+  hole_penalty: 2.0
+  goal_temperature: 1.0
+  scan_cost: 0.1
   seed: 0
 
 frozen_lake_methods:
@@ -220,7 +221,7 @@ frozen_lake_methods:
     planning_iterations: 20
     damping: 1.0
   region-extended:
-    planning_iterations: 25
+    planning_iterations: 50
     damping: 0.25
   dyn-channel:
     planning_iterations: 25
@@ -229,19 +230,23 @@ frozen_lake_methods:
     planning_iterations: 30
     damping: 1.0
   reduced-region-extended:
-    planning-iterations: 30
+    planning_iterations: 30
     damping: 0.3
+  bp:
+    planning_iterations: 1
+    damping: 1.0
 
 wumpus_world:
   grid_size: 4
   n_configs: 50
-  n_pits: 2
+  n_pits: 4
   obs_noise: 0.2
   slip_prob: 0.1
-  episodes: 10
-  max_steps: 50
+  episodes: 100
+  max_steps: 30
   planning_horizon: 15
   damping: 0.25
+  scan_cost: 0.1
   seed: 0
 
 wumpus_world_methods:

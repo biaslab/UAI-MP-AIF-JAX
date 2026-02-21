@@ -121,7 +121,7 @@ def loopy_vbp_planning(
     q_current_state,    # (n_states,)
     q_static_state,     # (n_static,) prior on θ
     transition_tensor,  # (n_states, n_states, n_static, n_actions) probability tensor
-    goal,               # (n_states,)
+    goal,               # (n_states,) or (n_states, n_static)
     horizon,            # int (static)
     n_iterations,       # int (static)
 ) -> jnp.ndarray:
@@ -135,7 +135,10 @@ def loopy_vbp_planning(
         q_current_state: (n_states,) current belief over dynamic state
         q_static_state: (n_static,) prior belief over static configuration θ
         transition_tensor: (n_states, n_states, n_static, n_actions) probability tensor
-        goal: (n_states,) goal distribution over final state
+        goal: (n_states,) goal distribution over final state, or
+              (n_states, n_static) per-config preference C(x, θ).
+              2D: marginalized with current θ belief each iteration and
+              injected as additive term in value function and forward pass.
         horizon: planning horizon T (static for JIT)
         n_iterations: number of loopy iterations (static for JIT)
 
@@ -143,39 +146,121 @@ def loopy_vbp_planning(
         action_dist: (n_actions,) distribution over first action
     """
     n_states = q_current_state.shape[0]
+    n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
 
     # Log once at the top
     log_T = safe_log(transition_tensor)
     log_prior_theta = safe_log(q_static_state)
     log_q0 = safe_log(q_current_state)
-    log_goal = safe_log(goal)
 
     # Initialize: cavity = prior
     log_cavity_theta = jnp.tile(log_prior_theta, (horizon, 1))
     log_Q_init = jnp.full((horizon, n_states, n_actions), LOG_ZERO)
-
-    def body_fn(_, carry):
-        log_cavity_theta, _, _ = carry
-
-        log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
-
-        # Backward first (value iteration), then forward under argmax policy
-        log_V, log_Q = backward_pass_vbp(log_reduced_per_t, log_goal, horizon)
-        log_fwd = forward_pass_vbp(log_reduced_per_t, log_q0, log_Q, horizon)
-
-        # Messages to θ: max over u
-        log_dyn_to_theta = compute_dyn_to_theta_msgs_vbp(
-            log_T, log_fwd, log_V, horizon
-        )
-        new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
-
-        return new_log_cavity, log_Q, log_V
-
     log_V_init = jnp.full((horizon + 1, n_states), LOG_ZERO)
-    log_cavity_theta, log_Q, log_V = lax.fori_loop(
-        0, n_iterations, body_fn, (log_cavity_theta, log_Q_init, log_V_init)
-    )
+
+    if goal.ndim == 2:
+        # 2D goal: per-config preference C(x, θ)
+        # Each iteration: compute full θ belief from prior + dyn_to_theta messages,
+        # marginalize C with it, and inject as per-step preference in value function.
+        log_C = safe_log(goal)
+        log_dyn_to_theta_init = jnp.zeros((horizon, n_static))
+
+        def body_fn(_, carry):
+            log_cavity_theta, _, _, log_dyn_to_theta_prev = carry
+
+            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+
+            # Full theta belief from previous iteration's messages
+            log_q_theta = log_prior_theta + log_dyn_to_theta_prev.sum(axis=0)
+            log_q_theta = log_q_theta - logsumexp(log_q_theta)
+
+            # Per-step preference: marginalize C(x,θ) with full theta belief
+            log_pref = logsumexp(log_C + log_q_theta[None, :], axis=1)
+            log_pref = log_pref - logsumexp(log_pref)
+
+            # Backward pass: value iteration with preference as additive term
+            # V(x_T) = uniform (zeros); Q(x,a) = logsumexp_{x'}[reduced + V(x') + log_pref(x')]
+            log_V = jnp.full((horizon + 1, n_states), LOG_ZERO)
+            log_V = log_V.at[horizon].set(jnp.zeros(n_states))  # uniform terminal
+            log_Q = jnp.full((horizon, n_states, n_actions), LOG_ZERO)
+
+            def bwd_body(rev_t, carry):
+                log_V, log_Q = carry
+                t = horizon - 1 - rev_t
+                # Q(x, a) = logsumexp_{x'} [reduced(x', x, a) + V(x') + log_pref(x')]
+                log_Q_t = logsumexp(
+                    log_reduced_per_t[t] + (log_V[t + 1] + log_pref)[:, None, None],
+                    axis=0,
+                )
+                log_Q = log_Q.at[t].set(log_Q_t)
+                # V(x) = max_a Q(x, a), then normalize
+                log_V_t = jnp.max(log_Q_t, axis=-1)
+                log_V_t = log_V_t - logsumexp(log_V_t)
+                log_V = log_V.at[t].set(log_V_t)
+                return log_V, log_Q
+
+            log_V, log_Q = lax.fori_loop(0, horizon, bwd_body, (log_V, log_Q))
+
+            # Forward pass: propagate under argmax policy, include log_pref
+            log_fwd = jnp.zeros((horizon + 1, n_states))
+            log_fwd = log_fwd.at[0].set(log_q0)
+
+            def fwd_body(t, log_fwd):
+                best_actions = jnp.argmax(log_Q[t], axis=-1)
+                log_policy = safe_log(nn.one_hot(best_actions, n_actions))
+
+                log_terms = (log_reduced_per_t[t]
+                             + (log_fwd[t] + log_pref)[None, :, None]
+                             + log_policy[None, :, :])
+                log_q_next = logsumexp(log_terms, axis=(1, 2))
+                log_q_next = log_q_next - logsumexp(log_q_next)
+                return log_fwd.at[t + 1].set(log_q_next)
+
+            log_fwd = lax.fori_loop(0, horizon, fwd_body, log_fwd)
+
+            # dyn_to_theta: include log_pref in x beliefs, max over u
+            log_fwd_t = (log_fwd[:-1] + log_pref[None, :])[:, None, :, None, None]
+            log_V_t1 = (log_V[1:] + log_pref[None, :])[:, :, None, None, None]
+
+            terms = (log_T[None]
+                     + log_fwd_t
+                     + log_V_t1)
+            # Max over u (ε→0), then sum over x_new and x_old
+            new_dyn_to_theta = logsumexp(jnp.max(terms, axis=4), axis=(1, 2))
+
+            new_log_cavity = compute_theta_cavities(log_prior_theta, new_dyn_to_theta)
+
+            return new_log_cavity, log_Q, log_V, new_dyn_to_theta
+
+        log_cavity_theta, log_Q, log_V, _ = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_cavity_theta, log_Q_init, log_V_init, log_dyn_to_theta_init),
+        )
+    else:
+        # 1D goal: original terminal-goal behavior
+        log_goal = safe_log(goal)
+
+        def body_fn(_, carry):
+            log_cavity_theta, _, _ = carry
+
+            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+
+            # Backward first (value iteration), then forward under argmax policy
+            log_V, log_Q = backward_pass_vbp(log_reduced_per_t, log_goal, horizon)
+            log_fwd = forward_pass_vbp(log_reduced_per_t, log_q0, log_Q, horizon)
+
+            # Messages to θ: max over u
+            log_dyn_to_theta = compute_dyn_to_theta_msgs_vbp(
+                log_T, log_fwd, log_V, horizon
+            )
+            new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
+
+            return new_log_cavity, log_Q, log_V
+
+        log_cavity_theta, log_Q, log_V = lax.fori_loop(
+            0, n_iterations, body_fn, (log_cavity_theta, log_Q_init, log_V_init)
+        )
 
     # Action selection: greedy policy weighted by belief and value
     # q(a_0) ∝ Σ_{x_0} δ(a, a*(x_0)) · P(x_0) · V(x_0)

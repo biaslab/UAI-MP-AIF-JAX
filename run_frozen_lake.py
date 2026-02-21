@@ -87,6 +87,7 @@ def main():
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
     parser.add_argument("--hole-penalty", type=float, default=1.0, help="Hole penalty in goal prior")
     parser.add_argument("--goal-temperature", type=float, default=1.0, help="Goal distribution temperature")
+    parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight (lower = more costly)")
     parser.add_argument("--receding-horizon", action="store_true", help="Use receding horizon")
     parser.add_argument("--seed", type=int, default=0, help="Starting seed")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -102,6 +103,7 @@ def main():
     print(f"  Base noise: {args.base_noise}, noise range: {args.noise_range}")
     print(f"  Slip prob: {args.slip_prob}")
     print(f"  Hole penalty: {args.hole_penalty}, goal temperature: {args.goal_temperature}")
+    print(f"  Scan cost: {args.scan_cost}")
     print()
 
     print("Generating tensors...")
@@ -137,11 +139,16 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
+    # Construct action prior: [1, 1, 1, 1, scan_cost] normalized
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    action_prior = action_prior / action_prior.sum()
+
     print("Creating agent...")
     agent = create_agent(
         method_key, T, B, goal, holes,
         planning_horizon=args.planning_horizon,
         planning_iterations=args.planning_iterations,
+        action_prior=action_prior,
         damping=args.damping,
     )
     print(f"  Method: {args.planning_method}")
@@ -203,6 +210,7 @@ def main():
                 "slip_prob": args.slip_prob,
                 "hole_penalty": args.hole_penalty,
                 "goal_temperature": args.goal_temperature,
+                "scan_cost": args.scan_cost,
                 "planning_method": args.planning_method,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,
