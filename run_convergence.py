@@ -40,6 +40,13 @@ from inference.convergence import (
 from utils.tensors import get_dimensions, flatten_state_index
 
 
+def _flatten_obs(obs):
+    """Flatten 5D obs tensor (fov_w, fov_h, ...) to 4D (n_channels, ...)."""
+    if obs.ndim == 5:
+        return obs.reshape(obs.shape[0] * obs.shape[1], *obs.shape[2:])
+    return obs
+
+
 def create_goal_distribution(grid_size, goal_x, goal_y):
     dims = get_dimensions(grid_size)
     goal = jnp.zeros(dims["n_states"])
@@ -116,7 +123,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
@@ -128,7 +135,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
@@ -140,7 +147,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
@@ -152,7 +159,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
@@ -164,7 +171,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
@@ -175,7 +182,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensors,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,

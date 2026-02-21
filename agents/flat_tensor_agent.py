@@ -18,6 +18,14 @@ from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_plannin
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
+def _flatten_obs_tensor(obs_tensors):
+    """Flatten 5D obs tensor (fov_w, fov_h, n_types, n_states, n_static) to 4D."""
+    if obs_tensors.ndim == 5:
+        fov_w, fov_h = obs_tensors.shape[0], obs_tensors.shape[1]
+        return obs_tensors.reshape(fov_w * fov_h, *obs_tensors.shape[2:])
+    return obs_tensors  # already 4D
+
+
 @dataclass
 class FlatTensorAgent:
     """
@@ -951,7 +959,7 @@ class RegionExtendedAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1114,7 +1122,7 @@ class ReducedRegionExtendedAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1278,7 +1286,7 @@ class DynChannelLoopyBPAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1442,7 +1450,7 @@ class ReducedDynChannelAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1600,7 +1608,7 @@ class NuijtenMPAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
@@ -1756,7 +1764,7 @@ class ReducedNuijtenMPAgent:
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=self.transition_tensor,
-            observation_tensor=self.observation_tensors,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,

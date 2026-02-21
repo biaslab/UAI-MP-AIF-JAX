@@ -1,8 +1,8 @@
 experiment:
-  grid_size: 4
-  episodes: 1000
-  max_steps: 25
-  planning_horizon: 20
+  grid_size: 3
+  episodes: 10
+  max_steps: 15
+  planning_horizon: 10
   inference_iterations: 10
   seed: 0
   fov_size: 3
@@ -11,9 +11,9 @@ experiment:
 
 methods:
   loopy-vbp:
-    planning_iterations: 10
+    planning_iterations: 20
   loopy:
-    planning_iterations: 10
+    planning_iterations: 20
   region-extended:
     planning_iterations: 25
   dyn-channel:
@@ -196,6 +196,65 @@ convergence_matrix:
   alpha_0p5_damp_1p0:
     obs_alpha: 0.5
     damping: 1.0
+
+frozen_lake:
+  grid_size: 5
+  n_configs: 4
+  hole_fraction: 0.2
+  min_hamming: 4
+  base_noise: 0.05
+  noise_range: 0.15
+  slip_prob: 0.1
+  episodes: 100
+  max_steps: 30
+  planning_horizon: 15
+  hole_penalty: 0.1
+  goal_temperature: 0.1
+  seed: 0
+
+frozen_lake_methods:
+  loopy-vbp:
+    planning_iterations: 20
+    damping: 1.0
+  loopy:
+    planning_iterations: 20
+    damping: 1.0
+  region-extended:
+    planning_iterations: 25
+    damping: 0.25
+  dyn-channel:
+    planning_iterations: 25
+    damping: 0.25
+  nuijten:
+    planning_iterations: 30
+    damping: 1.0
+  reduced-region-extended:
+    planning-iterations: 30
+    damping: 0.3
+
+wumpus_world:
+  grid_size: 4
+  n_configs: 50
+  n_pits: 2
+  obs_noise: 0.2
+  slip_prob: 0.1
+  episodes: 10
+  max_steps: 50
+  planning_horizon: 15
+  damping: 0.25
+  seed: 0
+
+wumpus_world_methods:
+  loopy-vbp:
+    planning_iterations: 20
+  loopy:
+    planning_iterations: 20
+  region-extended:
+    planning_iterations: 25
+  dyn-channel:
+    planning_iterations: 15
+  nuijten:
+    planning_iterations: 30
 
 deterioration:
   alphas: [0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5]

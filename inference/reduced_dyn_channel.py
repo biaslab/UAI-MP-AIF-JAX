@@ -25,7 +25,6 @@ from .region_extended_loopy_bp import (
     compute_dyn_channels,
     damp_log_channel,
 )
-from environments.minigrid import N_CELL_TYPES
 
 
 @partial(jax.jit, static_argnums=(5, 6))
@@ -33,11 +32,12 @@ def reduced_dyn_channel_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta (used as fixed cavity)
     transition_tensor,    # (n_states, n_states, n_static, n_actions)
-    observation_tensor,   # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
+    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static)
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
+    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
 ) -> tuple:
     """
     Plan actions via reduced dyn-channel BP with fixed theta.
@@ -53,16 +53,17 @@ def reduced_dyn_channel_planning(
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     # Log once at top
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)  # (x_old, x_new, theta, u)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
@@ -73,7 +74,7 @@ def reduced_dyn_channel_planning(
 
     # Tile obs tensor over time: kernel = raw B (no obs channels)
     log_B_tiled = jnp.broadcast_to(
-        log_B_flat[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_B_flat[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static)
     )
 
     # Precompute obs->x messages (both B and cavity are constant)

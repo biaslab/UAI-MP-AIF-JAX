@@ -68,6 +68,72 @@ stages:
         - data/convergence/${key}/results.json:
             cache: false
 
+  frozen_lake:
+    foreach: ${frozen_lake_methods}
+    do:
+      cmd: >-
+        uv run python run_frozen_lake.py
+        --planning-method ${key}
+        --grid-size ${frozen_lake.grid_size}
+        --n-configs ${frozen_lake.n_configs}
+        --hole-fraction ${frozen_lake.hole_fraction}
+        --min-hamming ${frozen_lake.min_hamming}
+        --base-noise ${frozen_lake.base_noise}
+        --noise-range ${frozen_lake.noise_range}
+        --slip-prob ${frozen_lake.slip_prob}
+        --episodes ${frozen_lake.episodes}
+        --max-steps ${frozen_lake.max_steps}
+        --planning-horizon ${frozen_lake.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --hole-penalty ${frozen_lake.hole_penalty}
+        --goal-temperature ${frozen_lake.goal_temperature}
+        --seed ${frozen_lake.seed}
+        --output data/results/frozen_lake/${key}.json
+        --receding-horizon
+      deps:
+        - run_frozen_lake.py
+        - agents/frozen_lake_agent.py
+        - environments/frozen_lake.py
+        - inference/
+      params:
+        - frozen_lake
+        - frozen_lake_methods.${key}
+      metrics:
+        - data/results/frozen_lake/${key}.json:
+            cache: false
+
+  wumpus_world:
+    foreach: ${wumpus_world_methods}
+    do:
+      cmd: >-
+        uv run python run_wumpus_world.py
+        --planning-method ${key}
+        --grid-size ${wumpus_world.grid_size}
+        --n-configs ${wumpus_world.n_configs}
+        --n-pits ${wumpus_world.n_pits}
+        --obs-noise ${wumpus_world.obs_noise}
+        --slip-prob ${wumpus_world.slip_prob}
+        --episodes ${wumpus_world.episodes}
+        --max-steps ${wumpus_world.max_steps}
+        --planning-horizon ${wumpus_world.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${wumpus_world.damping}
+        --seed ${wumpus_world.seed}
+        --output data/results/wumpus_world/${key}.json
+        --receding-horizon
+      deps:
+        - run_wumpus_world.py
+        - agents/wumpus_agent.py
+        - environments/wumpus_world.py
+        - inference/
+      params:
+        - wumpus_world
+        - wumpus_world_methods.${key}
+      metrics:
+        - data/results/wumpus_world/${key}.json:
+            cache: false
+
   deterioration:
     cmd: >-
       uv run python run_deterioration.py

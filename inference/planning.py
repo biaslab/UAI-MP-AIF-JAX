@@ -27,6 +27,7 @@ def planning(
     goal: jnp.ndarray,
     horizon: int,
     n_iterations: int = 1,
+    action_prior: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """
     Plan actions via forward-backward message passing. JIT-compiled.
@@ -38,6 +39,7 @@ def planning(
         goal: (n_states,) goal distribution over final state
         horizon: planning horizon T (static for JIT)
         n_iterations: number of forward-backward passes (static for JIT)
+        action_prior: (n_actions,) prior over actions. If None, uniform.
 
     Returns:
         action_dist: (n_actions,) distribution over first action
@@ -49,7 +51,8 @@ def planning(
     log_T = safe_log(transition_tensor)
     log_reduced = marginalize_static(log_T, safe_log(q_static_state))
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)

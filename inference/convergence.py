@@ -50,7 +50,6 @@ from .nuijten_mp import (
     compute_dyn_to_theta_msgs_nuijten,
     compute_dyn_region_beliefs_nuijten,
 )
-from environments.minigrid import N_CELL_TYPES
 
 
 # =============================================================================
@@ -473,6 +472,7 @@ def planning_convergence(
     goal,
     horizon,
     n_iterations=1,
+    action_prior=None,
 ):
     """Standard BP planning with per-iteration VFE trace.
 
@@ -486,7 +486,8 @@ def planning_convergence(
     log_T = safe_log(transition_tensor)
     log_reduced = marginalize_static(log_T, safe_log(q_static_state))
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
@@ -528,6 +529,7 @@ def loopy_bp_convergence(
     goal,
     horizon,
     n_iterations,
+    action_prior=None,
 ):
     """Loopy BP planning with per-iteration VFE trace.
 
@@ -544,7 +546,8 @@ def loopy_bp_convergence(
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     log_cavity_theta = jnp.tile(log_prior_theta, (horizon, 1))
@@ -588,27 +591,29 @@ def region_extended_convergence(
     horizon,
     n_iterations,
     damping=1.0,
+    action_prior=None,
 ):
     """Region-extended loopy BP planning with per-iteration VFE trace.
 
     Returns:
         action_dist: (n_actions,)
         log_dyn_channels: (T, n_states, n_states, n_actions)
-        log_obs_channels: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_obs_channels: (T+1, n_channels, n_obs_types, n_states, n_static)
         vfe_trace: (n_iterations,)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
     log_goal = safe_log(goal)
@@ -617,7 +622,7 @@ def region_extended_convergence(
     log_obs_to_theta = jnp.zeros((horizon + 1, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
     log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
-    log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
     vfe_trace = jnp.zeros(n_iterations)
 
     def body_fn(i, carry):
@@ -701,27 +706,29 @@ def reduced_region_extended_convergence(
     horizon,
     n_iterations,
     damping=1.0,
+    action_prior=None,
 ):
     """Reduced region-extended planning (fixed theta) with per-iteration VFE trace.
 
     Returns:
         action_dist: (n_actions,)
         log_dyn_channels: (T, n_states, n_states, n_actions)
-        log_obs_channels: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_obs_channels: (T+1, n_channels, n_obs_types, n_states, n_static)
         vfe_trace: (n_iterations,)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
@@ -731,7 +738,7 @@ def reduced_region_extended_convergence(
 
     q_u_init = jnp.zeros((horizon, n_actions))
     log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
-    log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    log_obs_channels_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
     vfe_trace = jnp.zeros(n_iterations)
 
     def body_fn(i, carry):
@@ -796,39 +803,41 @@ def nuijten_mp_convergence(
     goal,
     horizon,
     n_iterations,
+    action_prior=None,
 ):
     """Nuijten MP planning (theta inferred) with per-iteration VFE trace.
 
     Returns:
         action_dist: (n_actions,)
         log_dyn_region_beliefs: (T, x_old, x_new, theta, u)
-        obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        obs_region_beliefs: (T+1, n_channels, n_obs_types, n_states, n_static)
         vfe_trace: (n_iterations,)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
-    action_mask = jnp.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0])
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    action_mask = (action_prior > 0).astype(jnp.float32)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
     log_T_kernel_tiled = jnp.broadcast_to(
         log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
     log_goal = safe_log(goal)
 
     log_dyn_to_theta = jnp.zeros((horizon, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
-    action_prior_init = jnp.tile(
-        jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0]), (horizon, 1)
-    )
+    action_prior_init = jnp.tile(action_prior, (horizon, 1))
     log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_regions_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
     vfe_trace = jnp.zeros(n_iterations)
 
     def body_fn(i, carry):
@@ -898,28 +907,32 @@ def reduced_nuijten_mp_convergence(
     goal,
     horizon,
     n_iterations,
+    action_prior=None,
 ):
     """Reduced Nuijten MP planning (fixed theta) with per-iteration VFE trace.
 
     Returns:
         action_dist: (n_actions,)
         log_dyn_region_beliefs: (T, x_old, x_new, theta, u)
-        obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        obs_region_beliefs: (T+1, n_channels, n_obs_types, n_states, n_static)
         vfe_trace: (n_iterations,)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
-    action_mask = jnp.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0])
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    action_mask = (action_prior > 0).astype(jnp.float32)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
     log_T_kernel_tiled = jnp.broadcast_to(
         log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
@@ -931,11 +944,9 @@ def reduced_nuijten_mp_convergence(
     log_reduced_per_t = compute_log_reduced(log_T_kernel_tiled, log_cavity_dyn)
 
     q_u_init = jnp.zeros((horizon, n_actions))
-    action_prior_init = jnp.tile(
-        jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0]), (horizon, 1)
-    )
+    action_prior_init = jnp.tile(action_prior, (horizon, 1))
     log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_regions_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
     vfe_trace = jnp.zeros(n_iterations)
 
     def body_fn(i, carry):
@@ -998,6 +1009,7 @@ def dyn_channel_convergence(
     horizon,
     n_iterations,
     damping=1.0,
+    action_prior=None,
 ):
     """Dyn-channel loopy BP planning with per-iteration VFE trace.
 
@@ -1009,22 +1021,23 @@ def dyn_channel_convergence(
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
     log_goal = safe_log(goal)
 
     # Tile obs tensor over time: kernel = raw B (no obs channels)
     log_B_tiled = jnp.broadcast_to(
-        log_B_flat[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_B_flat[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static)
     )
 
     log_dyn_to_theta = jnp.zeros((horizon, n_static))
@@ -1116,6 +1129,7 @@ def reduced_dyn_channel_convergence(
     horizon,
     n_iterations,
     damping=1.0,
+    action_prior=None,
 ):
     """Reduced dyn-channel planning (fixed theta) with per-iteration VFE trace.
 
@@ -1127,15 +1141,16 @@ def reduced_dyn_channel_convergence(
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
@@ -1145,7 +1160,7 @@ def reduced_dyn_channel_convergence(
 
     # Tile obs tensor over time
     log_B_tiled = jnp.broadcast_to(
-        log_B_flat[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_B_flat[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static)
     )
 
     # Precompute obs->x messages (constant)

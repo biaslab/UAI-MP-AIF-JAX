@@ -31,7 +31,6 @@ from .region_extended_loopy_bp import (
     compute_log_reduced,
     compute_theta_cavities_extended,
 )
-from environments.minigrid import N_CELL_TYPES
 
 
 # =============================================================================
@@ -311,10 +310,11 @@ def nuijten_mp_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta
     transition_tensor,    # (n_states, n_states, n_static, n_actions) probability
-    observation_tensor,   # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static) probability
+    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static) probability
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
+    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
 ):
     """
     Plan actions via Nuijten MP with θ as a variable node.
@@ -324,14 +324,17 @@ def nuijten_mp_planning(
     Returns:
         action_dist: (n_actions,) distribution over first action
         log_dyn_region_beliefs: (T, x_old, x_new, θ, u)
-        obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        obs_region_beliefs: (T+1, n_channels, n_obs_types, n_states, n_static)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
-    action_mask = jnp.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0])
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    action_mask = (action_prior > 0).astype(jnp.float32)
 
     # Log once at top
     log_T = safe_log(transition_tensor)
@@ -339,7 +342,7 @@ def nuijten_mp_planning(
     log_T_kernel_tiled = jnp.broadcast_to(
         log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
     log_goal = safe_log(goal)
@@ -347,11 +350,9 @@ def nuijten_mp_planning(
     # Initialize carry
     log_dyn_to_theta = jnp.zeros((horizon, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
-    action_prior_init = jnp.tile(
-        jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0]), (horizon, 1)
-    )
+    action_prior_init = jnp.tile(action_prior, (horizon, 1))
     log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_regions_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
     def body_fn(_, carry):
         log_dyn_to_theta, _, action_prior_per_t, _, obs_regions = carry
@@ -419,10 +420,11 @@ def reduced_nuijten_mp_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta (used as fixed cavity)
     transition_tensor,    # (n_states, n_states, n_static, n_actions) probability
-    observation_tensor,   # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static) probability
+    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static) probability
     goal,                 # (n_states,)
     horizon,              # int (static)
     n_iterations,         # int (static)
+    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
 ):
     """
     Plan actions via reduced Nuijten MP with fixed θ.
@@ -432,14 +434,17 @@ def reduced_nuijten_mp_planning(
     Returns:
         action_dist: (n_actions,) distribution over first action
         log_dyn_region_beliefs: (T, x_old, x_new, θ, u)
-        obs_region_beliefs: (T+1, n_fov, N_CELL_TYPES, n_states, n_static)
+        obs_region_beliefs: (T+1, n_channels, n_obs_types, n_states, n_static)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
-    action_mask = jnp.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0])
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    action_mask = (action_prior > 0).astype(jnp.float32)
 
     # Log once at top
     log_T = safe_log(transition_tensor)
@@ -447,7 +452,7 @@ def reduced_nuijten_mp_planning(
     log_T_kernel_tiled = jnp.broadcast_to(
         log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
     )
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
@@ -462,11 +467,9 @@ def reduced_nuijten_mp_planning(
 
     # Initialize carry
     q_u_init = jnp.zeros((horizon, n_actions))
-    action_prior_init = jnp.tile(
-        jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0]), (horizon, 1)
-    )
+    action_prior_init = jnp.tile(action_prior, (horizon, 1))
     log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_regions_init = jnp.zeros((horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static))
+    obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
     def body_fn(_, carry):
         _, action_prior_per_t, _, obs_regions = carry

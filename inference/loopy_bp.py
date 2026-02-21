@@ -173,6 +173,7 @@ def loopy_bp_planning(
     goal,               # (n_states,)
     horizon,            # int (static)
     n_iterations,       # int (static)
+    action_prior=None,  # (n_actions,) prior over actions. If None, uniform.
 ) -> jnp.ndarray:
     """
     Plan actions via loopy BP with θ as a variable in the factor graph.
@@ -184,6 +185,7 @@ def loopy_bp_planning(
         goal: (n_states,) goal distribution over final state
         horizon: planning horizon T (static for JIT)
         n_iterations: number of loopy BP iterations (static for JIT)
+        action_prior: (n_actions,) prior over actions. If None, uniform.
 
     Returns:
         action_dist: (n_actions,) distribution over first action
@@ -198,7 +200,8 @@ def loopy_bp_planning(
     log_q0 = safe_log(q_current_state)
     log_goal = safe_log(goal)
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     # Initialize: cavity = prior
