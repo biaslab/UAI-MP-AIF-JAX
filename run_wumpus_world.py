@@ -72,8 +72,12 @@ def main():
     parser.add_argument("--n-configs", type=int, default=50, help="Number of configurations (n_static)")
     parser.add_argument("--n-pits", type=int, default=2, help="Number of pits per configuration")
     parser.add_argument("--obs-noise", type=float, default=0.1, help="Observation noise level")
+    parser.add_argument("--pos-noise", type=float, default=0.1, help="Position channel noise level")
     parser.add_argument("--slip-prob", type=float, default=0.0, help="Movement slip probability")
     parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight (lower = more costly)")
+    parser.add_argument("--pit-penalty", type=float, default=2.0, help="Pit penalty magnitude for goal")
+    parser.add_argument("--wumpus-penalty", type=float, default=2.0, help="Wumpus penalty magnitude for goal")
+    parser.add_argument("--goal-temperature", type=float, default=1.0, help="Softmax temperature for goal")
     parser.add_argument("--episodes", type=int, default=100, help="Number of episodes")
     parser.add_argument("--max-steps", type=int, default=50, help="Maximum steps per episode")
     parser.add_argument("--planning-horizon", type=int, default=10, help="Planning horizon")
@@ -96,7 +100,7 @@ def main():
     print(f"JAX default backend: {jax.default_backend()}")
     print(f"\nWumpus World {args.grid_size}x{args.grid_size}")
     print(f"  Configs: {args.n_configs}, pits: {args.n_pits}")
-    print(f"  Obs noise: {args.obs_noise}, slip prob: {args.slip_prob}")
+    print(f"  Obs noise: {args.obs_noise}, pos noise: {args.pos_noise}, slip prob: {args.slip_prob}")
     print(f"  Scan cost: {args.scan_cost}")
     print()
 
@@ -109,8 +113,13 @@ def main():
     T = generate_transition_tensor(args.grid_size, pits, wumpus_arr, slip_prob=args.slip_prob)
     B = generate_observation_tensor(
         args.grid_size, pits, wumpus_arr, gold, obs_noise=args.obs_noise,
+        pos_noise=args.pos_noise,
     )
-    goal = generate_goal(gold)
+    goal = generate_goal(
+        args.grid_size, pits, wumpus_arr, gold,
+        gold_reward=1.0, pit_penalty=args.pit_penalty,
+        wumpus_penalty=args.wumpus_penalty, temperature=args.goal_temperature,
+    )
 
     print(f"  Transition tensor: {T.shape} ({T.nbytes / 1024:.1f} KB)")
     print(f"  Observation tensor: {B.shape} ({B.nbytes / 1024:.1f} KB)")
@@ -198,6 +207,7 @@ def main():
                 "n_configs": args.n_configs,
                 "n_pits": args.n_pits,
                 "obs_noise": args.obs_noise,
+                "pos_noise": args.pos_noise,
                 "slip_prob": args.slip_prob,
                 "scan_cost": args.scan_cost,
                 "planning_method": args.planning_method,

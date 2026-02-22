@@ -2,8 +2,8 @@
 
 Grid world where the agent must reach the gold while avoiding hidden pits and
 the wumpus. The agent perceives breeze (adjacent to pit), stench (adjacent to
-wumpus), and glitter (on the gold cell). Static state θ represents sampled
-(pits, wumpus, gold) configurations.
+wumpus), and glitter (on the gold cell), plus noisy position channels.
+Static state θ represents sampled (pits, wumpus, gold) configurations.
 
 State space (doubled for scan mode):
     x: state_index(pos, scanned, n_pos) where pos = row * grid_size + col
@@ -14,12 +14,13 @@ Actions:
     0: LEFT, 1: DOWN, 2: RIGHT, 3: UP, 4: SCAN
 
 Observations:
-    3 binary channels:
+    3 + n_pos binary channels:
         - channel 0: breeze  (0=no, 1=yes) — adjacent to a pit
         - channel 1: stench  (0=no, 1=yes) — adjacent to the wumpus
         - channel 2: glitter (0=no, 1=yes) — on the gold cell
+        - channels 3..3+n_pos-1: position channels (θ-independent, noisy)
     Noisy when unscanned, near-deterministic when scanned.
-    Observation tensor shape: (3, 2, 2*n_pos, n_static)
+    Observation tensor shape: (3 + n_pos, 2, 2*n_pos, n_static)
 """
 
 import numpy as np
@@ -38,7 +39,7 @@ N_MOVEMENT_ACTIONS = 4
 BREEZE = 0
 STENCH = 1
 GLITTER = 2
-N_OBS_CHANNELS = 3
+N_FEATURE_CHANNELS = 3  # breeze, stench, glitter
 N_OBS_TYPES = 2  # binary: 0 or 1
 
 # Movement deltas: (delta_row, delta_col)
@@ -220,17 +221,19 @@ def generate_observation_tensor(
     wumpus: np.ndarray,
     gold: np.ndarray,
     obs_noise: float = 0.1,
+    pos_noise: float = 0.1,
 ) -> np.ndarray:
     """Generate observation tensor B(channel, obs_type, x, θ).
 
-    State space is doubled (2*n_pos) for scan mode. Channel count stays 3.
+    State space is doubled (2*n_pos) for scan mode.
 
-    3 binary observation channels:
+    3 + n_pos binary observation channels:
         - breeze:  adjacent to pit
         - stench:  adjacent to wumpus
         - glitter: on gold cell
+        - position channels: one per grid position (θ-independent)
 
-    Unscanned mode: p_tp = 1 - obs_noise, p_fp = obs_noise * 0.1
+    Unscanned mode: p_tp = 1 - noise, p_fp = noise * 0.1
     Scanned mode: p_tp = 0.999, p_fp = 0.001
 
     Args:
@@ -238,25 +241,32 @@ def generate_observation_tensor(
         pits: (n_configs, n_pos) pit configs
         wumpus: (n_configs, n_pos) wumpus configs
         gold: (n_configs, n_pos) gold configs
-        obs_noise: Noise level for unscanned mode
+        obs_noise: Noise level for feature channels (unscanned mode)
+        pos_noise: Noise level for position channels (unscanned mode)
 
     Returns:
-        B: (3, 2, 2*n_pos, n_static) observation tensor.
+        B: (3 + n_pos, 2, 2*n_pos, n_static) observation tensor.
     """
     n_pos = grid_size * grid_size
     n_states = 2 * n_pos
     n_static = pits.shape[0]
+    n_channels = N_FEATURE_CHANNELS + n_pos
 
-    # Unscanned noise parameters
+    # Unscanned noise parameters (feature channels)
     p_tp = np.clip(1.0 - obs_noise, 0.01, 0.99)
     p_fp = np.clip(obs_noise * 0.1, 0.01, 0.99)
+
+    # Unscanned noise parameters (position channels)
+    p_tp_pos = np.clip(1.0 - pos_noise, 0.01, 0.99)
+    p_fp_pos = np.clip(pos_noise * 0.1, 0.01, 0.99)
 
     # Scanned (near-deterministic) parameters
     p_tp_s = 0.999
     p_fp_s = 0.001
 
-    B = np.zeros((N_OBS_CHANNELS, N_OBS_TYPES, n_states, n_static), dtype=np.float32)
+    B = np.zeros((n_channels, N_OBS_TYPES, n_states, n_static), dtype=np.float32)
 
+    # --- Feature channels (breeze, stench, glitter) — θ-dependent ---
     for theta in range(n_static):
         for pos in range(n_pos):
             neighbors = get_neighbors(pos, grid_size)
@@ -284,31 +294,72 @@ def generate_observation_tensor(
                 B[GLITTER, 1, x, theta] = p_g
                 B[GLITTER, 0, x, theta] = 1.0 - p_g
 
+    # --- Position channels (θ-independent) ---
+    for target_pos in range(n_pos):
+        ch = N_FEATURE_CHANNELS + target_pos
+        for pos in range(n_pos):
+            for scanned in range(2):
+                x = state_index(pos, scanned, n_pos)
+                if scanned == 0:
+                    p = p_tp_pos if pos == target_pos else p_fp_pos
+                else:
+                    p = p_tp_s if pos == target_pos else p_fp_s
+                B[ch, 1, x, :] = p
+                B[ch, 0, x, :] = 1.0 - p
+
     return B
 
 
 def generate_goal(
+    grid_size: int,
+    pits: np.ndarray,
+    wumpus: np.ndarray,
     gold: np.ndarray,
+    gold_reward: float = 1.0,
+    pit_penalty: float = 1.0,
+    wumpus_penalty: float = 1.0,
+    temperature: float = 1.0,
 ) -> np.ndarray:
-    """Generate goal distribution: reach the gold cell.
+    """Generate per-config preference factor C(x, θ) via softmax over rewards.
 
-    State space is doubled (2*n_pos). Gold is reachable in both scan modes.
-    The marginal over gold positions is replicated for both modes.
+    State space is doubled (2*n_pos). Gold reward and pit/wumpus penalties
+    apply in both scan modes. Each config θ gets its own reward vector based
+    on which positions have gold, pits, and wumpus in that config.
 
     Args:
+        grid_size: Grid size
+        pits: (n_configs, n_pos) pit configurations
+        wumpus: (n_configs, n_pos) wumpus configurations
         gold: (n_configs, n_pos) gold configurations
+        gold_reward: Reward magnitude at gold position
+        pit_penalty: Penalty magnitude for pit positions
+        wumpus_penalty: Penalty magnitude for wumpus position
+        temperature: Softmax temperature (lower = more peaked)
 
     Returns:
-        goal: (2*n_pos,) goal distribution
+        goal: (2*n_pos, n_configs) per-config softmax preference
     """
-    n_pos = gold.shape[1]
-    gold_marginal = gold.mean(axis=0)  # (n_pos,)
+    n_pos = grid_size * grid_size
+    n_states = 2 * n_pos
+    n_static = pits.shape[0]
 
-    # Replicate for both modes
-    goal = np.concatenate([gold_marginal, gold_marginal])  # (2*n_pos,)
-    total = goal.sum()
-    if total > 0:
-        goal = goal / total
+    rewards = np.zeros((n_states, n_static), dtype=np.float64)
+
+    for theta in range(n_static):
+        for mode in range(2):
+            for pos in range(n_pos):
+                idx = state_index(pos, mode, n_pos)
+                if gold[theta, pos] == 1.0:
+                    rewards[idx, theta] += gold_reward
+                if pits[theta, pos] == 1.0:
+                    rewards[idx, theta] -= pit_penalty
+                if wumpus[theta, pos] == 1.0:
+                    rewards[idx, theta] -= wumpus_penalty
+
+    scaled = rewards / temperature
+    scaled -= scaled.max(axis=0, keepdims=True)  # numerical stability per config
+    goal = np.exp(scaled)
+    goal /= goal.sum(axis=0, keepdims=True)
     return goal.astype(np.float32)
 
 
@@ -319,7 +370,7 @@ def generate_goal(
 
 @dataclass
 class WumpusStepResult:
-    obs: np.ndarray  # (3,) binary observations [breeze, stench, glitter]
+    obs: np.ndarray  # (3 + n_pos,) binary observations
     reward: float
     terminated: bool
     truncated: bool
@@ -336,7 +387,7 @@ class WumpusWorldEnv:
         pits: (n_configs, n_pos) pit configurations
         wumpus: (n_configs, n_pos) wumpus configurations
         gold: (n_configs, n_pos) gold configurations
-        obs_tensor: (3, 2, 2*n_pos, n_static) observation tensor
+        obs_tensor: (n_channels, 2, 2*n_pos, n_static) observation tensor
         slip_prob: Movement noise (only affects movement actions, not SCAN)
         max_steps: Maximum steps per episode
     """
@@ -439,16 +490,17 @@ class WumpusWorldEnv:
         )
 
     def _get_obs(self) -> np.ndarray:
-        """Sample binary observations [breeze, stench, glitter] from obs model."""
+        """Sample binary observations from obs model."""
         x = self._state_idx
         if self.obs_tensor is not None:
-            obs = np.zeros(N_OBS_CHANNELS, dtype=np.float32)
-            for c in range(N_OBS_CHANNELS):
+            n_channels = self.obs_tensor.shape[0]
+            obs = np.zeros(n_channels, dtype=np.float32)
+            for c in range(n_channels):
                 p_fire = self.obs_tensor[c, 1, x, self._config_idx]
                 obs[c] = float(self._rng.random() < p_fire)
             return obs
         else:
-            # Fallback: deterministic
+            # Fallback: deterministic (feature channels only)
             theta = self._config_idx
             neighbors = get_neighbors(self._position, self.grid_size)
             breeze = float(any(self.pits[theta, n] == 1.0 for n in neighbors))

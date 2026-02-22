@@ -23,8 +23,8 @@ from environments.wumpus_world import (
 )
 from agents.wumpus_agent import create_agent
 
-ACTION_NAMES = ["left", "down", "right", "up"]
-OBS_NAMES = ["breeze", "stench", "glitter"]
+ACTION_NAMES = ["left", "down", "right", "up", "scan"]
+FEATURE_OBS_NAMES = ["breeze", "stench", "glitter"]
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +175,11 @@ def run_diagnostic_episode(agent, env, args, pits, wumpus_arr, gold):
 
         # --- OBSERVATION ---
         obs = jnp.array(result.obs)
+        n_obs = len(result.obs)
+        obs_names = FEATURE_OBS_NAMES + [f"pos{i}" for i in range(n_obs - len(FEATURE_OBS_NAMES))]
         print("  [OBSERVATION]")
         obs_parts = []
-        for i, name in enumerate(OBS_NAMES):
+        for i, name in enumerate(obs_names):
             val = int(obs[i])
             obs_parts.append(f"{name}={'YES' if val else 'no'}")
         print(f"    {', '.join(obs_parts)}")
@@ -197,8 +199,11 @@ def run_diagnostic_episode(agent, env, args, pits, wumpus_arr, gold):
         print()
 
         # --- POSITION BELIEF ---
+        # Marginalize over scan mode: sum unscanned + scanned halves
         print("  [POSITION BELIEF]")
-        q_pos = agent.q_current_state
+        q_full = agent.q_current_state
+        q_pos = q_full[:n_states] + q_full[n_states:]  # (n_pos,)
+        scan_mass = float(q_full[n_states:].sum())
         print_position_grid(q_pos, grid_size)
 
         map_pos = int(jnp.argmax(q_pos))
@@ -206,6 +211,7 @@ def run_diagnostic_episode(agent, env, args, pits, wumpus_arr, gold):
         map_p = float(q_pos[map_pos])
         correct = (map_pos == env._position)
         print(f"    MAP position: ({map_r},{map_c}) p={map_p:.4f} {'CORRECT' if correct else 'WRONG'}")
+        print(f"    P(scanned): {scan_mass:.4f}")
         print(f"    Position entropy: {entropy(q_pos):.2f} bits (max={max_entropy_pos:.2f})")
         print()
 
@@ -268,7 +274,11 @@ def main():
     parser.add_argument("--n-configs", type=int, default=50)
     parser.add_argument("--n-pits", type=int, default=2)
     parser.add_argument("--obs-noise", type=float, default=0.4)
+    parser.add_argument("--pos-noise", type=float, default=0.1)
     parser.add_argument("--slip-prob", type=float, default=0.1)
+    parser.add_argument("--pit-penalty", type=float, default=2.0)
+    parser.add_argument("--wumpus-penalty", type=float, default=2.0)
+    parser.add_argument("--goal-temperature", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--planning-horizon", type=int, default=15)
     parser.add_argument("--planning-iterations", type=int, default=3)
@@ -277,6 +287,7 @@ def main():
                                  "reduced-region-extended", "dyn-channel",
                                  "reduced-dyn-channel", "nuijten", "reduced-nuijten"])
     parser.add_argument("--damping", type=float, default=1.0)
+    parser.add_argument("--scan-cost", type=float, default=0.1)
     parser.add_argument("--receding-horizon", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -292,7 +303,7 @@ def main():
     print()
     print(f"Wumpus World {grid_size}x{grid_size}")
     print(f"  Configs: {args.n_configs}, pits: {args.n_pits}")
-    print(f"  Obs noise: {args.obs_noise}, slip prob: {args.slip_prob}")
+    print(f"  Obs noise: {args.obs_noise}, pos noise: {args.pos_noise}, slip prob: {args.slip_prob}")
     print(f"  Method: {args.planning_method}")
     print(f"  Horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Iterations: {args.planning_iterations}")
@@ -310,8 +321,13 @@ def main():
     T = generate_transition_tensor(grid_size, pits, wumpus_arr, slip_prob=args.slip_prob)
     B = generate_observation_tensor(
         grid_size, pits, wumpus_arr, gold, obs_noise=args.obs_noise,
+        pos_noise=args.pos_noise,
     )
-    goal = generate_goal(gold)
+    goal = generate_goal(
+        grid_size, pits, wumpus_arr, gold,
+        pit_penalty=args.pit_penalty, wumpus_penalty=args.wumpus_penalty,
+        temperature=args.goal_temperature,
+    )
 
     print(f"  T: {T.shape}  B: {B.shape}")
     print(f"  Generated in {time.time() - t0:.2f}s")
@@ -330,10 +346,14 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    action_prior = action_prior / action_prior.sum()
+
     agent = create_agent(
         method_key, T, B, goal,
         planning_horizon=args.planning_horizon,
         planning_iterations=args.planning_iterations,
+        action_prior=action_prior,
         damping=args.damping,
     )
 

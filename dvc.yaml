@@ -1,73 +1,4 @@
 stages:
-  experiment:
-    foreach: ${methods}
-    do:
-      cmd: >-
-        uv run python run_experiment.py
-        --planning-method ${key}
-        --grid-size ${experiment.grid_size}
-        --episodes ${experiment.episodes}
-        --max-steps ${experiment.max_steps}
-        --planning-horizon ${experiment.planning_horizon}
-        --inference-iterations ${experiment.inference_iterations}
-        --planning-iterations ${item.planning_iterations}
-        --seed ${experiment.seed}
-        --fov-size ${experiment.fov_size}
-        --damping ${experiment.damping}
-        --obs-alpha ${experiment.obs_alpha}
-        --record "first,last"
-        --video-dir data/videos/${key}
-        --output data/results/${key}.json
-        --receding-horizon
-      deps:
-        - run_experiment.py
-        - agents/
-        - inference/
-        - environments/
-        - utils/
-      params:
-        - experiment
-        - methods.${key}
-      outs:
-        - data/videos/${key}
-      metrics:
-        - data/results/${key}.json:
-            cache: false
-
-  convergence:
-    foreach: ${convergence_matrix}
-    do:
-      cmd: >-
-        uv run python run_convergence.py
-        --planning-method ${convergence.method}
-        --grid-size ${experiment.grid_size}
-        --planning-horizon ${convergence.planning_horizon}
-        --planning-iterations ${convergence.planning_iterations}
-        --fov-size ${experiment.fov_size}
-        --seed ${convergence.seed}
-        --damping ${item.damping}
-        --obs-alpha ${item.obs_alpha}
-        --observe-first
-        --plot ${key}
-        --output data/convergence/${key}/results.json
-      deps:
-        - run_convergence.py
-        - agents/
-        - inference/
-        - environments/
-        - utils/
-      params:
-        - experiment.grid_size
-        - experiment.fov_size
-        - convergence
-        - convergence_matrix.${key}
-      outs:
-        - data/convergence/${key}/convergence.png
-        - data/convergence/${key}/convergence.tex
-      metrics:
-        - data/convergence/${key}/results.json:
-            cache: false
-
   frozen_lake:
     foreach: ${frozen_lake_methods}
     do:
@@ -113,6 +44,7 @@ stages:
         --n-configs ${wumpus_world.n_configs}
         --n-pits ${wumpus_world.n_pits}
         --obs-noise ${wumpus_world.obs_noise}
+        --pos-noise ${wumpus_world.pos_noise}
         --slip-prob ${wumpus_world.slip_prob}
         --episodes ${wumpus_world.episodes}
         --max-steps ${wumpus_world.max_steps}
@@ -120,9 +52,11 @@ stages:
         --planning-iterations ${item.planning_iterations}
         --damping ${wumpus_world.damping}
         --scan-cost ${wumpus_world.scan_cost}
+        --pit-penalty ${wumpus_world.pit_penalty}
+        --wumpus-penalty ${wumpus_world.wumpus_penalty}
+        --goal-temperature ${wumpus_world.goal_temperature}
         --seed ${wumpus_world.seed}
         --output data/results/wumpus_world/${key}.json
-        --receding-horizon
       deps:
         - run_wumpus_world.py
         - agents/wumpus_agent.py
@@ -135,29 +69,4 @@ stages:
         - data/results/wumpus_world/${key}.json:
             cache: false
 
-  deterioration:
-    cmd: >-
-      uv run python run_deterioration.py
-      --grid-size ${experiment.grid_size}
-      --fov-size ${experiment.fov_size}
-      --damping ${experiment.damping}
-      --receding-horizon
-      --output-dir data/deterioration
-    deps:
-      - run_deterioration.py
-      - agents/
-      - inference/
-      - environments/
-      - utils/
-    params:
-      - experiment.grid_size
-      - experiment.fov_size
-      - experiment.damping
-      - deterioration
-      - deterioration_methods
-    outs:
-      - data/deterioration/deterioration.png
-      - data/deterioration/deterioration.tex
-    metrics:
-      - data/deterioration/results.json:
-          cache: false
+  

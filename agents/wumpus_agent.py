@@ -95,7 +95,7 @@ def _infer_state(
 class _WumpusAgentBase:
     transition_tensor: jnp.ndarray   # (n_states, n_states, n_static, n_actions)
     observation_tensor: jnp.ndarray  # (3, 2, n_states, n_static)
-    goal: jnp.ndarray               # (n_states,)
+    goal: jnp.ndarray               # (n_states,) or (n_states, n_static)
     q_current_state: jnp.ndarray    # (n_states,)
     q_static_state: jnp.ndarray     # (n_static,)
     planning_horizon: int
@@ -129,9 +129,10 @@ class _WumpusAgentBase:
         """
         n_actions = self.transition_tensor.shape[3]
 
-        # Convert obs to one-hot: (3, 2)
-        obs_onehot = jnp.zeros((3, 2))
-        for c in range(3):
+        # Convert obs to one-hot: (n_channels, 2)
+        n_channels = self.observation_tensor.shape[0]
+        obs_onehot = jnp.zeros((n_channels, 2))
+        for c in range(n_channels):
             obs_onehot = obs_onehot.at[c, jnp.round(obs[c]).astype(int)].set(1.0)
 
         # State inference
