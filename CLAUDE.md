@@ -1,6 +1,6 @@
 # MinigridMP-AIF-JAX
 
-Active Inference agents using message passing on factor graphs, implemented in JAX. Compares multiple belief propagation variants for goal-directed planning across three environments.
+Active Inference agents using message passing on factor graphs, implemented in JAX. Compares multiple belief propagation variants for goal-directed planning across four environments.
 
 ## Project Structure
 
@@ -19,6 +19,7 @@ tests/              # Unit & integration tests
 | MiniGrid DoorKey | `run_experiment.py` | `experiment` | Partially observable gridworld with key-door puzzle |
 | Frozen Lake | `run_frozen_lake.py` | `frozen_lake` | Slippery gridworld with holes; configurable layouts |
 | Wumpus World | `run_wumpus_world.py` | `wumpus_world` | Gridworld with pits and wumpus; indirect observations |
+| RockSample | `run_rocksample.py` | `rocksample` | Gridworld with rocks of unknown quality; distance-dependent observations |
 
 Each environment also has `run_*_diagnostics.py` for single-episode inspection.
 
@@ -33,9 +34,11 @@ Each environment also has `run_*_diagnostics.py` for single-episode inspection.
 - `agents/flat_tensor_agent.py` — MiniGrid agents (FlatTensorAgent + 10 variants)
 - `agents/frozen_lake_agent.py` — Frozen Lake agents
 - `agents/wumpus_agent.py` — Wumpus World agents
+- `agents/rocksample_agent.py` — RockSample agents
 - `environments/minigrid.py` — MiniGrid transition & observation tensor generation
 - `environments/frozen_lake.py` — Frozen Lake environment
 - `environments/wumpus_world.py` — Wumpus World environment
+- `environments/rocksample.py` — RockSample environment
 - `utils/tensors.py` — Index flattening, coordinate conversion, one-hot creation
 
 ## Planning Methods
@@ -66,6 +69,9 @@ uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --planning-method 
 
 # Wumpus World
 uv run python run_wumpus_world.py --grid-size 4 --n-configs 50 --planning-method dyn-channel
+
+# RockSample
+uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --planning-method bp
 
 # Single-episode diagnostics (any environment)
 uv run python run_frozen_lake_diagnostics.py --planning-method region-extended
@@ -110,7 +116,7 @@ uv run dvc repro -s experiment  # Run single stage
 
 ## Testing
 
-Run `uv run python run_tests.py` before committing. Tests cover tensor generation, inference algorithms, and agent integration for all three environments.
+Run `uv run python run_tests.py` before committing. Tests cover tensor generation, inference algorithms, and agent integration for all four environments.
 
 ## Conventions
 

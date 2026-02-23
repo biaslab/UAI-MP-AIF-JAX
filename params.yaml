@@ -67,3 +67,38 @@ wumpus_world_methods:
     planning_iterations: 30
   reduced-region-extended:
     planning_iterations: 30
+
+rocksample:
+  grid_size: 4
+  n_rocks: 1
+  half_eff_dist: 0.01
+  pos_noise: 0.3
+  slip_prob: 0.0
+  episodes: 100
+  max_steps: 15
+  planning_horizon: 10
+  good_reward: 2.0
+  bad_penalty: 2.0
+  exit_reward: 1.0
+  goal_temperature: 1.0
+  scan_cost: 0.5
+  sample_cost: 1.0
+  terminal_goal_only: true
+  seed: 0
+
+rocksample_methods:
+  loopy-vbp:
+    planning_iterations: 30
+    damping: 1.0
+  loopy:
+    planning_iterations: 30
+    damping: 1.0
+  region-extended:
+    planning_iterations: 50
+    damping: 0.25
+  dyn-channel:
+    planning_iterations: 50
+    damping: 0.25
+  nuijten:
+    planning_iterations: 30
+    damping: 1.0

@@ -69,4 +69,40 @@ stages:
         - data/results/wumpus_world/${key}.json:
             cache: false
 
-  
+  rocksample:
+    foreach: ${rocksample_methods}
+    do:
+      cmd: >-
+        uv run python run_rocksample.py
+        --planning-method ${key}
+        --grid-size ${rocksample.grid_size}
+        --n-rocks ${rocksample.n_rocks}
+        --half-eff-dist ${rocksample.half_eff_dist}
+        --pos-noise ${rocksample.pos_noise}
+        --slip-prob ${rocksample.slip_prob}
+        --episodes ${rocksample.episodes}
+        --max-steps ${rocksample.max_steps}
+        --planning-horizon ${rocksample.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --good-reward ${rocksample.good_reward}
+        --bad-penalty ${rocksample.bad_penalty}
+        --exit-reward ${rocksample.exit_reward}
+        --goal-temperature ${rocksample.goal_temperature}
+        --scan-cost ${rocksample.scan_cost}
+        --sample-cost ${rocksample.sample_cost}
+        --terminal-goal-only
+        --seed ${rocksample.seed}
+        --output data/results/rocksample/${key}.json
+      deps:
+        - run_rocksample.py
+        - agents/rocksample_agent.py
+        - environments/rocksample.py
+        - inference/
+      params:
+        - rocksample
+        - rocksample_methods.${key}
+      metrics:
+        - data/results/rocksample/${key}.json:
+            cache: false
+
