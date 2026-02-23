@@ -16,7 +16,7 @@ frozen_lake:
 
 frozen_lake_damping:
   n_iterations: 100
-  damping: [0.1, 0.25, 0.5, 0.75, 1.0]
+  damping: "0.1 0.25 0.5 0.75 1.0"
 
 frozen_lake_methods:
   loopy-vbp:

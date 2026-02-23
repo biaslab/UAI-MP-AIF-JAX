@@ -1565,3 +1565,48 @@ stages:
       hash: md5
       md5: a8f3c67a18ee889794d4710240e89c96
       size: 668
+  frozen_lake_damping:
+    cmd: uv run python run_frozen_lake_damping.py --grid-size 4 --n-configs 15 
+      --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 --noise-range 0.1 
+      --slip-prob 0.1 --planning-horizon 15 --hole-penalty 2.0 
+      --goal-temperature 1.0 --scan-cost 0.1 --seed 0 --n-iterations 100 
+      --damping 0.1 0.25 0.5 0.75 1.0 --output-dir data/frozen_lake_damping
+    deps:
+    - path: environments/frozen_lake.py
+      hash: md5
+      md5: f2b509c0fa6f4e890b7b770e8805a252
+      size: 19656
+    - path: inference/
+      hash: md5
+      md5: 8aed432ccf48bc15db1bed5c8c3d752f.dir
+      size: 490899
+      nfiles: 45
+    - path: run_frozen_lake_damping.py
+      hash: md5
+      md5: 2d8770330508001867b29cf650a45720
+      size: 10274
+    params:
+      params.yaml:
+        frozen_lake:
+          grid_size: 4
+          n_configs: 15
+          hole_fraction: 0.2
+          min_hamming: 4
+          base_noise: 0.4
+          noise_range: 0.1
+          slip_prob: 0.1
+          episodes: 1000
+          max_steps: 15
+          planning_horizon: 15
+          hole_penalty: 2.0
+          goal_temperature: 1.0
+          scan_cost: 0.1
+          seed: 0
+        frozen_lake_damping:
+          n_iterations: 100
+          damping: 0.1 0.25 0.5 0.75 1.0
+    outs:
+    - path: data/frozen_lake_damping/vfe_traces.csv
+      hash: md5
+      md5: ea82680a066684dc5b10d4fa8a10ea43
+      size: 6756
