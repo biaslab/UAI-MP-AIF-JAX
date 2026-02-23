@@ -35,15 +35,15 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Fixed parameters
 # ---------------------------------------------------------------------------
-GRID_SIZE = 5
-N_ROCKS = 3
+GRID_SIZE = 4
+N_ROCKS = 2
 GOOD_REWARD = 2.0
 BAD_PENALTY = 2.0
 EXIT_REWARD = 1.0
 SAMPLE_COST = 1.0
 POS_NOISE = 0.3
 SLIP_PROB = 0.0
-MAX_STEPS = 15
+MAX_STEPS = 10
 PLANNING_HORIZON = 10
 TERMINAL_GOAL_ONLY = True
 SEED = 0
@@ -106,7 +106,7 @@ def make_action_prior(scan_cost: float) -> np.ndarray:
 
 def main():
     parser = argparse.ArgumentParser(description="RockSample grid search")
-    parser.add_argument("--episodes", type=int, default=100, help="Episodes per config (default: 100)")
+    parser.add_argument("--episodes", type=int, default=25, help="Episodes per config (default: 100)")
     args = parser.parse_args()
 
     n_episodes = args.episodes

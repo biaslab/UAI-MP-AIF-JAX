@@ -1302,11 +1302,11 @@ stages:
       md5: 40b35b7b9af0aef85d20d693aae2abec
       size: 688
   rocksample@nuijten:
-    cmd: uv run python run_rocksample.py --planning-method nuijten --grid-size 4
-      --n-rocks 1 --half-eff-dist 0.01 --pos-noise 0.3 --slip-prob 0.0 
-      --episodes 100 --max-steps 15 --planning-horizon 10 --planning-iterations 
-      30 --damping 1.0 --good-reward 2.0 --bad-penalty 2.0 --exit-reward 1.0 
-      --goal-temperature 1.0 --scan-cost 0.5 --sample-cost 1.0 
+    cmd: uv run python run_rocksample.py --planning-method nuijten --grid-size 5
+      --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
+      1000 --max-steps 15 --planning-horizon 10 --planning-iterations 30 
+      --damping 1.0 --good-reward 2.0 --bad-penalty 2.0 --exit-reward 1.0 
+      --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output 
       data/results/rocksample/nuijten.json
     deps:
@@ -1320,9 +1320,9 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: e24daa4f6f7c095247445d881709d8c2.dir
-      size: 475227
-      nfiles: 45
+      md5: f919b0dc5bc9090de7ab5f28aa023d4d.dir
+      size: 348741
+      nfiles: 26
     - path: run_rocksample.py
       hash: md5
       md5: 0a9069dfb770f4392d19bf8034d42d5e
@@ -1330,18 +1330,18 @@ stages:
     params:
       params.yaml:
         rocksample:
-          grid_size: 4
-          n_rocks: 1
-          half_eff_dist: 0.01
+          grid_size: 5
+          n_rocks: 2
+          half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 100
+          episodes: 1000
           max_steps: 15
           planning_horizon: 10
           good_reward: 2.0
           bad_penalty: 2.0
           exit_reward: 1.0
-          goal_temperature: 1.0
+          goal_temperature: 0.5
           scan_cost: 0.5
           sample_cost: 1.0
           terminal_goal_only: true
@@ -1352,14 +1352,14 @@ stages:
     outs:
     - path: data/results/rocksample/nuijten.json
       hash: md5
-      md5: 1f0ee1e913b5bb2a1648eacdbc40a8d0
-      size: 671
+      md5: 27a94aa4df570b0df286aee3aaa3575a
+      size: 673
   rocksample@region-extended:
     cmd: uv run python run_rocksample.py --planning-method region-extended 
-      --grid-size 4 --n-rocks 1 --half-eff-dist 0.01 --pos-noise 0.3 --slip-prob
-      0.0 --episodes 100 --max-steps 15 --planning-horizon 10 
+      --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
+      0.0 --episodes 1000 --max-steps 15 --planning-horizon 10 
       --planning-iterations 50 --damping 0.25 --good-reward 2.0 --bad-penalty 
-      2.0 --exit-reward 1.0 --goal-temperature 1.0 --scan-cost 0.5 --sample-cost
+      2.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
       1.0 --terminal-goal-only --seed 0 --output 
       data/results/rocksample/region-extended.json
     deps:
@@ -1373,9 +1373,9 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: e24daa4f6f7c095247445d881709d8c2.dir
-      size: 475227
-      nfiles: 45
+      md5: f919b0dc5bc9090de7ab5f28aa023d4d.dir
+      size: 348741
+      nfiles: 26
     - path: run_rocksample.py
       hash: md5
       md5: 0a9069dfb770f4392d19bf8034d42d5e
@@ -1383,18 +1383,18 @@ stages:
     params:
       params.yaml:
         rocksample:
-          grid_size: 4
-          n_rocks: 1
-          half_eff_dist: 0.01
+          grid_size: 5
+          n_rocks: 2
+          half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 100
+          episodes: 1000
           max_steps: 15
           planning_horizon: 10
           good_reward: 2.0
           bad_penalty: 2.0
           exit_reward: 1.0
-          goal_temperature: 1.0
+          goal_temperature: 0.5
           scan_cost: 0.5
           sample_cost: 1.0
           terminal_goal_only: true
@@ -1405,14 +1405,14 @@ stages:
     outs:
     - path: data/results/rocksample/region-extended.json
       hash: md5
-      md5: 2cabc3e5bcb27f6fdd6899641d2da0d1
-      size: 678
+      md5: 06fe58605a27e40db34fe48df6604ac5
+      size: 683
   rocksample@loopy-vbp:
     cmd: uv run python run_rocksample.py --planning-method loopy-vbp --grid-size
-      4 --n-rocks 1 --half-eff-dist 0.01 --pos-noise 0.3 --slip-prob 0.0 
-      --episodes 100 --max-steps 15 --planning-horizon 10 --planning-iterations 
-      30 --damping 1.0 --good-reward 2.0 --bad-penalty 2.0 --exit-reward 1.0 
-      --goal-temperature 1.0 --scan-cost 0.5 --sample-cost 1.0 
+      4 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 
+      --episodes 100 --max-steps 15 --planning-horizon 15 --planning-iterations 
+      30 --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
+      --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output 
       data/results/rocksample/loopy-vbp.json
     deps:
@@ -1426,9 +1426,9 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: e24daa4f6f7c095247445d881709d8c2.dir
-      size: 475227
-      nfiles: 45
+      md5: f919b0dc5bc9090de7ab5f28aa023d4d.dir
+      size: 348741
+      nfiles: 26
     - path: run_rocksample.py
       hash: md5
       md5: 0a9069dfb770f4392d19bf8034d42d5e
@@ -1437,17 +1437,17 @@ stages:
       params.yaml:
         rocksample:
           grid_size: 4
-          n_rocks: 1
-          half_eff_dist: 0.01
+          n_rocks: 2
+          half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
           episodes: 100
           max_steps: 15
-          planning_horizon: 10
+          planning_horizon: 15
           good_reward: 2.0
-          bad_penalty: 2.0
+          bad_penalty: 3.0
           exit_reward: 1.0
-          goal_temperature: 1.0
+          goal_temperature: 0.5
           scan_cost: 0.5
           sample_cost: 1.0
           terminal_goal_only: true
@@ -1458,14 +1458,14 @@ stages:
     outs:
     - path: data/results/rocksample/loopy-vbp.json
       hash: md5
-      md5: c1e84d66e1ff3973a08d6e17a9b8771b
-      size: 670
+      md5: 87b3bacfc3c87495116079b073325eea
+      size: 668
   rocksample@dyn-channel:
     cmd: uv run python run_rocksample.py --planning-method dyn-channel 
-      --grid-size 4 --n-rocks 1 --half-eff-dist 0.01 --pos-noise 0.3 --slip-prob
-      0.0 --episodes 100 --max-steps 15 --planning-horizon 10 
+      --grid-size 4 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
+      0.0 --episodes 100 --max-steps 15 --planning-horizon 15 
       --planning-iterations 50 --damping 0.25 --good-reward 2.0 --bad-penalty 
-      2.0 --exit-reward 1.0 --goal-temperature 1.0 --scan-cost 0.5 --sample-cost
+      3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
       1.0 --terminal-goal-only --seed 0 --output 
       data/results/rocksample/dyn-channel.json
     deps:
@@ -1479,9 +1479,9 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: e24daa4f6f7c095247445d881709d8c2.dir
-      size: 475227
-      nfiles: 45
+      md5: f919b0dc5bc9090de7ab5f28aa023d4d.dir
+      size: 348741
+      nfiles: 26
     - path: run_rocksample.py
       hash: md5
       md5: 0a9069dfb770f4392d19bf8034d42d5e
@@ -1490,17 +1490,17 @@ stages:
       params.yaml:
         rocksample:
           grid_size: 4
-          n_rocks: 1
-          half_eff_dist: 0.01
+          n_rocks: 2
+          half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
           episodes: 100
           max_steps: 15
-          planning_horizon: 10
+          planning_horizon: 15
           good_reward: 2.0
-          bad_penalty: 2.0
+          bad_penalty: 3.0
           exit_reward: 1.0
-          goal_temperature: 1.0
+          goal_temperature: 0.5
           scan_cost: 0.5
           sample_cost: 1.0
           terminal_goal_only: true
@@ -1511,14 +1511,14 @@ stages:
     outs:
     - path: data/results/rocksample/dyn-channel.json
       hash: md5
-      md5: b44c11d1cdc26fab9294bc46bdb72a36
-      size: 675
+      md5: 81ced3cf6809b50e09c81d7ab1e0870a
+      size: 672
   rocksample@loopy:
     cmd: uv run python run_rocksample.py --planning-method loopy --grid-size 4 
-      --n-rocks 1 --half-eff-dist 0.01 --pos-noise 0.3 --slip-prob 0.0 
-      --episodes 100 --max-steps 15 --planning-horizon 10 --planning-iterations 
-      30 --damping 1.0 --good-reward 2.0 --bad-penalty 2.0 --exit-reward 1.0 
-      --goal-temperature 1.0 --scan-cost 0.5 --sample-cost 1.0 
+      --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
+      100 --max-steps 15 --planning-horizon 15 --planning-iterations 30 
+      --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
+      --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output data/results/rocksample/loopy.json
     deps:
     - path: agents/rocksample_agent.py
@@ -1531,9 +1531,9 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: e24daa4f6f7c095247445d881709d8c2.dir
-      size: 475227
-      nfiles: 45
+      md5: f919b0dc5bc9090de7ab5f28aa023d4d.dir
+      size: 348741
+      nfiles: 26
     - path: run_rocksample.py
       hash: md5
       md5: 0a9069dfb770f4392d19bf8034d42d5e
@@ -1542,17 +1542,17 @@ stages:
       params.yaml:
         rocksample:
           grid_size: 4
-          n_rocks: 1
-          half_eff_dist: 0.01
+          n_rocks: 2
+          half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
           episodes: 100
           max_steps: 15
-          planning_horizon: 10
+          planning_horizon: 15
           good_reward: 2.0
-          bad_penalty: 2.0
+          bad_penalty: 3.0
           exit_reward: 1.0
-          goal_temperature: 1.0
+          goal_temperature: 0.5
           scan_cost: 0.5
           sample_cost: 1.0
           terminal_goal_only: true
@@ -1563,50 +1563,5 @@ stages:
     outs:
     - path: data/results/rocksample/loopy.json
       hash: md5
-      md5: a8f3c67a18ee889794d4710240e89c96
-      size: 668
-  frozen_lake_damping:
-    cmd: uv run python run_frozen_lake_damping.py --grid-size 4 --n-configs 15 
-      --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 --noise-range 0.1 
-      --slip-prob 0.1 --planning-horizon 15 --hole-penalty 2.0 
-      --goal-temperature 1.0 --scan-cost 0.1 --seed 0 --n-iterations 100 
-      --damping 0.1 0.25 0.5 0.75 1.0 --output-dir data/frozen_lake_damping
-    deps:
-    - path: environments/frozen_lake.py
-      hash: md5
-      md5: f2b509c0fa6f4e890b7b770e8805a252
-      size: 19656
-    - path: inference/
-      hash: md5
-      md5: 8aed432ccf48bc15db1bed5c8c3d752f.dir
-      size: 490899
-      nfiles: 45
-    - path: run_frozen_lake_damping.py
-      hash: md5
-      md5: 2d8770330508001867b29cf650a45720
-      size: 10274
-    params:
-      params.yaml:
-        frozen_lake:
-          grid_size: 4
-          n_configs: 15
-          hole_fraction: 0.2
-          min_hamming: 4
-          base_noise: 0.4
-          noise_range: 0.1
-          slip_prob: 0.1
-          episodes: 1000
-          max_steps: 15
-          planning_horizon: 15
-          hole_penalty: 2.0
-          goal_temperature: 1.0
-          scan_cost: 0.1
-          seed: 0
-        frozen_lake_damping:
-          n_iterations: 100
-          damping: 0.1 0.25 0.5 0.75 1.0
-    outs:
-    - path: data/frozen_lake_damping/vfe_traces.csv
-      hash: md5
-      md5: ea82680a066684dc5b10d4fa8a10ea43
-      size: 6756
+      md5: bf0dceb9490a4f86c4da4711d0cafb8e
+      size: 666
