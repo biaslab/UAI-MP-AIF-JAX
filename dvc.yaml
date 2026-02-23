@@ -34,6 +34,36 @@ stages:
         - data/results/frozen_lake/${key}.json:
             cache: false
 
+  frozen_lake_damping:
+    cmd: >-
+      uv run python run_frozen_lake_damping.py
+      --grid-size ${frozen_lake.grid_size}
+      --n-configs ${frozen_lake.n_configs}
+      --hole-fraction ${frozen_lake.hole_fraction}
+      --min-hamming ${frozen_lake.min_hamming}
+      --base-noise ${frozen_lake.base_noise}
+      --noise-range ${frozen_lake.noise_range}
+      --slip-prob ${frozen_lake.slip_prob}
+      --planning-horizon ${frozen_lake.planning_horizon}
+      --hole-penalty ${frozen_lake.hole_penalty}
+      --goal-temperature ${frozen_lake.goal_temperature}
+      --scan-cost ${frozen_lake.scan_cost}
+      --seed ${frozen_lake.seed}
+      --n-iterations ${frozen_lake_damping.n_iterations}
+      --damping ${frozen_lake_damping.damping}
+      --output-dir data/frozen_lake_damping
+    deps:
+      - run_frozen_lake_damping.py
+      - environments/frozen_lake.py
+      - inference/
+    params:
+      - frozen_lake
+      - frozen_lake_damping
+    plots:
+      - data/frozen_lake_damping/vfe_traces.csv:
+          x: iteration
+          y_label: VFE
+
   wumpus_world:
     foreach: ${wumpus_world_methods}
     do:

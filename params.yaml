@@ -14,6 +14,10 @@ frozen_lake:
   scan_cost: 0.1
   seed: 0
 
+frozen_lake_damping:
+  n_iterations: 100
+  damping: [0.1, 0.25, 0.5, 0.75, 1.0]
+
 frozen_lake_methods:
   loopy-vbp:
     planning_iterations: 30

@@ -62,12 +62,24 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False):
         if result.terminated or result.truncated:
             break
 
+    # Track good-rock collection
+    n_good_total = 0
+    n_good_collected = 0
+    for j in range(env.n_rocks):
+        rock_good = env.qualities[env.config_idx, j] == 1.0
+        if rock_good:
+            n_good_total += 1
+            if env._collected & (1 << j):
+                n_good_collected += 1
+
     return {
         "total_reward": total_reward,
         "steps": steps,
         "success": result.terminated and result.reward > 0,
         "terminated": result.terminated,
         "truncated": result.truncated,
+        "n_good_total": n_good_total,
+        "n_good_collected": n_good_collected,
     }
 
 
@@ -227,12 +239,21 @@ def main():
 
     success_rate = successes / args.episodes
     avg_steps = sum(r["steps"] for r in results) / args.episodes
-    avg_reward = sum(r["total_reward"] for r in results) / args.episodes
+    rewards = np.array([r["total_reward"] for r in results])
+    avg_reward = float(rewards.mean())
+    std_reward = float(rewards.std())
+
+    # Good-rock retrieval: only count episodes where good rocks existed
+    total_good = sum(r["n_good_total"] for r in results)
+    total_good_collected = sum(r["n_good_collected"] for r in results)
+    good_rock_retrieval = total_good_collected / total_good if total_good > 0 else float("nan")
+    episodes_with_good = sum(1 for r in results if r["n_good_total"] > 0)
 
     print("-" * 50)
     print(f"Success rate: {success_rate:.1%}")
     print(f"Average steps: {avg_steps:.1f}")
-    print(f"Average reward: {avg_reward:.3f}")
+    print(f"Average reward: {avg_reward:.3f} (std: {std_reward:.3f})")
+    print(f"Good rock retrieval: {good_rock_retrieval:.1%} ({total_good_collected}/{total_good} across {episodes_with_good} episodes with good rocks)")
     print(f"Total time: {elapsed:.2f}s ({elapsed / args.episodes * 1000:.1f}ms/episode)")
 
     if args.output:
@@ -266,6 +287,11 @@ def main():
                 "success_rate": success_rate,
                 "avg_steps": avg_steps,
                 "avg_reward": avg_reward,
+                "std_reward": std_reward,
+                "good_rock_retrieval": good_rock_retrieval,
+                "total_good_rocks": total_good,
+                "total_good_collected": total_good_collected,
+                "episodes_with_good_rocks": episodes_with_good,
                 "successes": successes,
                 "total_time_s": elapsed,
             },
