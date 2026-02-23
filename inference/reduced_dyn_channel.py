@@ -21,11 +21,11 @@ from .region_extended_loopy_bp import (
     forward_pass,
     backward_pass,
     compute_obs_to_x_msgs,
+    compute_pref_to_x_msgs,
     compute_dyn_region_beliefs,
     compute_dyn_channels,
     damp_log_channel,
 )
-from environments.minigrid import N_CELL_TYPES
 
 
 @partial(jax.jit, static_argnums=(5, 6))
@@ -33,11 +33,12 @@ def reduced_dyn_channel_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta (used as fixed cavity)
     transition_tensor,    # (n_states, n_states, n_static, n_actions)
-    observation_tensor,   # (fov_w, fov_h, N_CELL_TYPES, n_states, n_static)
-    goal,                 # (n_states,)
+    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static)
+    goal,                 # (n_states,) or (n_states, n_static) preference
     horizon,              # int (static)
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
+    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
 ) -> tuple:
     """
     Plan actions via reduced dyn-channel BP with fixed theta.
@@ -46,6 +47,8 @@ def reduced_dyn_channel_planning(
     Only dynamics factors get kernel reparameterization. Observation factors
     use the raw B tensor with fixed cavity.
 
+    When goal is 2D, preference is applied at every timestep with fixed cavity.
+
     Returns:
         action_dist: (n_actions,)
         log_dyn_channels: (T, n_states, n_states, n_actions)
@@ -53,18 +56,26 @@ def reduced_dyn_channel_planning(
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
     n_actions = transition_tensor.shape[3]
-    fov_w, fov_h = observation_tensor.shape[0], observation_tensor.shape[1]
-    n_fov = fov_w * fov_h
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+    has_pref = goal.ndim == 2
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
     # Log once at top
     log_T = safe_log(transition_tensor)
     log_T_kernel = log_T.transpose(1, 0, 2, 3)  # (x_old, x_new, theta, u)
-    log_B_flat = safe_log(observation_tensor.reshape(n_fov, N_CELL_TYPES, n_states, n_static))
+    log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
-    log_goal = safe_log(goal)
+
+    if has_pref:
+        log_C = safe_log(goal)                            # (n_states, n_static)
+        log_goal = jnp.zeros(n_states)                    # uniform terminal
+    else:
+        log_C = None
+        log_goal = safe_log(goal)
 
     # Fixed cavities: theta = q_static_state tiled over time
     log_cavity_fixed = safe_log(q_static_state)
@@ -73,15 +84,27 @@ def reduced_dyn_channel_planning(
 
     # Tile obs tensor over time: kernel = raw B (no obs channels)
     log_B_tiled = jnp.broadcast_to(
-        log_B_flat[None], (horizon + 1, n_fov, N_CELL_TYPES, n_states, n_static)
+        log_B_flat[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static)
     )
 
     # Precompute obs->x messages (both B and cavity are constant)
     log_obs_to_x = compute_obs_to_x_msgs(log_B_tiled, log_cavity_obs)
 
+    # Precompute pref_to_x with fixed cavity (constant across iterations)
+    if has_pref:
+        log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_obs)  # (T+1, n_states)
+        log_local_to_x = log_obs_to_x + log_pref_to_x
+    else:
+        log_local_to_x = log_obs_to_x
+
     # Initialize carry
     q_u_init = jnp.zeros((horizon, n_actions))
-    log_dyn_channels_init = jnp.zeros((horizon, n_states, n_states, n_actions))
+
+    # Initial dyn channels: r(x_new | x_old, u) from θ-marginalized transition
+    log_dyn_ch0 = logsumexp(log_T + log_cavity_fixed[None, None, :, None], axis=2)
+    log_dyn_ch0 = log_dyn_ch0 - logsumexp(log_dyn_ch0, axis=0, keepdims=True)
+    log_dyn_ch0 = log_dyn_ch0.transpose(1, 0, 2)  # (x_old, x_new, u)
+    log_dyn_channels_init = jnp.broadcast_to(log_dyn_ch0[None], (horizon, n_states, n_states, n_actions))
 
     def body_fn(i, carry):
         q_u, log_dyn_channels = carry
@@ -92,20 +115,20 @@ def reduced_dyn_channel_planning(
         # Reduced tensors (using FIXED cavity)
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
 
-        # Forward pass (with precomputed obs->x)
+        # Forward pass (with precomputed local messages)
         log_fwd_msgs = forward_pass(
-            log_reduced_per_t, log_q0, log_action_prior, log_obs_to_x, horizon
+            log_reduced_per_t, log_q0, log_action_prior, log_local_to_x, horizon
         )
 
         # Backward pass + action marginals
         log_bwd_msgs, q_u = backward_pass(
             log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
-            log_obs_to_x, horizon
+            log_local_to_x, horizon
         )
 
         # Dyn region beliefs -> extract dyn channels -> damped update
         log_dyn_regions = compute_dyn_region_beliefs(
-            log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+            log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
             log_cavity_dyn, log_action_prior
         )
         raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)

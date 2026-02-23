@@ -27,6 +27,7 @@ def planning(
     goal: jnp.ndarray,
     horizon: int,
     n_iterations: int = 1,
+    action_prior: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """
     Plan actions via forward-backward message passing. JIT-compiled.
@@ -35,9 +36,13 @@ def planning(
         q_current_state: (n_states,) current belief over state
         q_static_state: (n_static,) belief over static configuration
         transition_tensor: (n_states, n_states, n_static, n_actions) probability tensor
-        goal: (n_states,) goal distribution over final state
+        goal: (n_states,) or (n_states, n_static) goal distribution.
+              1D: terminal goal distribution over final state.
+              2D: per-config preference C(x, θ), marginalized with q_static and
+                  injected at every forward/backward step.
         horizon: planning horizon T (static for JIT)
         n_iterations: number of forward-backward passes (static for JIT)
+        action_prior: (n_actions,) prior over actions. If None, uniform.
 
     Returns:
         action_dist: (n_actions,) distribution over first action
@@ -49,26 +54,85 @@ def planning(
     log_T = safe_log(transition_tensor)
     log_reduced = marginalize_static(log_T, safe_log(q_static_state))
 
-    action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
     log_q0 = safe_log(q_current_state)
-    log_goal = safe_log(goal)
 
-    # Initialize log-space state beliefs (positions 1..T overwritten by forward pass)
-    log_q_state = jnp.concatenate([
-        log_q0[None, :],
-        jnp.zeros((horizon, n_states)),
-    ], axis=0)
+    if goal.ndim == 2:
+        # 2D goal: per-config preference C(x, θ)
+        # Marginalize over static state to get per-step preference
+        log_C = safe_log(goal)
+        log_pref = logsumexp(log_C + safe_log(q_static_state)[None, :], axis=1)
+        log_pref = log_pref - logsumexp(log_pref)  # normalize
 
-    q_u = jnp.tile(action_prior, (horizon, 1))
+        log_q_state = jnp.concatenate([
+            log_q0[None, :],
+            jnp.zeros((horizon, n_states)),
+        ], axis=0)
+        q_u = jnp.tile(action_prior, (horizon, 1))
 
-    def body_fn(_, carry):
-        log_q_state, q_u = carry
-        log_q_state_new = forward_pass(log_reduced, log_q_state, log_action_prior, horizon)
-        q_u_new = backward_pass(log_reduced, log_q_state_new, log_goal, log_action_prior, horizon)
-        return log_q_state_new, q_u_new
+        def body_fn(_, carry):
+            log_q_state, q_u = carry
 
-    log_q_state, q_u = lax.fori_loop(0, n_iterations, body_fn, (log_q_state, q_u))
+            # Forward pass with per-step preference injected
+            def fwd_body(t, lqs):
+                log_terms = (log_reduced
+                             + (lqs[t] + log_pref)[None, :, None]
+                             + log_action_prior[None, None, :])
+                log_q_next = logsumexp(log_terms, axis=(1, 2))
+                log_q_next = log_q_next - logsumexp(log_q_next)
+                return lqs.at[t + 1].set(log_q_next)
+
+            log_q_state_new = lax.fori_loop(0, horizon, fwd_body, log_q_state)
+
+            # Backward pass with per-step preference, uniform terminal
+            def bwd_body(carry, t):
+                log_bwd, q_u = carry
+                log_bwd_with_pref = log_bwd + log_pref
+
+                # Action marginal: sum over x_new (i) and x_old (j)
+                log_terms = (log_reduced
+                             + log_bwd_with_pref[:, None, None]
+                             + (log_q_state_new[t] + log_pref)[None, :, None])
+                log_msg_to_u = logsumexp(log_terms, axis=(0, 1))
+                q_u_t = nn.softmax(log_msg_to_u + log_action_prior)
+                q_u = q_u.at[t].set(q_u_t)
+
+                # Backward message to x_t: sum over x_new (i) and u (k)
+                log_terms_bwd = (log_reduced
+                                 + log_bwd_with_pref[:, None, None]
+                                 + log_action_prior[None, None, :])
+                log_bwd_new = logsumexp(log_terms_bwd, axis=(0, 2))
+                log_bwd_new = log_bwd_new - logsumexp(log_bwd_new)
+
+                return (log_bwd_new, q_u), None
+
+            q_u_init = jnp.zeros((horizon, n_actions))
+            (_, q_u_new), _ = lax.scan(
+                bwd_body, (jnp.zeros(n_states), q_u_init),
+                jnp.arange(horizon - 1, -1, -1)
+            )
+            return log_q_state_new, q_u_new
+
+        log_q_state, q_u = lax.fori_loop(0, n_iterations, body_fn, (log_q_state, q_u))
+    else:
+        # 1D goal: original terminal-goal behavior
+        log_goal = safe_log(goal)
+
+        log_q_state = jnp.concatenate([
+            log_q0[None, :],
+            jnp.zeros((horizon, n_states)),
+        ], axis=0)
+        q_u = jnp.tile(action_prior, (horizon, 1))
+
+        def body_fn(_, carry):
+            log_q_state, q_u = carry
+            log_q_state_new = forward_pass(log_reduced, log_q_state, log_action_prior, horizon)
+            q_u_new = backward_pass(log_reduced, log_q_state_new, log_goal, log_action_prior, horizon)
+            return log_q_state_new, q_u_new
+
+        log_q_state, q_u = lax.fori_loop(0, n_iterations, body_fn, (log_q_state, q_u))
 
     return q_u[0]
 

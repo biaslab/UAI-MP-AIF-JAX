@@ -215,9 +215,11 @@ class TestPlanning:
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist = planning(
-            q_current, q_static, self.transition_tensor, goal, horizon=5
+            q_current, q_static, self.transition_tensor, goal, horizon=5,
+            action_prior=action_prior,
         )
 
         # Actions 4 (DROP) and 6 (DONE) should have zero probability
@@ -321,10 +323,11 @@ class TestLoopyBPPlanning:
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist = loopy_bp_planning(
             q_current, q_static, self.transition_tensor, goal,
-            horizon=5, n_iterations=3,
+            horizon=5, n_iterations=3, action_prior=action_prior,
         )
 
         # Actions 4 (DROP) and 6 (DONE) should have zero probability
@@ -451,6 +454,10 @@ class TestRegionExtendedLoopyBP:
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
 
     def test_output_shape(self):
         import jax.numpy as jnp
@@ -464,7 +471,7 @@ class TestRegionExtendedLoopyBP:
         goal = goal.at[0].set(1.0)
 
         action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=5, n_iterations=2,
         )
 
@@ -483,10 +490,11 @@ class TestRegionExtendedLoopyBP:
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist, _, _ = region_extended_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
-            goal, horizon=5, n_iterations=3,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
+            goal, horizon=5, n_iterations=3, action_prior=action_prior,
         )
 
         assert action_dist[4] < 1e-6
@@ -682,13 +690,17 @@ class TestNumericalStability:
 
         transition_tensor = jnp.array(generate_transition_tensor(n), dtype=jnp.float32)
         observation_tensor = jnp.array(generate_observation_tensor(n), dtype=jnp.float32)
+        observation_tensor_flat = observation_tensor.reshape(
+            observation_tensor.shape[0] * observation_tensor.shape[1],
+            *observation_tensor.shape[2:]
+        )
 
         q_current = jnp.ones(n_states) / n_states
         q_static = jnp.ones(n_static) / n_static
         goal = jnp.zeros(n_states).at[0].set(1.0)
 
         action_dist, dyn_ch, obs_ch = region_extended_loopy_bp_planning(
-            q_current, q_static, transition_tensor, observation_tensor,
+            q_current, q_static, transition_tensor, observation_tensor_flat,
             goal, horizon=5, n_iterations=10,
         )
 
@@ -707,13 +719,17 @@ class TestNumericalStability:
 
         transition_tensor = jnp.array(generate_transition_tensor(n), dtype=jnp.float32)
         observation_tensor = jnp.array(generate_observation_tensor(n), dtype=jnp.float32)
+        observation_tensor_flat = observation_tensor.reshape(
+            observation_tensor.shape[0] * observation_tensor.shape[1],
+            *observation_tensor.shape[2:]
+        )
 
         q_current = jnp.ones(n_states) / n_states
         q_static = jnp.ones(n_static) / n_static
         goal = jnp.zeros(n_states).at[0].set(1.0)
 
         action_dist, dyn_ch, obs_ch = reduced_region_extended_planning(
-            q_current, q_static, transition_tensor, observation_tensor,
+            q_current, q_static, transition_tensor, observation_tensor_flat,
             goal, horizon=5, n_iterations=10,
         )
 
@@ -741,6 +757,10 @@ class TestReducedRegionExtended:
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
 
     def test_output_shape(self):
         import jax.numpy as jnp
@@ -754,7 +774,7 @@ class TestReducedRegionExtended:
         goal = goal.at[0].set(1.0)
 
         action_dist, dyn_channels, obs_channels = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=5, n_iterations=2,
         )
 
@@ -773,10 +793,11 @@ class TestReducedRegionExtended:
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states)
         goal = goal.at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist, _, _ = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
-            goal, horizon=5, n_iterations=3,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
+            goal, horizon=5, n_iterations=3, action_prior=action_prior,
         )
 
         assert action_dist[4] < 1e-6
@@ -799,11 +820,11 @@ class TestReducedRegionExtended:
         goal = goal.at[0].set(1.0)
 
         full_result, _, _ = region_extended_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=5, n_iterations=1,
         )
         reduced_result, _, _ = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=5, n_iterations=1,
         )
 
@@ -835,6 +856,10 @@ class TestNuijtenMP:
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
 
     # -----------------------------------------------------------------
     # Observation region beliefs
@@ -1100,7 +1125,7 @@ class TestNuijtenMP:
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
 
         action_dist, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=2,
         )
 
@@ -1116,10 +1141,11 @@ class TestNuijtenMP:
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist, _, _ = nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
-            goal, horizon=3, n_iterations=2,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
+            goal, horizon=3, n_iterations=2, action_prior=action_prior,
         )
 
         assert action_dist[4] < 1e-6, f"DROP should be masked, got {action_dist[4]}"
@@ -1135,7 +1161,7 @@ class TestNuijtenMP:
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
 
         action_dist, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=5,
         )
 
@@ -1157,7 +1183,7 @@ class TestNuijtenMP:
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
 
         _, log_dyn_beliefs, obs_beliefs = nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=horizon, n_iterations=2,
         )
 
@@ -1178,7 +1204,7 @@ class TestNuijtenMP:
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
 
         action_dist, log_dyn_beliefs, obs_beliefs = reduced_nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=2,
         )
 
@@ -1194,10 +1220,11 @@ class TestNuijtenMP:
         q_current = jnp.ones(self.n_states) / self.n_states
         q_static = jnp.ones(self.n_static) / self.n_static
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
 
         action_dist, _, _ = reduced_nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
-            goal, horizon=3, n_iterations=2,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
+            goal, horizon=3, n_iterations=2, action_prior=action_prior,
         )
 
         assert action_dist[4] < 1e-6
@@ -1213,7 +1240,7 @@ class TestNuijtenMP:
         goal = jnp.zeros(self.n_states).at[0].set(1.0)
 
         action_dist, log_dyn_beliefs, obs_beliefs = reduced_nuijten_mp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=5,
         )
 
@@ -1312,6 +1339,10 @@ class TestCustomFOVSizeInference:
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n, fov_size=self.fov_size), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
         self.orientation_tensor = jnp.array(generate_orientation_observation_tensor(self.n), dtype=jnp.float32)
 
     def test_obs_tensor_shape(self):
@@ -1352,7 +1383,7 @@ class TestCustomFOVSizeInference:
         goal = goal.at[0].set(1.0)
 
         action_dist, dyn_channels, obs_channels = region_extended_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=2,
         )
 
@@ -1373,7 +1404,7 @@ class TestCustomFOVSizeInference:
         goal = goal.at[0].set(1.0)
 
         action_dist, dyn_channels, obs_channels = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor, self.observation_tensor,
+            q_current, q_static, self.transition_tensor, self.observation_tensor_flat,
             goal, horizon=3, n_iterations=2,
         )
 
@@ -1425,6 +1456,10 @@ class TestPerformanceRefactorEquivalence:
 
         self.transition_tensor = jnp.array(generate_transition_tensor(self.n), dtype=jnp.float32)
         self.observation_tensor = jnp.array(generate_observation_tensor(self.n), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
         self.q_current = jnp.ones(n_states) / n_states
         self.q_static = jnp.ones(n_static) / n_static
         self.goal = jnp.zeros(n_states).at[0].set(1.0)
@@ -1433,10 +1468,12 @@ class TestPerformanceRefactorEquivalence:
         import jax.numpy as jnp
         from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 
-        ref = jnp.array([0.28529316, 0.28473705, 0.15433712, 0.13547038, 0.0, 0.1401623, 0.0])
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+        ref = jnp.array([0.37998927, 0.3881985, 0.08980469, 0.06858236, 0.0, 0.07342518, 0.0])
         action_dist, _, _ = region_extended_loopy_bp_planning(
             self.q_current, self.q_static, self.transition_tensor,
-            self.observation_tensor, self.goal, horizon=5, n_iterations=3)
+            self.observation_tensor_flat, self.goal, horizon=5, n_iterations=3,
+            action_prior=action_prior)
         assert np.allclose(action_dist, ref, atol=1e-5), (
             f"region_extended mismatch:\n  got:      {action_dist}\n  expected: {ref}")
 
@@ -1444,10 +1481,12 @@ class TestPerformanceRefactorEquivalence:
         import jax.numpy as jnp
         from inference.reduced_region_extended import reduced_region_extended_planning
 
-        ref = jnp.array([0.27358004, 0.2739623, 0.184954, 0.13003711, 0.0, 0.1374666, 0.0])
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
+        ref = jnp.array([0.27807137, 0.28130087, 0.16806313, 0.13238382, 0.0, 0.14018087, 0.0])
         action_dist, _, _ = reduced_region_extended_planning(
             self.q_current, self.q_static, self.transition_tensor,
-            self.observation_tensor, self.goal, horizon=5, n_iterations=3)
+            self.observation_tensor_flat, self.goal, horizon=5, n_iterations=3,
+            action_prior=action_prior)
         assert np.allclose(action_dist, ref, atol=1e-5), (
             f"reduced_region_extended mismatch:\n  got:      {action_dist}\n  expected: {ref}")
 
@@ -1455,10 +1494,11 @@ class TestPerformanceRefactorEquivalence:
         import jax.numpy as jnp
         from inference.loopy_bp import loopy_bp_planning
 
+        action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
         ref = jnp.array([0.20261735, 0.20261735, 0.19984041, 0.19230758, 0.0, 0.20261735, 0.0])
         action_dist = loopy_bp_planning(
             self.q_current, self.q_static, self.transition_tensor,
-            self.goal, horizon=5, n_iterations=3)
+            self.goal, horizon=5, n_iterations=3, action_prior=action_prior)
         assert np.allclose(action_dist, ref, atol=1e-5), (
             f"loopy_bp mismatch:\n  got:      {action_dist}\n  expected: {ref}")
 

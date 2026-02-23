@@ -40,6 +40,13 @@ from utils.tensors import (
     unflatten_static_index, location_to_coords,
 )
 
+def _flatten_obs(obs):
+    """Flatten 5D obs tensor (fov_w, fov_h, ...) to 4D (n_channels, ...)."""
+    if obs.ndim == 5:
+        return obs.reshape(obs.shape[0] * obs.shape[1], *obs.shape[2:])
+    return obs
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -216,7 +223,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -228,7 +235,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -240,7 +247,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -252,7 +259,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -264,7 +271,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
@@ -275,7 +282,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
-            observation_tensor=agent.observation_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensor),
             goal=agent.goal,
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,

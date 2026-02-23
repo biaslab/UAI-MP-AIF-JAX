@@ -1,112 +1,130 @@
-# MinigridMP-AIF-JAX
+# What Type of Inference Is Active Inference?
 
-Message passing implementation for planning in MiniGrid's DoorKey environment using JAX.
+Companion code for the paper *"What Type of Inference Is Active Inference?"*. Implements Active Inference agents using message passing on factor graphs in JAX, comparing multiple belief propagation variants for goal-directed planning across four environments.
 
-## Overview
-
-This project implements discrete factor graph inference for goal-directed planning in partially observable grid worlds. Features:
-
-- **Loopy Belief Propagation** for state inference
-- **Multiple message-passing schemes** for action planning (see below)
-- **Memory-efficient indexed tensor representation** (100-400x smaller than full tensors)
-
-## Planning Methods
-
-| Flag | Method | Description |
-|------|--------|-------------|
-| `bp` | Standard BP | Marginalizes static parameter θ once; forward-backward on temporal graph |
-| `loopy` | Loopy BP | Treats θ as a variable node in the factor graph |
-| `region-extended` | Region-extended loopy BP | Adds observation factors to the planning graph |
-| `reduced-aif` | Reduced region-extended | Fixed θ with kernel reparameterization + observation factors |
-| `nuijten` | Nuijten MP | Region beliefs without kernels, θ inferred |
-| `reduced-nuijten` | Reduced Nuijten MP | Region beliefs without kernels, θ fixed |
-
-Select a method with `--planning-method <flag>`.
-
-## Quick Start
+## Reproducing Paper Results
 
 ```bash
 # Install dependencies
 uv sync
 
-# Run basic experiment (5x5 grid, 100 episodes, standard BP)
-uv run python run_experiment.py --grid-size 3 --episodes 100
-
-# Run with a different planning method
-uv run python run_experiment.py --grid-size 3 --episodes 100 --planning-method region-extended
-
-# Run all tests
-uv run python run_tests.py
-```
-
-## Experiments
-
-Experiments are managed with [DVC](https://dvc.org). All shared parameters live in `params.yaml` and the pipeline is defined in `dvc.yaml`.
-
-```bash
-# Install dev dependencies (includes DVC)
-uv sync --group dev
-
-# Run all 6 planning methods
+# Run all experiments (Frozen Lake, Wumpus World, RockSample)
 uv run dvc repro
 
-# Compare results
+# View results
 uv run dvc metrics show
-uv run dvc metrics diff
 ```
 
-To tweak parameters, edit `params.yaml` and re-run `uv run dvc repro` — DVC only re-runs stages whose parameters or code changed. Results (JSON) are git-tracked in `data/results/`; videos are DVC-cached in `data/videos/`.
+Configuration lives in `params.yaml`, the pipeline in `dvc.yaml`. Results go to `data/results/`. DVC only re-runs stages whose parameters or code changed.
 
-### Running a single method
+## Planning Methods
+
+Available via `--planning-method`:
+
+| Flag | Paper name | Module | Description |
+|---|---|---|---|
+| `bp` | Standard BP | `planning.py` | Marginalizes static parameter once; forward-backward on temporal graph |
+| `vbp` | Value BP | `vbp.py` | Value iteration variant (temperature to zero) |
+| `loopy-vbp` | Loopy VBP | `loopy_vbp.py` | Loopy BP with value iteration messages |
+| `loopy` | Loopy BP | `loopy_bp.py` | Treats static parameter as variable node |
+| `region-extended` | Active Inference | `region_extended_loopy_bp.py` | Adds observation factors to planning graph |
+| `reduced-region-extended` | Reduced Active Inference | `reduced_region_extended.py` | Fixed parameter + kernel reparameterization + observation factors |
+| `dyn-channel` | Risk-minimizing | `dyn_channel_loopy_bp.py` | Dynamic channel messages |
+| `reduced-dyn-channel` | Reduced risk-minimizing | `reduced_dyn_channel.py` | Fixed parameter + dynamic channels |
+| `nuijten` | Nuijten MP | `nuijten_mp.py` | Region beliefs without kernels |
+| `reduced-nuijten` | Reduced Nuijten MP | `nuijten_mp.py` | Fixed parameter, no kernels |
+
+## Environments
+
+### Frozen Lake
+
+Slippery gridworld where the agent must reach a goal while avoiding holes. Hole layouts are randomized across configurations; observations are noisy and distance-dependent.
 
 ```bash
-uv run python run_experiment.py --grid-size 3 --episodes 100 \
-    --planning-method bp \
-    --planning-horizon 15 \
-    --inference-iterations 10 \
-    --planning-iterations 10 \
-    --fov-size 7 \
-    --seed 0
+uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --episodes 1000 \
+    --planning-method region-extended --planning-horizon 15 --damping 0.25
 ```
 
-### Key options
+Environment-specific arguments: `--n-configs`, `--hole-fraction`, `--min-hamming`, `--base-noise`, `--noise-range`, `--slip-prob`, `--hole-penalty`, `--goal-temperature`, `--scan-cost`.
 
-- `--grid-size N` — Internal grid size (MiniGrid size = N+2)
-- `--planning-horizon N` — Lookahead depth
-- `--receding-horizon` — Decrease horizon as episode time runs out
-- `--fov-size N` — Field-of-view size (odd, >= 3)
-- `--no-orientation` — Replace orientation observation with uniform (agent must infer orientation)
-- `--record first,last` — Record episodes to video
-- `--output results.json` — Save results to JSON
+### Wumpus World
+
+Gridworld with pits and a wumpus. The agent receives indirect observations (stench, breeze) about neighboring cells. Multiple static configurations vary pit and wumpus placement.
+
+```bash
+uv run python run_wumpus_world.py --grid-size 4 --n-configs 50 --episodes 1000 \
+    --planning-method dyn-channel --planning-horizon 7 --damping 0.25
+```
+
+Environment-specific arguments: `--n-configs`, `--n-pits`, `--obs-noise`, `--pos-noise`, `--slip-prob`, `--pit-penalty`, `--wumpus-penalty`, `--goal-temperature`, `--scan-cost`.
+
+### RockSample
+
+Gridworld with rocks of unknown quality. The agent can check rocks (distance-dependent observation accuracy), sample them, or move to the exit. Static configurations vary rock placement and quality.
+
+```bash
+uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --episodes 100 \
+    --planning-method bp --planning-horizon 10
+```
+
+Environment-specific arguments: `--n-rocks`, `--n-configs`, `--half-eff-dist`, `--pos-noise`, `--slip-prob`, `--good-reward`, `--bad-penalty`, `--exit-reward`, `--goal-temperature`, `--scan-cost`, `--sample-cost`, `--terminal-goal-only`.
+
+### MiniGrid DoorKey
+
+Partially observable gridworld with a key-door puzzle. The agent has a limited field of view and must pick up a key to unlock a door. This environment is not part of the DVC pipeline.
+
+```bash
+uv run python run_minigrid.py --grid-size 3 --episodes 100 \
+    --planning-method region-extended --fov-size 7
+```
+
+Environment-specific arguments: `--fov-size`, `--no-orientation`, `--inference-iterations`, `--obs-alpha`, `--full-tensors`, `--record`, `--video-dir`.
+
+## Common CLI Arguments
+
+All environments share these arguments:
+
+| Flag | Description |
+|---|---|
+| `--grid-size N` | Grid size |
+| `--episodes N` | Number of episodes |
+| `--max-steps N` | Maximum steps per episode |
+| `--planning-horizon N` | Lookahead depth |
+| `--planning-iterations N` | Number of message-passing iterations |
+| `--planning-method METHOD` | Planning algorithm (see table above) |
+| `--damping F` | Channel update damping (1.0 = no damping) |
+| `--receding-horizon` | Decrease horizon as episode time runs out |
+| `--seed N` | Random seed |
+| `--verbose` | Print per-step details |
+| `--output FILE` | Save results to JSON |
+
+Use `--help` on any script for all parameters. Per-method iteration counts and damping are configured in `params.yaml`.
 
 ## Diagnostics
 
-`run_diagnostics.py` runs a single episode and prints full internal state at every step: beliefs, observations, inference/planning timing, action distributions, and entropy.
+Each environment has a `run_*_diagnostics.py` script that runs a single episode and prints full internal state at every step: beliefs, observations, timing, action distributions, and entropy.
 
 ```bash
-uv run python run_diagnostics.py --grid-size 3 --seed 0 --planning-method bp
+uv run python run_frozen_lake_diagnostics.py --planning-method region-extended
+uv run python run_wumpus_world_diagnostics.py --planning-method loopy
+uv run python run_rocksample_diagnostics.py --planning-method bp
+uv run python run_minigrid_diagnostics.py --grid-size 3 --planning-method bp
 ```
-
-## Key Features
-
-- **JAX-based**: JIT-compiled inference for GPU acceleration
-- **Two representations**: Full tensors (debugging) and indexed tensors (production)
-- **Validated**: Tests compare against MiniGrid ground truth
 
 ## Project Structure
 
 ```
-agents/         # Agent implementations
-environments/   # MiniGrid tensor generation & gym wrapper
-inference/      # State inference & planning algorithms
-tests/          # Unit & integration tests
+agents/              # Agent implementations per environment
+environments/        # Tensor generation & environment wrappers
+inference/           # Planning algorithms & state inference
+utils/               # Index conversion utilities
+tests/               # Unit & integration tests
 ```
 
-See [CLAUDE.md](CLAUDE.md) for detailed technical documentation.
+## Testing
 
-## Requirements
+```bash
+uv run python run_tests.py
+```
 
-- Python 3.10+
-- JAX
-- MiniGrid
-- uv (recommended) or pip
+Tests cover tensor generation, inference algorithms, and agent integration for all four environments.

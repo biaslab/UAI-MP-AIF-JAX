@@ -271,10 +271,83 @@ def run_groundtruth_tests():
     print("  FOV size=5 ground truth: PASSED")
 
 
+def run_rocksample_tests():
+    from tests.test_rocksample import (
+        TestRockSampleTensors,
+        TestRockSampleEnv,
+        TestRockSampleAgents,
+        TestRockSampleEpisode,
+    )
+
+    print()
+    print("=" * 60)
+    print("ROCKSAMPLE ENVIRONMENT TESTS")
+    print("=" * 60)
+
+    print("Running RockSample tensor tests...")
+    t = TestRockSampleTensors()
+    t.setup_method()
+    t.test_config_shapes()
+    t.test_exhaustive_configs()
+    t.test_rock_quality_independence()
+    t.test_rocks_not_at_start_or_exit()
+    t.test_state_indexing_roundtrip()
+    t.test_transition_shape()
+    t.test_transition_stochastic()
+    t.test_exit_absorbing()
+    t.test_scan_transitions()
+    t.test_scan_nearest_rock()
+    t.test_scan_all_scanned_selfloop()
+    t.test_sample_at_rock()
+    t.test_sample_no_rock()
+    t.test_sample_already_collected()
+    t.test_theta_independent_transitions()
+    t.test_observation_shape()
+    t.test_observation_is_stochastic()
+    t.test_position_channels_correctness()
+    t.test_position_channels_scan_independent()
+    t.test_rock_quality_distance_dependent()
+    t.test_rock_quality_scanned_deterministic()
+    t.test_rock_quality_unscanned_not_deterministic()
+    t.test_goal_shape()
+    t.test_slip_stochastic()
+    print("  RockSample tensors: PASSED")
+
+    print("Running RockSample env tests...")
+    t = TestRockSampleEnv()
+    t.setup_method()
+    t.test_reset()
+    t.test_movement_right()
+    t.test_wall_collision()
+    t.test_scan_action()
+    t.test_scan_second_rock()
+    t.test_scan_all_scanned_noop()
+    t.test_sample_at_rock()
+    t.test_exit_termination()
+    t.test_ascii_render()
+    print("  RockSample env: PASSED")
+
+    print("Running RockSample agent tests...")
+    t = TestRockSampleAgents()
+    t.setup_method()
+    t.test_bp_agent_produces_valid_action()
+    t.test_loopy_bp_agent_produces_valid_action()
+    t.test_region_extended_agent_produces_valid_action()
+    t.test_static_belief_update()
+    t.test_all_methods_run()
+    print("  RockSample agents: PASSED")
+
+    print("Running RockSample episode test...")
+    t = TestRockSampleEpisode()
+    t.test_episode_completes()
+    print("  RockSample episode: PASSED")
+
+
 def main():
     run_minigrid_tests()
     run_inference_tests()
     run_groundtruth_tests()
+    run_rocksample_tests()
 
     print()
     print("=" * 60)
