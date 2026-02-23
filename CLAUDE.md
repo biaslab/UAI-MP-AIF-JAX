@@ -16,7 +16,7 @@ tests/              # Unit & integration tests
 
 | Environment | Entry point | Config key | Description |
 |---|---|---|---|
-| MiniGrid DoorKey | `run_experiment.py` | `experiment` | Partially observable gridworld with key-door puzzle |
+| MiniGrid DoorKey | `run_minigrid.py` | `experiment` | Partially observable gridworld with key-door puzzle |
 | Frozen Lake | `run_frozen_lake.py` | `frozen_lake` | Slippery gridworld with holes; configurable layouts |
 | Wumpus World | `run_wumpus_world.py` | `wumpus_world` | Gridworld with pits and wumpus; indirect observations |
 | RockSample | `run_rocksample.py` | `rocksample` | Gridworld with rocks of unknown quality; distance-dependent observations |
@@ -62,7 +62,7 @@ Available via `--planning-method`:
 
 ```bash
 # MiniGrid experiment
-uv run python run_experiment.py --grid-size 3 --episodes 100 --planning-method region-extended
+uv run python run_minigrid.py --grid-size 3 --episodes 100 --planning-method region-extended
 
 # Frozen Lake
 uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --planning-method loopy
@@ -77,7 +77,7 @@ uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --planni
 uv run python run_frozen_lake_diagnostics.py --planning-method region-extended
 
 # Convergence analysis
-uv run python run_convergence.py --damping 0.25 --obs-alpha 0.01
+uv run python run_minigrid_convergence.py --damping 0.25 --obs-alpha 0.01
 
 # Tests
 uv run python run_tests.py
@@ -91,7 +91,7 @@ Experiments are managed with DVC. Configuration lives in `params.yaml`, pipeline
 
 ```bash
 uv run dvc repro          # Run full pipeline
-uv run dvc repro -s experiment  # Run single stage
+uv run dvc repro -s frozen_lake  # Run single stage
 ```
 
 ## Important Details
