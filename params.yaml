@@ -20,19 +20,19 @@ frozen_lake_damping:
 
 frozen_lake_methods:
   loopy-vbp:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0
   loopy:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0
   region-extended:
     planning_iterations: 50
     damping: 0.25
   dyn-channel:
-    planning_iterations: 25
+    planning_iterations: 50
     damping: 0.25
   nuijten:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0
 
 wumpus_world:
@@ -54,15 +54,15 @@ wumpus_world:
 
 wumpus_world_methods:
   loopy-vbp:
-    planning_iterations: 30
+    planning_iterations: 50
   loopy:
-    planning_iterations: 30
+    planning_iterations: 50
   region-extended:
     planning_iterations: 50
   dyn-channel:
     planning_iterations: 50
   nuijten:
-    planning_iterations: 30
+    planning_iterations: 50
 
 rocksample:
   grid_size: 5
@@ -84,10 +84,10 @@ rocksample:
 
 rocksample_methods:
   loopy-vbp:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0
   loopy:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0
   region-extended:
     planning_iterations: 50
@@ -96,5 +96,5 @@ rocksample_methods:
     planning_iterations: 50
     damping: 0.25
   nuijten:
-    planning_iterations: 30
+    planning_iterations: 50
     damping: 1.0

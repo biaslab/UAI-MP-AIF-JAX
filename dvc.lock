@@ -4,7 +4,7 @@ stages:
     cmd: uv run python run_frozen_lake.py --planning-method loopy-vbp 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
       --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 1000 
-      --max-steps 15 --planning-horizon 15 --planning-iterations 30 --damping 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
       1.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/loopy-vbp.json
     deps:
@@ -43,18 +43,18 @@ stages:
           scan_cost: 0.1
           seed: 0
         frozen_lake_methods.loopy-vbp:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/frozen_lake/loopy-vbp.json
       hash: md5
-      md5: df10e2ee1c28308ce5faa739096cb152
-      size: 614
+      md5: 84a610d57a82aad1140957034a8374fb
+      size: 615
   frozen_lake@loopy:
     cmd: uv run python run_frozen_lake.py --planning-method loopy --grid-size 4 
       --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
       --noise-range 0.1 --slip-prob 0.1 --episodes 1000 --max-steps 15 
-      --planning-horizon 15 --planning-iterations 30 --damping 1.0 
+      --planning-horizon 15 --planning-iterations 50 --damping 1.0 
       --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/loopy.json
     deps:
@@ -93,12 +93,12 @@ stages:
           scan_cost: 0.1
           seed: 0
         frozen_lake_methods.loopy:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/frozen_lake/loopy.json
       hash: md5
-      md5: 4fda85b0009b53a975183f8cd95c6bf5
+      md5: c2eec6f6e68cc74a414c8a2fa1fd7023
       size: 609
   frozen_lake@region-extended:
     cmd: uv run python run_frozen_lake.py --planning-method region-extended 
@@ -154,7 +154,7 @@ stages:
     cmd: uv run python run_frozen_lake.py --planning-method dyn-channel 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
       --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 1000 
-      --max-steps 15 --planning-horizon 15 --planning-iterations 25 --damping 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
       0.25 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/dyn-channel.json
     deps:
@@ -193,18 +193,18 @@ stages:
           scan_cost: 0.1
           seed: 0
         frozen_lake_methods.dyn-channel:
-          planning_iterations: 25
+          planning_iterations: 50
           damping: 0.25
     outs:
     - path: data/results/frozen_lake/dyn-channel.json
       hash: md5
-      md5: 4bc4b7987d844988c9002044e56e38fa
+      md5: 687b854817b5608b9974ce4866e3d1cc
       size: 617
   frozen_lake@nuijten:
     cmd: uv run python run_frozen_lake.py --planning-method nuijten --grid-size 
       4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
       --noise-range 0.1 --slip-prob 0.1 --episodes 1000 --max-steps 15 
-      --planning-horizon 15 --planning-iterations 30 --damping 1.0 
+      --planning-horizon 15 --planning-iterations 50 --damping 1.0 
       --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/nuijten.json
     deps:
@@ -243,12 +243,12 @@ stages:
           scan_cost: 0.1
           seed: 0
         frozen_lake_methods.nuijten:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/frozen_lake/nuijten.json
       hash: md5
-      md5: 6d86bb932259287f094cb9a69a2134e7
+      md5: d68dabf2369ef1fa533119650c678e5b
       size: 613
   frozen_lake_damping:
     cmd: uv run python run_frozen_lake_damping.py --grid-size 4 --n-configs 15 
@@ -299,7 +299,7 @@ stages:
     cmd: uv run python run_wumpus_world.py --planning-method loopy-vbp 
       --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
       --slip-prob 0.01 --episodes 1000 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 30 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/loopy-vbp.json
     deps:
@@ -339,17 +339,17 @@ stages:
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.loopy-vbp:
-          planning_iterations: 30
+          planning_iterations: 50
     outs:
     - path: data/results/wumpus_world/loopy-vbp.json
       hash: md5
-      md5: 524aa971ca1e15cd7fefa67a5e48e3ac
-      size: 549
+      md5: f762bcfdee7a4e24a8b31c8c9e9ce589
+      size: 550
   wumpus_world@loopy:
     cmd: uv run python run_wumpus_world.py --planning-method loopy --grid-size 5
       --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 --slip-prob 0.01
       --episodes 1000 --max-steps 10 --planning-horizon 7 --planning-iterations 
-      30 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 --wumpus-penalty 1.0 
+      50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 --wumpus-penalty 1.0 
       --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/loopy.json
     deps:
@@ -389,11 +389,11 @@ stages:
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.loopy:
-          planning_iterations: 30
+          planning_iterations: 50
     outs:
     - path: data/results/wumpus_world/loopy.json
       hash: md5
-      md5: 997b1463df076dfbba3ce2f47eee8f60
+      md5: dc5f6e076698d15dba9984298b89714a
       size: 546
   wumpus_world@region-extended:
     cmd: uv run python run_wumpus_world.py --planning-method region-extended 
@@ -499,7 +499,7 @@ stages:
     cmd: uv run python run_wumpus_world.py --planning-method nuijten --grid-size
       5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 --slip-prob 
       0.01 --episodes 1000 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 30 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/nuijten.json
     deps:
@@ -539,17 +539,17 @@ stages:
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.nuijten:
-          planning_iterations: 30
+          planning_iterations: 50
     outs:
     - path: data/results/wumpus_world/nuijten.json
       hash: md5
-      md5: bfe11609e7708016ce1ea5ff94e9a0d7
+      md5: b090910260f988259d988fe1bd635100
       size: 547
   rocksample@loopy-vbp:
     cmd: uv run python run_rocksample.py --planning-method loopy-vbp --grid-size
       5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 
       --episodes 1000 --max-steps 15 --planning-horizon 15 --planning-iterations
-      30 --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
+      50 --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output 
       data/results/rocksample/loopy-vbp.json
@@ -591,17 +591,17 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.loopy-vbp:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/rocksample/loopy-vbp.json
       hash: md5
-      md5: fe2c76dd9701b05ca84c9744ee912d32
+      md5: 1c819232dcb1134bde1debd9404ecb76
       size: 823
   rocksample@loopy:
     cmd: uv run python run_rocksample.py --planning-method loopy --grid-size 5 
       --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
-      1000 --max-steps 15 --planning-horizon 15 --planning-iterations 30 
+      1000 --max-steps 15 --planning-horizon 15 --planning-iterations 50 
       --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output data/results/rocksample/loopy.json
@@ -643,12 +643,12 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.loopy:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/rocksample/loopy.json
       hash: md5
-      md5: 99d07d80abf4193dd58d42ea1f8846b7
+      md5: 484a252cdb7337814aed808378ff79a2
       size: 842
   rocksample@region-extended:
     cmd: uv run python run_rocksample.py --planning-method region-extended 
@@ -759,7 +759,7 @@ stages:
   rocksample@nuijten:
     cmd: uv run python run_rocksample.py --planning-method nuijten --grid-size 5
       --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
-      1000 --max-steps 15 --planning-horizon 15 --planning-iterations 30 
+      1000 --max-steps 15 --planning-horizon 15 --planning-iterations 50 
       --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
       --terminal-goal-only --seed 0 --output 
@@ -802,10 +802,10 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.nuijten:
-          planning_iterations: 30
+          planning_iterations: 50
           damping: 1.0
     outs:
     - path: data/results/rocksample/nuijten.json
       hash: md5
-      md5: df555e9bf4ed6a728124471c6117a607
+      md5: 3252c4bc09020af060fd940ad77b2884
       size: 860
