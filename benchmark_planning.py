@@ -14,7 +14,6 @@ from environments.minigrid import (
 from inference.loopy_bp import loopy_bp_planning
 from inference.loopy_vbp import loopy_vbp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
-from inference.reduced_region_extended import reduced_region_extended_planning
 from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from inference.nuijten_mp import nuijten_mp_planning
 
@@ -80,8 +79,6 @@ def main():
         ("loopy_vbp", loopy_vbp_planning,
          (q_state, q_static, T, goal, horizon, n_iterations)),
         ("region_extended", region_extended_loopy_bp_planning,
-         (q_state, q_static, T, B, goal, horizon, n_iterations)),
-        ("reduced_region_ext", reduced_region_extended_planning,
          (q_state, q_static, T, B, goal, horizon, n_iterations)),
         ("dyn_channel", dyn_channel_loopy_bp_planning,
          (q_state, q_static, T, B, goal, horizon, n_iterations)),

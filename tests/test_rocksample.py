@@ -599,7 +599,7 @@ class TestRockSampleAgents:
         from agents.rocksample_agent import create_agent
 
         agent = create_agent(
-            "bp", self.T, self.B, self.goal,
+            "loopy_bp", self.T, self.B, self.goal,
             self.rock_positions, self.qualities,
             self.n_pos, self.start_state_idx,
             planning_horizon=3,
@@ -648,7 +648,7 @@ class TestRockSampleAgents:
         )
 
         agent = create_agent(
-            "bp", self.T, B_low, self.goal,
+            "loopy_bp", self.T, B_low, self.goal,
             self.rock_positions, self.qualities,
             self.n_pos, self.start_state_idx,
             planning_horizon=3,
@@ -725,7 +725,7 @@ class TestRockSampleEpisode:
         goal = generate_goal(grid_size, rock_positions, qualities, n_rocks)
 
         agent = create_agent(
-            "bp", T, B, goal,
+            "loopy_bp", T, B, goal,
             rock_positions, qualities, n_pos, start_state_idx,
             planning_horizon=5, planning_iterations=1,
         )

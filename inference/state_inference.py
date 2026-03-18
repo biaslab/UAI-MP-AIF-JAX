@@ -51,6 +51,7 @@ def state_inference_step(
             q_old_state,
             q_current,
             q_static,
+            q_static_state,
             transition_tensor,
             obs_tensors,
             ori_tensor,
@@ -69,6 +70,7 @@ def _single_iteration(
     q_old_state: jnp.ndarray,
     q_current: jnp.ndarray,
     q_static: jnp.ndarray,
+    q_static_prior: jnp.ndarray,
     transition_tensor: jnp.ndarray,
     obs_tensors: jnp.ndarray,
     ori_tensor: jnp.ndarray,
@@ -116,6 +118,6 @@ def _single_iteration(
     )
     log_msg_static = log_msg_static + jnp.log(msg_trans_static + EPSILON)
     
-    q_static_new = nn.softmax(log_msg_static)
+    q_static_new = nn.softmax(log_msg_static + jnp.log(q_static_prior + EPSILON))
     
     return q_current_new, q_static_new

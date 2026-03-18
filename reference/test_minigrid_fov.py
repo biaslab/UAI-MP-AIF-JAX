@@ -10,12 +10,12 @@ import gymnasium as gym
 import minigrid
 from minigrid.wrappers import ViewSizeWrapper
 
-from environments.minigrid import (
+from src.environments.minigrid import (
     CellType,
     ActionType,
     get_fov,
 )
-from environments.gym_wrapper import register_doorkey_env
+from src.environments.gym_wrapper import register_doorkey_env
 
 
 # ---------------------------------------------------------------------------

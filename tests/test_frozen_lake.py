@@ -345,7 +345,7 @@ class TestFrozenLakeAgents:
         from agents.frozen_lake_agent import create_agent
 
         agent = create_agent(
-            "bp", self.T, self.B, self.goal, self.holes,
+            "loopy_bp", self.T, self.B, self.goal, self.holes,
             planning_horizon=5,
         )
         obs = self._make_obs(0, 0)
@@ -393,7 +393,7 @@ class TestFrozenLakeAgents:
         )
 
         agent = create_agent(
-            "bp", self.T, B_low_noise, self.goal, self.holes,
+            "loopy_bp", self.T, B_low_noise, self.goal, self.holes,
             planning_horizon=3,
         )
         agent = agent.reset()
@@ -468,7 +468,7 @@ class TestFrozenLakeEpisode:
         goal = generate_goal(grid_size, holes)
 
         agent = create_agent(
-            "bp", T, B, goal, holes,
+            "loopy_bp", T, B, goal, holes,
             planning_horizon=8, planning_iterations=1,
         )
         env = FrozenLakeEnv(

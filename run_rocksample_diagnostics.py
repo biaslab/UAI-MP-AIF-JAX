@@ -429,10 +429,10 @@ def main():
     parser.add_argument("--max-steps", type=int, default=20)
     parser.add_argument("--planning-horizon", type=int, default=10)
     parser.add_argument("--planning-iterations", type=int, default=3)
-    parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy-vbp", "loopy", "region-extended",
-                                 "reduced-region-extended", "dyn-channel",
-                                 "reduced-dyn-channel", "nuijten", "reduced-nuijten"])
+    parser.add_argument("--planning-method", type=str, default="loopy",
+                        choices=["loopy-vbp", "loopy", "region-extended",
+                                 "dyn-channel", "nuijten", "vbp-channel",
+                                 "precise-info-seeking"])
     parser.add_argument("--damping", type=float, default=1.0)
     parser.add_argument("--good-reward", type=float, default=10.0)
     parser.add_argument("--bad-penalty", type=float, default=10.0)
@@ -443,8 +443,6 @@ def main():
     parser.add_argument("--receding-horizon", action="store_true")
     parser.add_argument("--terminal-goal-only", action="store_true",
                         help="Apply goal only at final planning step")
-    parser.add_argument("--compare-bp", action="store_true",
-                        help="Also run basic BP planner and compare action distributions")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -478,8 +476,6 @@ def main():
     if args.terminal_goal_only:
         print(f"  Terminal goal only: enabled")
     print(f"  Seed: {args.seed}")
-    if args.compare_bp:
-        print(f"  Compare BP: enabled")
     print()
 
     print("Generating tensors...")
@@ -513,15 +509,13 @@ def main():
     print_goal_diagnostic(goal, grid_size, rock_positions, qualities, n_rocks)
 
     METHOD_MAP = {
-        "bp": "bp",
         "loopy-vbp": "loopy_vbp",
         "loopy": "loopy_bp",
         "region-extended": "region_extended",
-        "reduced-region-extended": "reduced_region_extended",
         "dyn-channel": "dyn_channel",
-        "reduced-dyn-channel": "reduced_dyn_channel",
         "nuijten": "nuijten",
-        "reduced-nuijten": "reduced_nuijten",
+        "vbp-channel": "vbp_channel",
+        "precise-info-seeking": "precise_info_seeking",
     }
     method_key = METHOD_MAP[args.planning_method]
 
@@ -542,20 +536,7 @@ def main():
         terminal_goal_only=args.terminal_goal_only,
     )
 
-    # Create BP comparison agent if requested
     compare_bp_agent = None
-    if args.compare_bp:
-        print("Creating BP comparison agent...")
-        compare_bp_agent = create_agent(
-            "bp", T, B, goal,
-            rock_positions, qualities, n_pos, start_state_idx,
-            planning_horizon=args.planning_horizon,
-            planning_iterations=1,
-            action_prior=action_prior,
-            damping=1.0,
-            terminal_goal_only=args.terminal_goal_only,
-        )
-        print()
 
     env = RockSampleEnv(
         grid_size=grid_size,

@@ -15,6 +15,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from environments.minigrid import (
+    get_valid_static_configs,
     generate_transition_tensor,
     generate_observation_tensor,
     generate_orientation_observation_tensor,
@@ -22,20 +23,18 @@ from environments.minigrid import (
 )
 from environments.gym_wrapper import MiniGridWrapper, StepResult
 from agents.flat_tensor_agent import (
-    IndexedTensorAgent, LoopyBPAgent, RegionExtendedAgent,
-    ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent,
-    NuijtenMPAgent, ReducedNuijtenMPAgent,
+    LoopyBPAgent, RegionExtendedAgent,
+    DynChannelLoopyBPAgent, NuijtenMPAgent, VBPChannelAgent,
+    PreciseInfoSeekingAgent,
 )
 from inference.state_inference import state_inference_step
 from inference.convergence import (
-    planning_convergence,
     loopy_bp_convergence,
     region_extended_convergence,
-    reduced_region_extended_convergence,
     dyn_channel_convergence,
-    reduced_dyn_channel_convergence,
     nuijten_mp_convergence,
-    reduced_nuijten_mp_convergence,
+    vbp_channel_convergence,
+    precise_info_seeking_convergence,
 )
 from utils.tensors import get_dimensions, flatten_state_index
 
@@ -76,39 +75,26 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
     elif method == "region-extended":
         return RegionExtendedAgent.create(
             transition_tensor=transition_tensor, **common)
-    elif method == "reduced-aif":
-        return ReducedRegionExtendedAgent.create(
-            transition_tensor=transition_tensor, **common)
     elif method == "dyn-channel":
         return DynChannelLoopyBPAgent.create(
-            transition_tensor=transition_tensor, **common)
-    elif method == "reduced-dyn-channel":
-        return ReducedDynChannelAgent.create(
             transition_tensor=transition_tensor, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(
             transition_tensor=transition_tensor, **common)
-    elif method == "reduced-nuijten":
-        return ReducedNuijtenMPAgent.create(
-            transition_tensor=transition_tensor, **common)
-    else:  # bp
-        return IndexedTensorAgent.create(transition_tensor=transition_tensor, **common)
+    elif method == "vbp-channel":
+        return VBPChannelAgent.create(
+            transition_tensor=transition_tensor, damping=args.damping, **common)
+    elif method == "precise-info-seeking":
+        return PreciseInfoSeekingAgent.create(
+            transition_tensor=transition_tensor, damping=args.damping, **common)
+    else:
+        raise ValueError(f"Unknown planning method: {method}")
 
 
 def call_convergence_planning(method, q_current, q_static, agent, horizon,
                                n_iterations, damping=1.0):
     """Dispatch to the correct convergence planning function."""
-    if method == "bp":
-        action_dist, vfe_trace = planning_convergence(
-            q_current_state=q_current,
-            q_static_state=q_static,
-            transition_tensor=agent.transition_tensor,
-            goal=agent.goal,
-            horizon=horizon,
-            n_iterations=n_iterations,
-        )
-        return action_dist, vfe_trace
-    elif method == "loopy":
+    if method == "loopy":
         action_dist, vfe_trace = loopy_bp_convergence(
             q_current_state=q_current,
             q_static_state=q_static,
@@ -120,18 +106,6 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
         return action_dist, vfe_trace
     elif method == "region-extended":
         action_dist, _, _, vfe_trace = region_extended_convergence(
-            q_current_state=q_current,
-            q_static_state=q_static,
-            transition_tensor=agent.transition_tensor,
-            observation_tensor=_flatten_obs(agent.observation_tensors),
-            goal=agent.goal,
-            horizon=horizon,
-            n_iterations=n_iterations,
-            damping=damping,
-        )
-        return action_dist, vfe_trace
-    elif method == "reduced-aif":
-        action_dist, _, _, vfe_trace = reduced_region_extended_convergence(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
@@ -154,18 +128,6 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             damping=damping,
         )
         return action_dist, vfe_trace
-    elif method == "reduced-dyn-channel":
-        action_dist, _, vfe_trace = reduced_dyn_channel_convergence(
-            q_current_state=q_current,
-            q_static_state=q_static,
-            transition_tensor=agent.transition_tensor,
-            observation_tensor=_flatten_obs(agent.observation_tensors),
-            goal=agent.goal,
-            horizon=horizon,
-            n_iterations=n_iterations,
-            damping=damping,
-        )
-        return action_dist, vfe_trace
     elif method == "nuijten":
         action_dist, _, _, vfe_trace = nuijten_mp_convergence(
             q_current_state=q_current,
@@ -177,8 +139,8 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             n_iterations=n_iterations,
         )
         return action_dist, vfe_trace
-    elif method == "reduced-nuijten":
-        action_dist, _, _, vfe_trace = reduced_nuijten_mp_convergence(
+    elif method == "vbp-channel":
+        action_dist, _, vfe_trace = vbp_channel_convergence(
             q_current_state=q_current,
             q_static_state=q_static,
             transition_tensor=agent.transition_tensor,
@@ -186,6 +148,19 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             goal=agent.goal,
             horizon=horizon,
             n_iterations=n_iterations,
+            damping=damping,
+        )
+        return action_dist, vfe_trace
+    elif method == "precise-info-seeking":
+        action_dist, _, _, vfe_trace = precise_info_seeking_convergence(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=n_iterations,
+            damping=damping,
         )
         return action_dist, vfe_trace
     else:
@@ -232,10 +207,10 @@ def main():
     parser.add_argument("--planning-horizon", type=int, default=15)
     parser.add_argument("--planning-iterations", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy", "region-extended", "reduced-aif",
-                                 "dyn-channel", "reduced-dyn-channel",
-                                 "nuijten", "reduced-nuijten"])
+    parser.add_argument("--planning-method", type=str, default="loopy",
+                        choices=["loopy", "region-extended",
+                                 "dyn-channel", "nuijten",
+                                 "vbp-channel", "precise-info-seeking"])
     parser.add_argument("--fov-size", type=int, default=7)
     parser.add_argument("--no-orientation", action="store_true")
     parser.add_argument("--damping", type=float, default=1.0,
@@ -258,7 +233,8 @@ def main():
     grid_size = args.grid_size
     minigrid_size = grid_size + 2
     env_name = f"MiniGrid-DoorKey-{minigrid_size}x{minigrid_size}-v0"
-    dims = get_dimensions(grid_size)
+    valid_configs = get_valid_static_configs(grid_size)
+    dims = get_dimensions(grid_size, n_static_override=len(valid_configs))
 
     print(f"JAX devices: {jax.devices()}")
     print(f"Method: {args.planning_method}")
@@ -273,8 +249,8 @@ def main():
     # Generate tensors
     print("Generating tensors...")
     t0 = time.time()
-    transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
-    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    transition_tensor = jnp.array(generate_transition_tensor(grid_size, valid_configs), dtype=jnp.float32)
+    obs_np = generate_observation_tensor(grid_size, valid_configs, fov_size=args.fov_size)
     if args.obs_alpha > 0.0:
         obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
     observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
@@ -284,7 +260,7 @@ def main():
     print()
 
     goal_x = grid_size - 1
-    goal_y = 0
+    goal_y = grid_size - 1
     goal = create_goal_distribution(grid_size, goal_x, goal_y)
 
     agent = create_agent(args, transition_tensor, observation_tensor,

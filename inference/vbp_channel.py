@@ -1,9 +1,13 @@
-"""Dyn-channel loopy BP planning with observation factors (theta inferred).
+"""VBP channel planning with action channel reparameterization (theta inferred).
 
-Like region_extended_loopy_bp.py but only dynamics factors get channel
-reparameterization. Observation factors contribute obs->x and obs->theta
-messages via the raw observation tensor (no obs kernels, no obs channels,
-no obs region beliefs).
+True VBP message-passing: standard Bethe BP with a single action entropy
+correction reparameterized into the dynamics kernel via one action channel
+r(u|x) per timestep. The channel enters the numerator (multiplied in),
+unlike dyn-channel where r(x'|x,u) enters the denominator.
+
+Modified kernel: κ_t(x_old, x_new, θ, u) = T(x_old, x_new, θ, u) · r_t(u|x_old)
+Action channel: r_t(u|x) = q_pair(x, u) / q(x) from dyn region beliefs
+Observation kernel: raw B (unmodified)
 
 All internal computation is in log-space. Accepts probability-space tensors.
 """
@@ -15,7 +19,6 @@ from jax.scipy.special import logsumexp
 from functools import partial
 
 from .messages import LOG_ZERO, safe_log
-from .messages import safe_log_div
 from .region_extended_loopy_bp import (
     compute_log_reduced,
     forward_pass,
@@ -27,13 +30,55 @@ from .region_extended_loopy_bp import (
     compute_theta_cavities_extended,
     compute_dyn_to_theta_msgs,
     compute_dyn_region_beliefs,
-    compute_dyn_channels,
     damp_log_channel,
 )
 
 
+def compute_dyn_kernels_vbp(log_T_kernel, log_r_ux):
+    """Compute VBP dynamics kernels: channel enters numerator.
+
+    kernel[t] = log_T_kernel + log_r_ux[t, :, None, None, :]
+
+    Args:
+        log_T_kernel: (x_old, x_new, theta, u) log transition kernel
+        log_r_ux: (T, n_states, n_actions) log action channels
+
+    Returns:
+        (T, x_old, x_new, theta, u) log dynamics kernels
+    """
+    return log_T_kernel[None] + log_r_ux[:, :, None, None, :]
+
+
+def compute_pair_marginal(log_dyn_regions):
+    """Compute pair marginal q(x_old, u) from dyn region beliefs.
+
+    Marginalizes over x_new and theta.
+
+    Args:
+        log_dyn_regions: (T, x_old, x_new, theta, u) unnormalized log beliefs
+
+    Returns:
+        (T, n_states, n_actions) log pair marginal
+    """
+    return logsumexp(log_dyn_regions, axis=(2, 3))
+
+
+def compute_action_channel(log_pair_marginal):
+    """Compute action channel r(u|x) from pair marginal.
+
+    r(u|x) = q_pair(x, u) / q(x) — conditional over actions given state.
+
+    Args:
+        log_pair_marginal: (T, n_states, n_actions) log pair marginal
+
+    Returns:
+        (T, n_states, n_actions) log action channel
+    """
+    return log_pair_marginal - logsumexp(log_pair_marginal, axis=2, keepdims=True)
+
+
 @partial(jax.jit, static_argnums=(5, 6))
-def dyn_channel_loopy_bp_planning(
+def vbp_channel_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta
     transition_tensor,    # (n_states, n_states, n_static, n_actions)
@@ -45,14 +90,14 @@ def dyn_channel_loopy_bp_planning(
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
 ) -> tuple:
     """
-    Plan actions via dyn-channel loopy BP with observation factors.
+    Plan actions via VBP channel planning with action channel reparameterization.
 
-    Observation factors use the raw observation tensor (no obs channels).
-    Only dynamics factors get kernel reparameterization via dyn channels.
+    Uses standard Bethe BP with action entropy correction reparameterized into
+    the dynamics kernel. Theta is inferred via cavity messages.
 
     Returns:
         action_dist: (n_actions,)
-        log_dyn_channels: (T, n_states, n_states, n_actions)
+        log_action_channels: (T, n_states, n_actions)
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
@@ -90,24 +135,21 @@ def dyn_channel_loopy_bp_planning(
     log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
 
-    # Initial dyn channels: r(x_new | x_old, u) from θ-marginalized transition
-    log_dyn_ch0 = logsumexp(log_T + log_prior_theta[None, None, :, None], axis=2)
-    log_dyn_ch0 = log_dyn_ch0 - logsumexp(log_dyn_ch0, axis=0, keepdims=True)  # normalize over x_new
-    log_dyn_ch0 = log_dyn_ch0.transpose(1, 0, 2)  # (x_old, x_new, u)
-    log_dyn_channels_init = jnp.broadcast_to(log_dyn_ch0[None], (horizon, n_states, n_states, n_actions))
+    # Initial action channels: uniform r(u|x) = 1/n_actions
+    log_r_ux_init = jnp.full((horizon, n_states, n_actions), -jnp.log(n_actions))
 
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_dyn_channels) = carry
+             log_r_ux) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
             )
 
-            # Step 2: Dyn kernels (factor / channel in log-space)
-            log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+            # Step 2: Dyn kernels (channel in NUMERATOR: factor * channel)
+            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
 
             # Step 3: Reduced tensors
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
@@ -145,35 +187,36 @@ def dyn_channel_loopy_bp_planning(
                 log_C, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
             )
 
-            # Step 10: Dyn region beliefs -> extract dyn channels -> damped update
+            # Step 10: Dyn region beliefs -> pair marginal -> action channel -> damp
             log_dyn_regions = compute_dyn_region_beliefs(
                 log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
                 log_cavity_dyn, log_action_prior
             )
-            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
-            new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_dyn_channels)
+                    q_u, new_log_r_ux)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_dyn_channels_init)
+             q_u_init, log_r_ux_init)
         )
-        _, _, _, q_u, log_dyn_channels = result
+        _, _, _, q_u, log_r_ux = result
     else:
         def body_fn(i, carry):
-            log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels = carry
+            log_dyn_to_theta, log_obs_to_theta, _, log_r_ux = carry
 
             # Step 1: theta cavities
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
             )
 
-            # Step 2: Dyn kernels (factor / channel in log-space)
-            log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+            # Step 2: Dyn kernels (channel in NUMERATOR: factor * channel)
+            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
 
             # Step 3: Reduced tensors
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
@@ -203,25 +246,26 @@ def dyn_channel_loopy_bp_planning(
                 log_B_tiled, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
             )
 
-            # Step 9: Dyn region beliefs -> extract dyn channels -> damped update
+            # Step 9: Dyn region beliefs -> pair marginal -> action channel -> damp
             log_dyn_regions = compute_dyn_region_beliefs(
                 log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
                 log_cavity_dyn, log_action_prior
             )
-            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
-            new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_dyn_channels)
+                    new_log_r_ux)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_dyn_channels_init)
+             log_r_ux_init)
         )
-        _, _, q_u, log_dyn_channels = result
+        _, _, q_u, log_r_ux = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
-    return action_dist, log_dyn_channels
+    return action_dist, log_r_ux

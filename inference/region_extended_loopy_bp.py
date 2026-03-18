@@ -25,7 +25,7 @@ from jax import lax
 from jax.scipy.special import logsumexp
 from functools import partial
 
-from .planning import LOG_ZERO, safe_log
+from .messages import LOG_ZERO, safe_log
 from .messages import safe_log_div
 
 

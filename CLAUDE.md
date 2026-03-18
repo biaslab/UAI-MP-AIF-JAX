@@ -7,7 +7,7 @@ Active Inference agents using message passing on factor graphs, implemented in J
 ```
 agents/              # Agent implementations per environment
 environments/        # Tensor generation & environment wrappers
-inference/           # Planning algorithms (11 BP variants) & state inference
+inference/           # Planning algorithms (7 loopy BP variants) & state inference
 utils/              # Index conversion utilities
 tests/              # Unit & integration tests
 ```
@@ -25,13 +25,16 @@ Each environment also has `run_*_diagnostics.py` for single-episode inspection.
 
 ## Key Files
 
-- `inference/planning.py` — Standard BP: forward-backward on temporal factor graph
 - `inference/loopy_bp.py` — Loopy BP with θ as variable node
+- `inference/loopy_vbp.py` — Loopy VBP (value iteration, θ as variable)
 - `inference/region_extended_loopy_bp.py` — Adds observation factors to planning graph
+- `inference/dyn_channel_loopy_bp.py` — Dynamic channel loopy BP with observation factors
 - `inference/nuijten_mp.py` — Region beliefs without kernels
+- `inference/vbp_channel.py` — VBP with action channel reparameterization
+- `inference/precise_info_seeking.py` — VBP action channels + obs channel reparameterization
 - `inference/state_inference.py` — Loopy BP for Bayesian state estimation
-- `inference/messages.py` — Low-level message operations (log-space, EPSILON=1e-8, LOG_ZERO=-1e12)
-- `agents/flat_tensor_agent.py` — MiniGrid agents (FlatTensorAgent + 10 variants)
+- `inference/messages.py` — Low-level message operations + shared utilities (LOG_ZERO, safe_log, marginalize_static)
+- `agents/flat_tensor_agent.py` — MiniGrid agents (6 loopy variants)
 - `agents/frozen_lake_agent.py` — Frozen Lake agents
 - `agents/wumpus_agent.py` — Wumpus World agents
 - `agents/rocksample_agent.py` — RockSample agents
@@ -47,16 +50,13 @@ Available via `--planning-method`:
 
 | Method | Module | θ handling |
 |---|---|---|
-| `bp` | `planning.py` | Marginalized once |
-| `vbp` | `vbp.py` | Value iteration (ε→0) |
-| `loopy-vbp` | `loopy_vbp.py` | Variable node (VBP) |
 | `loopy` | `loopy_bp.py` | Variable node |
+| `loopy-vbp` | `loopy_vbp.py` | Variable node (VBP) |
 | `region-extended` | `region_extended_loopy_bp.py` | Variable node + obs factors |
-| `reduced-region-extended` | `reduced_region_extended.py` | Fixed + kernel reparam + obs factors |
 | `dyn-channel` | `dyn_channel_loopy_bp.py` | Variable node + dynamic channels |
-| `reduced-dyn-channel` | `reduced_dyn_channel.py` | Fixed + dynamic channels |
 | `nuijten` | `nuijten_mp.py` | Variable node, no kernels |
-| `reduced-nuijten` | `nuijten_mp.py` | Fixed, no kernels |
+| `vbp-channel` | `vbp_channel.py` | Variable node + action channels |
+| `precise-info-seeking` | `precise_info_seeking.py` | Variable node + action channels + obs channels |
 
 ## Running
 
@@ -71,7 +71,7 @@ uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --planning-method 
 uv run python run_wumpus_world.py --grid-size 4 --n-configs 50 --planning-method dyn-channel
 
 # RockSample
-uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --planning-method bp
+uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --planning-method loopy
 
 # Single-episode diagnostics (any environment)
 uv run python run_frozen_lake_diagnostics.py --planning-method region-extended
@@ -97,8 +97,7 @@ uv run dvc repro -s frozen_lake  # Run single stage
 ## Important Details
 
 **MiniGrid agent representations:**
-- `IndexedTensorAgent` (default) — stores indices, not full tensors. Always use for production.
-- `FlatTensorAgent` — full tensors, debugging only, grid_size ≤ 3.
+All agents use indexed tensor storage for efficient state inference. Seven planning variants available: `LoopyBPAgent`, `LoopyVBPAgent`, `RegionExtendedAgent`, `DynChannelLoopyBPAgent`, `NuijtenMPAgent`, `VBPChannelAgent`, `PreciseInfoSeekingAgent`.
 
 **JAX requirements:**
 - All inference functions are JIT-compiled (`@jax.jit`)
@@ -112,7 +111,7 @@ uv run dvc repro -s frozen_lake  # Run single stage
 - Static state: (key_position, door_position) → flat index
 - See `flatten_state_index()` in `utils/tensors.py`
 
-**Coordinates:** Our (x,y) is y-flipped vs MiniGrid. Use conversions in `tests/test_minigrid_groundtruth.py`.
+**Coordinates:** Our (x,y) matches MiniGrid's inner grid with wall offset subtracted: `our = mg - 1`.
 
 ## Testing
 

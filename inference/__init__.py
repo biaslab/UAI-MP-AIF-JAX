@@ -7,18 +7,17 @@ from .messages import (
     backward_message_to_other_3d,
     combine_messages,
     combine_messages_log,
+    marginalize_static,
     EPSILON,
     LOG_ZERO,
     safe_log,
     safe_log_div,
 )
 from .state_inference import state_inference_step
-from .planning import planning, marginalize_static
 from .loopy_bp import loopy_bp_planning
 from .region_extended_loopy_bp import region_extended_loopy_bp_planning
-from .reduced_region_extended import reduced_region_extended_planning
-from .nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
+from .nuijten_mp import nuijten_mp_planning
 from .dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
-from .reduced_dyn_channel import reduced_dyn_channel_planning
-from .vbp import vbp_planning
 from .loopy_vbp import loopy_vbp_planning
+from .vbp_channel import vbp_channel_planning
+from .precise_info_seeking import precise_info_seeking_planning

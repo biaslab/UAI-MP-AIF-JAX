@@ -4,7 +4,7 @@
 Usage:
     python run_frozen_lake_convergence.py
     python run_frozen_lake_convergence.py --method region-extended --damping 0.25 0.5 1.0
-    python run_frozen_lake_convergence.py --method reduced-region-extended --n-iterations 30
+    python run_frozen_lake_convergence.py --method dyn-channel --n-iterations 30
 """
 
 import sys
@@ -26,9 +26,9 @@ from environments.frozen_lake import (
 )
 from inference.convergence import (
     region_extended_convergence,
-    reduced_region_extended_convergence,
     dyn_channel_convergence,
-    reduced_dyn_channel_convergence,
+    vbp_channel_convergence,
+    precise_info_seeking_convergence,
 )
 
 ACTION_NAMES = ["left", "down", "right", "up"]
@@ -36,9 +36,9 @@ ACTION_NAMES = ["left", "down", "right", "up"]
 # Methods that support damping (channel-based)
 CONVERGENCE_FUNCS = {
     "region-extended": region_extended_convergence,
-    "reduced-region-extended": reduced_region_extended_convergence,
     "dyn-channel": dyn_channel_convergence,
-    "reduced-dyn-channel": reduced_dyn_channel_convergence,
+    "vbp-channel": vbp_channel_convergence,
+    "precise-info-seeking": precise_info_seeking_convergence,
 }
 
 

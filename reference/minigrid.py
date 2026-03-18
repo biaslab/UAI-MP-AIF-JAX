@@ -1,5 +1,10 @@
 from enum import IntEnum
 import numpy as np
+import jax
+import jax.numpy as jnp
+
+from ..objectives.observation_modality import ObservationModality
+from ..environments.environment_protocol import EnvironmentTensors
 
 
 class ActionType(IntEnum):
@@ -329,7 +334,9 @@ def get_next_agent_position(
         return coords_to_state(agent_x, agent_y, n)
 
 
-def generate_observation_tensor(n: int, valid_configs: list[tuple[int, int]], fov_size: int = 7, dtype=np.float16) -> np.ndarray:
+def generate_observation_tensor(
+    n: int, valid_configs: list[tuple[int, int]], fov_size: int = 7, dtype=np.float16
+) -> np.ndarray:
     """Generate full observation tensor (memory-intensive, for reference/testing)."""
     n_location_states = n * n
     n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
@@ -373,44 +380,6 @@ def generate_observation_tensor(n: int, valid_configs: list[tuple[int, int]], fo
     return B
 
 
-def soften_observation_tensor(B_hard: np.ndarray, fov_size: int, alpha: float) -> np.ndarray:
-    """Soften observation tensor based on Manhattan distance from the cell in front of the agent.
-
-    Nearby cells keep high precision (near one-hot), distant cells approach uniform.
-    UNSEEN entries (occluded cells) are preserved unchanged.
-
-    Args:
-        B_hard: Hard one-hot observation tensor, shape (fov, fov, N_CELL_TYPES, n_states, n_static).
-        fov_size: FOV grid size (must be odd).
-        alpha: Noise rate per unit Manhattan distance. 0 = no softening.
-
-    Returns:
-        Softened observation tensor with same shape and dtype as B_hard.
-    """
-    if alpha == 0.0:
-        return B_hard
-
-    half = fov_size // 2
-    ref_x, ref_y = half, fov_size - 2  # cell directly in front of agent
-    agent_x, agent_y = half, fov_size - 1  # agent position
-
-    # Manhattan distance grid: min distance to agent or cell in front
-    ix = np.arange(fov_size)
-    dist_ref = np.abs(ix[:, None] - ref_x) + np.abs(ref_y - ix[None, :])
-    dist_agent = np.abs(ix[:, None] - agent_x) + np.abs(agent_y - ix[None, :])
-    dist = np.minimum(dist_ref, dist_agent)  # (fov, fov)
-
-    precision = np.maximum(0.0, 1.0 - alpha * dist)  # (fov, fov)
-
-    # Broadcast to (fov, fov, 1, 1, 1) for element-wise ops
-    p = precision[:, :, None, None, None]
-    uniform = np.float64(1.0 / N_CELL_TYPES)
-
-    B_soft = (p * B_hard + (1.0 - p) * uniform).astype(B_hard.dtype)
-
-    return B_soft
-
-
 def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndarray:
     """Generate full orientation observation tensor (for reference/testing)."""
     n_location_states = n * n
@@ -428,7 +397,9 @@ def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndar
 
 
 
-def generate_transition_tensor(n: int, valid_configs: list[tuple[int, int]], dtype=np.float16) -> np.ndarray:
+def generate_transition_tensor(
+    n: int, valid_configs: list[tuple[int, int]], dtype=np.float16
+) -> np.ndarray:
     """Generate full transition tensor (memory-intensive, for reference/testing)."""
     n_location_states = n * n
     n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
@@ -530,3 +501,309 @@ def contains_key(image: np.ndarray) -> bool:
 
 def contains_door(image: np.ndarray) -> bool:
     return CellType.DOOR in image[:, :, 0]
+
+
+def create_reward_observation_tensor_minigrid(
+    n: int,
+    n_static_states: int,
+) -> np.ndarray:
+    """
+    Create reward observation tensor for minigrid: p(reward_obs | s, θ).
+
+    Reward outcomes: {none=0, goal=1} → 2 outcomes.
+    The goal is at position (n-1, n-1). The agent gets reward when at goal.
+    This is θ-dependent since the static config determines layout.
+
+    Shape: (2, n_total_states, n_static_states)
+    """
+    n_location_states = n * n
+    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+
+    goal_state = coords_to_state(n - 1, n - 1, n)
+
+    R = np.zeros((2, n_total_states, n_static_states), dtype=np.float32)
+
+    for state_idx in range(n_total_states):
+        agent_state, orientation, door_key_state = unflatten_state_index(
+            state_idx, n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES
+        )
+        if agent_state == goal_state:
+            R[1, state_idx, :] = 1.0  # goal reached
+        else:
+            R[0, state_idx, :] = 1.0  # no reward
+
+    return R
+
+
+def collapse_fov_to_flat_modality(
+    B: np.ndarray,
+    fov_size: int,
+) -> tuple[np.ndarray, list, dict]:
+    """Collapse per-pixel FOV observations into a single flat modality.
+
+    Enumerates unique full-FOV patterns (argmax per pixel) and builds
+    a one-hot generative tensor over pattern indices.
+
+    Args:
+        B: One-hot observation tensor, shape (fov, fov, n_cell_types, n_states, n_static).
+        fov_size: FOV grid dimension.
+
+    Returns:
+        B_flat: Generative tensor shape (n_patterns, n_states, n_static).
+        pattern_list: Sorted list of unique pattern tuples.
+        pattern_map: Dict mapping pattern tuple → pattern index.
+    """
+    _, _, _, n_states, n_static = B.shape
+    n_pixels = fov_size * fov_size
+
+    # For each (state, static), argmax cell type per pixel → flat tuple
+    patterns = np.argmax(B, axis=2)  # (fov, fov, n_states, n_static)
+    patterns_flat = patterns.reshape(n_pixels, n_states, n_static)
+
+    # Collect unique patterns
+    unique_patterns = set()
+    for s in range(n_states):
+        for th in range(n_static):
+            key = tuple(int(x) for x in patterns_flat[:, s, th])
+            unique_patterns.add(key)
+
+    # Sort for deterministic ordering
+    pattern_list = sorted(unique_patterns)
+    pattern_map = {pat: idx for idx, pat in enumerate(pattern_list)}
+    n_patterns = len(pattern_list)
+
+    # Build one-hot flat generative tensor
+    B_flat = np.zeros((n_patterns, n_states, n_static), dtype=np.float32)
+    for s in range(n_states):
+        for th in range(n_static):
+            key = tuple(int(x) for x in patterns_flat[:, s, th])
+            B_flat[pattern_map[key], s, th] = 1.0
+
+    return B_flat, pattern_list, pattern_map
+
+
+def generate_transition_index(
+    n: int, valid_configs: list[tuple[int, int]],
+) -> np.ndarray:
+    """Generate transition index array (compact form of transition tensor).
+
+    Returns:
+        T_idx: shape (n_total_states, N_ACTIONS, n_static_states) dtype int32
+               T_idx[old_state, action, theta] = new_state
+               Layout puts n_static_states (multiple of 8) as innermost dim
+               for GPU memory coalescing.
+    """
+    n_location_states = n * n
+    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+    n_static_states = len(valid_configs)
+
+    T_idx = np.zeros((n_total_states, N_ACTIONS, n_static_states), dtype=np.int32)
+
+    for old_agent_state in range(n_location_states):
+        agent_x, agent_y = state_to_coords(old_agent_state, n)
+
+        for orientation in range(N_ORIENTATIONS):
+            for door_key_state in range(N_DOOR_KEY_STATES):
+                old_idx = flatten_state_index(
+                    old_agent_state, orientation, door_key_state,
+                    n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES,
+                )
+
+                for static_idx, (key_pos, door_pos) in enumerate(valid_configs):
+                    key_x, key_y = key_position(key_pos, n)
+                    door_x, door_y = door_position(door_pos, n)
+
+                    if agent_x == door_x and agent_y != door_y:
+                        T_idx[old_idx, :, static_idx] = old_idx
+                        continue
+
+                    for action in range(N_ACTIONS):
+                        new_agent_state = get_next_agent_position(
+                            agent_x, agent_y, orientation,
+                            door_x, door_y, key_x, key_y,
+                            door_key_state, action, n,
+                        )
+                        new_door_key_state = get_next_door_key_state(
+                            agent_x, agent_y, orientation,
+                            key_x, key_y, door_x, door_y,
+                            action, door_key_state,
+                        )
+                        new_orientation = get_next_orientation(orientation, action)
+                        new_idx = flatten_state_index(
+                            new_agent_state, new_orientation, new_door_key_state,
+                            n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES,
+                        )
+                        T_idx[old_idx, action, static_idx] = new_idx
+
+    return T_idx
+
+
+def generate_fov_observation_index(
+    n: int, valid_configs: list[tuple[int, int]], fov_size: int = 7,
+) -> tuple[np.ndarray, list, dict]:
+    """Generate FOV observation index directly from get_fov(), without intermediate tensor.
+
+    For each (state, theta), computes the FOV pattern and maps it to a unique index.
+
+    Returns:
+        fov_idx: shape (n_total_states, n_static_states) dtype int32
+        pattern_list: sorted list of unique FOV pattern tuples
+        pattern_map: dict mapping pattern tuple -> index
+    """
+    n_location_states = n * n
+    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+    n_static_states = len(valid_configs)
+
+    unique_patterns = set()
+    pattern_grid = [[None] * n_static_states for _ in range(n_total_states)]
+
+    for agent_state in range(n_location_states):
+        agent_x, agent_y = state_to_coords(agent_state, n)
+
+        for orientation in range(N_ORIENTATIONS):
+            for door_key_state in range(N_DOOR_KEY_STATES):
+                flat_state = flatten_state_index(
+                    agent_state, orientation, door_key_state,
+                    n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES,
+                )
+
+                for static_idx, (key_pos, door_pos) in enumerate(valid_configs):
+                    key_x, key_y = key_position(key_pos, n)
+                    door_x, door_y = door_position(door_pos, n)
+
+                    fov = get_fov(
+                        agent_x, agent_y, orientation,
+                        key_x, key_y, door_x, door_y,
+                        door_key_state, n, fov_size,
+                    )
+                    pattern = tuple(fov.ravel().tolist())
+                    unique_patterns.add(pattern)
+                    pattern_grid[flat_state][static_idx] = pattern
+
+    pattern_list = sorted(unique_patterns)
+    pattern_map = {pat: idx for idx, pat in enumerate(pattern_list)}
+
+    fov_idx = np.zeros((n_total_states, n_static_states), dtype=np.int32)
+    for s in range(n_total_states):
+        for th in range(n_static_states):
+            fov_idx[s, th] = pattern_map[pattern_grid[s][th]]
+
+    return fov_idx, pattern_list, pattern_map
+
+
+def create_minigrid_env_tensors(
+    n: int,
+    fov_size: int = 3,
+) -> EnvironmentTensors:
+    """
+    Create EnvironmentTensors for the Minigrid Door-Key environment.
+
+    Uses index arrays instead of dense tensors for transitions and FOV observations,
+    avoiding massive intermediate allocations. Dense tensors are only built for
+    small modalities (orientation, reward) and the collapsed FOV generative tensor.
+
+    Args:
+        n: Grid size (n x n)
+        fov_size: Field-of-view size (must be odd)
+
+    Returns:
+        EnvironmentTensors with collapsed FOV modality + orientation + reward
+    """
+    n_location_states = n * n
+    n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
+    valid_configs = get_valid_static_configs(n)
+    n_static_states = len(valid_configs)
+
+    # Generate index arrays (compact — no massive dense tensors)
+    T_idx = generate_transition_index(n, valid_configs)                 # (s, a, n_static) int32
+    fov_idx, pattern_list, pattern_map = generate_fov_observation_index(
+        n, valid_configs, fov_size
+    )                                                                    # (s, n_static) int32
+    n_fov_patterns = len(pattern_list)
+
+    # Build collapsed FOV generative tensor from index (small: n_patterns × s × n_static)
+    B_flat = np.zeros((n_fov_patterns, n_total_states, n_static_states), dtype=np.float32)
+    for s in range(n_total_states):
+        for th in range(n_static_states):
+            B_flat[fov_idx[s, th], s, th] = 1.0
+    B_flat_jax = jnp.array(B_flat, dtype=jnp.float32)
+    fov_idx_jax = jnp.array(fov_idx, dtype=jnp.int32)
+
+    # Small dense tensors (orientation and reward are tiny)
+    O = generate_orientation_observation_tensor(n)                      # (4, s)
+    R = create_reward_observation_tensor_minigrid(n, n_static_states)   # (2, s, n_static)
+    O_jax = jnp.array(O, dtype=jnp.float32)
+    R_jax = jnp.array(R, dtype=jnp.float32)
+
+    # Transition index as JAX array
+    T_idx_jax = jnp.array(T_idx, dtype=jnp.int32)
+
+    modalities = []
+    modalities.append(ObservationModality(
+        name="fov",
+        generative_tensor=B_flat_jax,
+        theta_dependent=True,
+        n_obs=n_fov_patterns,
+        observation_index=fov_idx_jax,
+    ))
+
+    # Orientation modality (θ-independent)
+    modalities.append(ObservationModality(
+        name="orientation",
+        generative_tensor=O_jax,
+        theta_dependent=False,
+        n_obs=N_ORIENTATIONS,
+    ))
+
+    # Reward modality (θ-dependent)
+    modalities.append(ObservationModality(
+        name="reward",
+        generative_tensor=R_jax,
+        theta_dependent=True,
+        n_obs=2,
+    ))
+
+    # Uniform priors
+    action_prior = jnp.ones(N_ACTIONS) / N_ACTIONS
+    theta_prior = jnp.ones(n_static_states) / n_static_states
+
+    # Goal mapping: prefer goal state, shape (n_total_states, n_static_states)
+    goal_state = coords_to_state(n - 1, n - 1, n)
+    goal_logits = jnp.full((n_total_states, n_static_states), -1.0)
+    for orient in range(N_ORIENTATIONS):
+        for dks in range(N_DOOR_KEY_STATES):
+            flat = flatten_state_index(
+                goal_state, orient, dks,
+                n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES,
+            )
+            goal_logits = goal_logits.at[flat, :].set(1.0)
+    goal_mapping = jax.nn.softmax(goal_logits * 5.0, axis=0)
+
+    # Initial state prior: dks=0, x < n-2 (agent starts left of wall, without key)
+    initial_state = np.zeros(n_total_states, dtype=np.float32)
+    for loc in range(n_location_states):
+        x, y = state_to_coords(loc, n)
+        if x >= n - 2:
+            continue
+        for orient in range(N_ORIENTATIONS):
+            flat = flatten_state_index(
+                loc, orient, 0,
+                n_location_states, N_ORIENTATIONS, N_DOOR_KEY_STATES,
+            )
+            initial_state[flat] = 1.0
+    initial_state = initial_state / initial_state.sum()
+
+    return EnvironmentTensors(
+        n_states=n_total_states,
+        n_actions=N_ACTIONS,
+        n_theta=n_static_states,
+        transition_tensor=None,
+        theta_dependent_transitions=True,
+        observation_modalities=modalities,
+        goal_mapping=goal_mapping,
+        initial_state=jnp.array(initial_state),
+        action_prior=action_prior,
+        theta_prior=theta_prior,
+        metadata={"fov_pattern_map": pattern_map, "valid_configs": valid_configs},
+        transition_index=T_idx_jax,
+    )

@@ -44,22 +44,6 @@ def unflatten_state_index(
     return location, orientation, door_key_state
 
 
-def flatten_static_index(
-    key_pos: int, door_pos: int, n_key_positions: int, n_door_positions: int
-) -> int:
-    """Flatten (key_position, door_position) to single static index."""
-    return key_pos + n_key_positions * door_pos
-
-
-def unflatten_static_index(
-    static_idx: int, n_key_positions: int, n_door_positions: int
-) -> tuple[int, int]:
-    """Unflatten static index to (key_position, door_position)."""
-    key_pos = static_idx % n_key_positions
-    door_pos = static_idx // n_key_positions
-    return key_pos, door_pos
-
-
 def coords_to_location(x: int, y: int, grid_size: int) -> int:
     """Convert (x, y) grid coordinates to location index."""
     return (x - 1) * grid_size + (y - 1)
@@ -107,17 +91,24 @@ def load_tensors_from_julia(
     return tensors
 
 
-def get_dimensions(grid_size: int) -> dict[str, int]:
-    """Get all dimension sizes for a given grid size."""
+def get_dimensions(grid_size: int, n_static_override: int = None) -> dict[str, int]:
+    """Get all dimension sizes for a given grid size.
+
+    Args:
+        grid_size: Internal grid size (n x n).
+        n_static_override: If provided, use this as n_static instead of
+            computing n_key_positions * n_door_positions. Pass
+            len(valid_configs) when using filtered static configs.
+    """
     n_locations = grid_size * grid_size
     n_orientations = 4
     n_door_key_states = 3
     n_key_positions = n_locations - 2 * grid_size
     n_door_positions = n_locations - 2 * grid_size
     n_states = n_locations * n_orientations * n_door_key_states
-    n_static = n_key_positions * n_door_positions
+    n_static = n_static_override if n_static_override is not None else n_key_positions * n_door_positions
     n_actions = 7
-    
+
     return {
         "grid_size": grid_size,
         "n_locations": n_locations,

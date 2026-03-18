@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 from jax import nn
+from jax.scipy.special import logsumexp
 
 EPSILON = 1e-10
 LOG_ZERO = -1e12
@@ -117,6 +118,19 @@ def combine_messages(messages: list[jnp.ndarray]) -> jnp.ndarray:
     log_msgs = [jnp.log(msg + EPSILON) for msg in messages]
     log_q = sum(log_msgs)
     return nn.softmax(log_q)
+
+
+def marginalize_static(log_T, log_q_static):
+    """Marginalize out static_state from log transition tensor.
+
+    Args:
+        log_T: (n_states, n_states, n_static, n_actions) log-space
+        log_q_static: (n_static,) log-space
+
+    Returns:
+        (n_states, n_states, n_actions) log-space reduced tensor
+    """
+    return logsumexp(log_T + log_q_static[None, None, :, None], axis=2)
 
 
 def combine_messages_log(log_messages: list[jnp.ndarray]) -> jnp.ndarray:
