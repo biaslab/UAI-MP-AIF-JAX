@@ -3,7 +3,7 @@ stages:
   frozen_lake@loopy-vbp:
     cmd: uv run python run_frozen_lake.py --planning-method loopy-vbp 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 1000 
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
       --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
       1.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/loopy-vbp.json
@@ -18,8 +18,8 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 8d2ebd57507ac06db9c46f4b3aef49c1.dir
-      size: 180778
+      md5: e5a91675b495c7bcd884e31e5ac886dc.dir
+      size: 186108
       nfiles: 13
     - path: run_frozen_lake.py
       hash: md5
@@ -35,7 +35,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 1000
+          episodes: 50
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -48,12 +48,12 @@ stages:
     outs:
     - path: data/results/frozen_lake/loopy-vbp.json
       hash: md5
-      md5: 84a610d57a82aad1140957034a8374fb
-      size: 615
+      md5: 4d180436fd6d5fb4f2c51ae551db1106
+      size: 608
   frozen_lake@loopy:
     cmd: uv run python run_frozen_lake.py --planning-method loopy --grid-size 4 
       --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
-      --noise-range 0.1 --slip-prob 0.1 --episodes 1000 --max-steps 15 
+      --noise-range 0.1 --slip-prob 0.1 --episodes 50 --max-steps 15 
       --planning-horizon 15 --planning-iterations 50 --damping 1.0 
       --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --seed 0 
       --output data/results/frozen_lake/loopy.json
@@ -68,8 +68,8 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 8d2ebd57507ac06db9c46f4b3aef49c1.dir
-      size: 180778
+      md5: e5a91675b495c7bcd884e31e5ac886dc.dir
+      size: 186108
       nfiles: 13
     - path: run_frozen_lake.py
       hash: md5
@@ -85,7 +85,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 1000
+          episodes: 50
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -98,8 +98,8 @@ stages:
     outs:
     - path: data/results/frozen_lake/loopy.json
       hash: md5
-      md5: c2eec6f6e68cc74a414c8a2fa1fd7023
-      size: 609
+      md5: 74f60788aec0cdb237ad582f42478b6f
+      size: 604
   frozen_lake@region-extended:
     cmd: uv run python run_frozen_lake.py --planning-method region-extended 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 

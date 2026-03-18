@@ -6,7 +6,7 @@ frozen_lake:
   base_noise: 0.4
   noise_range: 0.1
   slip_prob: 0.1
-  episodes: 1000
+  episodes: 50
   max_steps: 15
   planning_horizon: 15
   hole_penalty: 2.0
@@ -42,7 +42,7 @@ wumpus_world:
   obs_noise: 0.1
   pos_noise: 0.4
   slip_prob: 0.01
-  episodes: 1000
+  episodes: 50
   max_steps: 10
   planning_horizon: 7
   damping: 0.25
@@ -70,7 +70,7 @@ rocksample:
   half_eff_dist: 2.0
   pos_noise: 0.3
   slip_prob: 0.0
-  episodes: 1000
+  episodes: 50
   max_steps: 15
   planning_horizon: 15
   good_reward: 2.0

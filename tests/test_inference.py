@@ -1469,7 +1469,7 @@ class TestPerformanceRefactorEquivalence:
         from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 
         action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
-        ref = jnp.array([0.37998927, 0.3881985, 0.08980469, 0.06858236, 0.0, 0.07342518, 0.0])
+        ref = jnp.array([0.32753843, 0.10478605, 0.13575694, 0.20968296, 0.0, 0.22223565, 0.0])
         action_dist, _, _ = region_extended_loopy_bp_planning(
             self.q_current, self.q_static, self.transition_tensor,
             self.observation_tensor_flat, self.goal, horizon=5, n_iterations=3,
@@ -1482,7 +1482,7 @@ class TestPerformanceRefactorEquivalence:
         from inference.reduced_region_extended import reduced_region_extended_planning
 
         action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
-        ref = jnp.array([0.27807137, 0.28130087, 0.16806313, 0.13238382, 0.0, 0.14018087, 0.0])
+        ref = jnp.array([0.25137547, 0.2970175, 0.11122638, 0.16245691, 0.0, 0.17792377, 0.0])
         action_dist, _, _ = reduced_region_extended_planning(
             self.q_current, self.q_static, self.transition_tensor,
             self.observation_tensor_flat, self.goal, horizon=5, n_iterations=3,

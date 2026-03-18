@@ -369,6 +369,18 @@ def compute_obs_channels(log_region_beliefs):
     return log_region_beliefs - logsumexp(log_region_beliefs, axis=2, keepdims=True)
 
 
+def compute_marginal_obs_channels(log_region_beliefs):
+    """Compute marginal obs channel r(y|x) from obs region beliefs.
+
+    Marginalizes θ, then normalizes over obs_types.
+
+    Returns:
+        (T+1, n_fov, N_CELL_TYPES, n_states) log r(y|x)
+    """
+    log_marginal = logsumexp(log_region_beliefs, axis=4)  # Σ_θ
+    return log_marginal - logsumexp(log_marginal, axis=2, keepdims=True)
+
+
 # =============================================================================
 # Main planning function
 # =============================================================================
@@ -442,10 +454,17 @@ def region_extended_loopy_bp_planning(
     log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)  # normalize over obs_type
     log_obs_channels_init = jnp.broadcast_to(log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
+    # Initial marginal obs channels: r(y | x) by marginalizing θ with prior weighting
+    log_marginal_obs_ch0 = logsumexp(
+        log_B_flat + log_prior_theta[None, None, None, :], axis=3)
+    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(log_marginal_obs_ch0, axis=1, keepdims=True)
+    log_marginal_obs_channels_init = jnp.broadcast_to(
+        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_dyn_channels, log_obs_channels) = carry
+             log_dyn_channels, log_obs_channels, log_marginal_obs_channels) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
@@ -454,7 +473,9 @@ def region_extended_loopy_bp_planning(
 
             # Step 2: Inline kernels
             log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-            log_obs_kernels = log_B_flat[None] + log_obs_channels
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
 
             # Step 3: Reduced tensors
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
@@ -505,24 +526,30 @@ def region_extended_loopy_bp_planning(
             # Step 11: Channels from region beliefs (with damping)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
                 log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_dyn_channels, new_log_obs_channels)
+                    q_u, new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_dyn_channels_init, log_obs_channels_init)
+             q_u_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init)
         )
-        _, _, _, q_u, log_dyn_channels, log_obs_channels = result
+        _, _, _, q_u, log_dyn_channels, log_obs_channels, _ = result
     else:
         def body_fn(i, carry):
-            log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels, log_obs_channels = carry
+            (log_dyn_to_theta, log_obs_to_theta, _,
+             log_dyn_channels, log_obs_channels, log_marginal_obs_channels) = carry
 
             # Step 1: theta cavities
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
@@ -531,7 +558,9 @@ def region_extended_loopy_bp_planning(
 
             # Step 2: Inline kernels
             log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-            log_obs_kernels = log_B_flat[None] + log_obs_channels
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
 
             # Step 3: Reduced tensors
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
@@ -574,21 +603,26 @@ def region_extended_loopy_bp_planning(
             # Step 10: Channels from region beliefs (with damping)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
                 log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_dyn_channels, new_log_obs_channels)
+                    new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_dyn_channels_init, log_obs_channels_init)
+             log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init)
         )
-        _, _, q_u, log_dyn_channels, log_obs_channels = result
+        _, _, q_u, log_dyn_channels, log_obs_channels, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

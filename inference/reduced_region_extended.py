@@ -25,6 +25,7 @@ from .region_extended_loopy_bp import (
     compute_obs_region_beliefs,
     compute_dyn_channels,
     compute_obs_channels,
+    compute_marginal_obs_channels,
     damp_log_channel,
 )
 
@@ -106,12 +107,21 @@ def reduced_region_extended_planning(
     log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)
     log_obs_channels_init = jnp.broadcast_to(log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
+    # Initial marginal obs channels: r(y | x) by marginalizing θ with fixed cavity
+    log_marginal_obs_ch0 = logsumexp(
+        log_B_flat + log_cavity_fixed[None, None, None, :], axis=3)
+    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(log_marginal_obs_ch0, axis=1, keepdims=True)
+    log_marginal_obs_channels_init = jnp.broadcast_to(
+        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+
     def body_fn(i, carry):
-        q_u, log_dyn_channels, log_obs_channels = carry
+        q_u, log_dyn_channels, log_obs_channels, log_marginal_obs_channels = carry
 
         # Inline kernels (factor / channel in log-space)
         log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-        log_obs_kernels = log_B_flat[None] + log_obs_channels
+        log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                           + safe_log_div(log_obs_channels,
+                                          log_marginal_obs_channels[:, :, :, :, None]))
 
         # Reduced tensors: factor_reduced / channel (avoids per-iteration logsumexp over θ)
         log_reduced_per_t = safe_log_div(
@@ -149,17 +159,21 @@ def reduced_region_extended_planning(
         # Channels from region beliefs (with damping)
         raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
         raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+        raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
         new_log_dyn_channels = damp_log_channel(
             log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
         new_log_obs_channels = damp_log_channel(
             log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+        new_log_marginal_obs_channels = damp_log_channel(
+            log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
-        return q_u, new_log_dyn_channels, new_log_obs_channels
+        return q_u, new_log_dyn_channels, new_log_obs_channels, new_log_marginal_obs_channels
 
-    q_u, log_dyn_channels, log_obs_channels = lax.fori_loop(
+    q_u, log_dyn_channels, log_obs_channels, _ = lax.fori_loop(
         0, n_iterations, body_fn,
-        (q_u_init, log_dyn_channels_init, log_obs_channels_init)
+        (q_u_init, log_dyn_channels_init, log_obs_channels_init,
+         log_marginal_obs_channels_init)
     )
 
     return q_u[0], log_dyn_channels, log_obs_channels

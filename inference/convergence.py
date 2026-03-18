@@ -40,6 +40,7 @@ from .region_extended_loopy_bp import (
     compute_obs_region_beliefs,
     compute_dyn_channels,
     compute_obs_channels,
+    compute_marginal_obs_channels,
     damp_log_channel,
 )
 from .nuijten_mp import (
@@ -806,12 +807,20 @@ def region_extended_convergence(
     log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)
     log_obs_channels_init = jnp.broadcast_to(log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
+    # Initial marginal obs channels: r(y | x) by marginalizing θ with prior weighting
+    log_marginal_obs_ch0 = logsumexp(
+        log_B_flat + log_prior_theta[None, None, None, :], axis=3)
+    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(log_marginal_obs_ch0, axis=1, keepdims=True)
+    log_marginal_obs_channels_init = jnp.broadcast_to(
+        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+
     vfe_trace = jnp.zeros(n_iterations)
 
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_dyn_channels, log_obs_channels, vfe_trace) = carry
+             log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+             vfe_trace) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
@@ -819,7 +828,9 @@ def region_extended_convergence(
             )
 
             log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-            log_obs_kernels = log_B_flat[None] + log_obs_channels
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
 
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
 
@@ -859,11 +870,14 @@ def region_extended_convergence(
 
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
                 log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_region_extended_vfe(
                 log_dyn_regions, log_obs_regions,
@@ -875,25 +889,29 @@ def region_extended_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_dyn_channels, new_log_obs_channels, vfe_trace)
+                    q_u, new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_dyn_channels_init, log_obs_channels_init, vfe_trace)
+             q_u_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init, vfe_trace)
         )
-        _, _, _, q_u, log_dyn_channels, log_obs_channels, vfe_trace = result
+        _, _, _, q_u, log_dyn_channels, log_obs_channels, _, vfe_trace = result
     else:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels,
-             log_obs_channels, vfe_trace) = carry
+             log_obs_channels, log_marginal_obs_channels, vfe_trace) = carry
 
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
             )
 
             log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-            log_obs_kernels = log_B_flat[None] + log_obs_channels
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
 
             log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
             log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
@@ -925,11 +943,14 @@ def region_extended_convergence(
 
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
                 log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_region_extended_vfe(
                 log_dyn_regions, log_obs_regions,
@@ -941,14 +962,16 @@ def region_extended_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_dyn_channels, new_log_obs_channels, vfe_trace)
+                    new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_dyn_channels_init, log_obs_channels_init, vfe_trace)
+             log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init, vfe_trace)
         )
-        _, _, q_u, log_dyn_channels, log_obs_channels, vfe_trace = result
+        _, _, q_u, log_dyn_channels, log_obs_channels, _, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
@@ -1020,13 +1043,22 @@ def reduced_region_extended_convergence(
     log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)
     log_obs_channels_init = jnp.broadcast_to(log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
+    # Initial marginal obs channels: r(y | x) by marginalizing θ with fixed cavity
+    log_marginal_obs_ch0 = logsumexp(
+        log_B_flat + log_cavity_fixed[None, None, None, :], axis=3)
+    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(log_marginal_obs_ch0, axis=1, keepdims=True)
+    log_marginal_obs_channels_init = jnp.broadcast_to(
+        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+
     vfe_trace = jnp.zeros(n_iterations)
 
     def body_fn(i, carry):
-        q_u, log_dyn_channels, log_obs_channels, vfe_trace = carry
+        q_u, log_dyn_channels, log_obs_channels, log_marginal_obs_channels, vfe_trace = carry
 
         log_dyn_kernels = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-        log_obs_kernels = log_B_flat[None] + log_obs_channels
+        log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                           + safe_log_div(log_obs_channels,
+                                          log_marginal_obs_channels[:, :, :, :, None]))
 
         log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
         log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
@@ -1053,11 +1085,14 @@ def reduced_region_extended_convergence(
 
         raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
         raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+        raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
         new_log_dyn_channels = damp_log_channel(
             log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
         new_log_obs_channels = damp_log_channel(
             log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+        new_log_marginal_obs_channels = damp_log_channel(
+            log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
         vfe = compute_region_extended_vfe(
             log_dyn_regions, log_obs_regions,
@@ -1068,11 +1103,12 @@ def reduced_region_extended_convergence(
         )
         vfe_trace = vfe_trace.at[i].set(vfe)
 
-        return q_u, new_log_dyn_channels, new_log_obs_channels, vfe_trace
+        return q_u, new_log_dyn_channels, new_log_obs_channels, new_log_marginal_obs_channels, vfe_trace
 
-    q_u, log_dyn_channels, log_obs_channels, vfe_trace = lax.fori_loop(
+    q_u, log_dyn_channels, log_obs_channels, _, vfe_trace = lax.fori_loop(
         0, n_iterations, body_fn,
-        (q_u_init, log_dyn_channels_init, log_obs_channels_init, vfe_trace)
+        (q_u_init, log_dyn_channels_init, log_obs_channels_init,
+         log_marginal_obs_channels_init, vfe_trace)
     )
 
     return q_u[0], log_dyn_channels, log_obs_channels, vfe_trace
