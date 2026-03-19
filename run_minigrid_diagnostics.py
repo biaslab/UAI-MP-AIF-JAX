@@ -200,7 +200,7 @@ def print_observation_summary(vision_obs, orientation_obs, fov_size):
 # ---------------------------------------------------------------------------
 
 
-def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
+def call_planning(method, q_current, q_static, agent, horizon, damping=1.0, momentum=0.0):
     """Dispatch to the correct planning function based on method string."""
     if method == "loopy-vbp":
         return loopy_vbp_planning(
@@ -230,6 +230,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
             damping=damping,
+            momentum=momentum,
         )
         return result[0]
     elif method == "dyn-channel":
@@ -242,6 +243,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
             damping=damping,
+            momentum=momentum,
         )
         return result[0]
     elif method == "nuijten":
@@ -265,6 +267,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
             damping=damping,
+            momentum=momentum,
         )
         return result[0]
     elif method == "precise-info-seeking":
@@ -277,6 +280,7 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0):
             horizon=horizon,
             n_iterations=agent.n_planning_iterations,
             damping=damping,
+            momentum=momentum,
         )
         return result[0]
     else:
@@ -413,7 +417,7 @@ def run_diagnostic_episode(agent, env, args, dims, grid_size, valid_configs):
 
         t0 = time.time()
         action_dist = call_planning(args.planning_method, q_state, q_static, agent, horizon,
-                                     damping=args.damping)
+                                     damping=args.damping, momentum=args.momentum)
         action_dist.block_until_ready()
         planning_ms = (time.time() - t0) * 1000
         print(f"    Planning time: {planning_ms:.1f}ms")
@@ -496,15 +500,15 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
     elif method == "loopy":
         return LoopyBPAgent.create(**common)
     elif method == "region-extended":
-        return RegionExtendedAgent.create(damping=args.damping, **common)
+        return RegionExtendedAgent.create(damping=args.damping, momentum=args.momentum, **common)
     elif method == "dyn-channel":
-        return DynChannelLoopyBPAgent.create(damping=args.damping, **common)
+        return DynChannelLoopyBPAgent.create(damping=args.damping, momentum=args.momentum, **common)
     elif method == "nuijten":
         return NuijtenMPAgent.create(**common)
     elif method == "vbp-channel":
-        return VBPChannelAgent.create(damping=args.damping, **common)
+        return VBPChannelAgent.create(damping=args.damping, momentum=args.momentum, **common)
     elif method == "precise-info-seeking":
-        return PreciseInfoSeekingAgent.create(damping=args.damping, **common)
+        return PreciseInfoSeekingAgent.create(damping=args.damping, momentum=args.momentum, **common)
     else:
         raise ValueError(f"Unknown planning method: {method}")
 
@@ -526,6 +530,8 @@ def main():
                         help="Replace orientation observation with uniform")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
+    parser.add_argument("--momentum", type=float, default=0.0,
+                        help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--obs-alpha", type=float, default=0.0,
                         help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
@@ -553,6 +559,8 @@ def main():
         print("Orientation observation: DISABLED (uniform)")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
+    if args.momentum > 0:
+        print(f"Momentum: {args.momentum}")
     if args.obs_alpha > 0.0:
         print(f"Observation softening: alpha={args.obs_alpha}")
     print(f"Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")

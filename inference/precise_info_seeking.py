@@ -23,11 +23,7 @@ from .region_extended_loopy_bp import (
     forward_pass,
     backward_pass,
     compute_obs_to_x_msgs,
-    compute_obs_to_theta_msgs,
     compute_pref_to_x_msgs,
-    compute_pref_to_theta_msgs,
-    compute_theta_cavities_extended,
-    compute_dyn_to_theta_msgs,
     compute_dyn_region_beliefs,
     compute_obs_region_beliefs,
     compute_obs_channels,
@@ -52,6 +48,7 @@ def precise_info_seeking_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
+    momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> tuple:
     """
     Plan actions via precise info-seeking: VBP action channels + obs channels.
@@ -86,11 +83,13 @@ def precise_info_seeking_planning(
         log_C = None
         log_goal = safe_log(goal)
 
-    # Initialize messages
-    log_dyn_to_theta = jnp.zeros((horizon, n_static))
-    log_obs_to_theta = jnp.zeros((horizon + 1, n_static))
-    log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
+    # Precompute prior broadcasts (replacing theta cavity messages)
+    log_prior_dyn = jnp.broadcast_to(log_prior_theta[None, :], (horizon, n_static))
+    log_prior_obs = jnp.broadcast_to(log_prior_theta[None, :], (horizon + 1, n_static))
+
     q_u_init = jnp.zeros((horizon, n_actions))
+    log_fwd_prev_init = jnp.zeros((horizon + 1, n_states))
+    log_bwd_prev_init = jnp.zeros((horizon + 1, n_states))
 
     # Initial action channels: uniform r(u|x) = 1/n_actions (from vbp_channel)
     log_r_ux_init = jnp.full((horizon, n_states, n_actions), -jnp.log(n_actions))
@@ -108,176 +107,156 @@ def precise_info_seeking_planning(
 
     if has_pref:
         def body_fn(i, carry):
-            (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_r_ux, log_obs_channels, log_marginal_obs_channels) = carry
+            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+             log_fwd_prev, log_bwd_prev) = carry
 
-            # Step 1: 3-way theta cavities
-            log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
-                log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
-            )
-
-            # Step 2: Dyn kernels via VBP (channel in NUMERATOR)
+            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
             log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
 
-            # Step 3: Obs kernels via region-extended
+            # Step 2: Obs kernels via region-extended
             log_obs_kernels = (log_B_flat[None] + log_obs_channels
                                + safe_log_div(log_obs_channels,
                                               log_marginal_obs_channels[:, :, :, :, None]))
 
-            # Step 4: Reduced tensors from dyn kernels
-            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+            # Step 3: Reduced tensors (use prior instead of cavity)
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_prior_dyn)
 
-            # Step 5: obs->x and pref->x messages
-            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
-            log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_pref)
+            # Step 4: obs->x and pref->x messages (use prior instead of cavity)
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_prior_obs)
+            log_pref_to_x = compute_pref_to_x_msgs(log_C, log_prior_obs)
             log_local_to_x = log_obs_to_x + log_pref_to_x
 
-            # Step 6: Forward pass
+            # Step 5: Forward pass (with inertial damping)
             log_fwd_msgs = forward_pass(
-                log_reduced_per_t, log_q0, log_action_prior, log_local_to_x, horizon
+                log_reduced_per_t, log_q0, log_action_prior, log_local_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
             )
 
-            # Step 7: Backward pass
+            # Step 6: Backward pass (with inertial damping)
             log_bwd_msgs, q_u = backward_pass(
                 log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
-                log_local_to_x, horizon
+                log_local_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
             )
 
-            # Step 8: dyn->theta messages
-            new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_action_prior, horizon
-            )
-
-            # Step 9: obs->theta messages (include pref_to_x in x belief)
-            new_log_obs_to_theta = compute_obs_to_theta_msgs(
-                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_extra_to_x=log_pref_to_x
-            )
-
-            # Step 10: pref->theta messages (include obs_to_x in x belief)
-            new_log_pref_to_theta = compute_pref_to_theta_msgs(
-                log_C, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
-            )
-
-            # Step 11: Region beliefs
+            # Step 7: Region beliefs (use prior instead of cavity)
             log_dyn_regions = compute_dyn_region_beliefs(
                 log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_cavity_dyn, log_action_prior
+                log_prior_dyn, log_action_prior
             )
             log_obs_regions = compute_obs_region_beliefs(
                 log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_cavity_obs
+                log_prior_obs
             )
 
-            # Step 12: Action channels from dyn region beliefs (VBP style)
+            # Step 8: Action channels from dyn region beliefs (VBP style)
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
+                log_prev=log_r_ux_prev, momentum=momentum)
 
-            # Step 13: Obs channels from obs region beliefs (region-extended style)
+            # Step 9: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
+                log_prev=log_obs_ch_prev, momentum=momentum)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
+                log_prev=log_marg_obs_ch_prev, momentum=momentum)
 
-            return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_r_ux, new_log_obs_channels,
-                    new_log_marginal_obs_channels)
+            return (q_u, new_log_r_ux, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
-            (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init)
+            (q_u_init, log_r_ux_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_r_ux_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init)
         )
-        _, _, _, q_u, log_r_ux, log_obs_channels, _ = result
+        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
     else:
         def body_fn(i, carry):
-            (log_dyn_to_theta, log_obs_to_theta, _,
-             log_r_ux, log_obs_channels, log_marginal_obs_channels) = carry
+            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+             log_fwd_prev, log_bwd_prev) = carry
 
-            # Step 1: theta cavities
-            log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
-                log_prior_theta, log_dyn_to_theta, log_obs_to_theta
-            )
-
-            # Step 2: Dyn kernels via VBP (channel in NUMERATOR)
+            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
             log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
 
-            # Step 3: Obs kernels via region-extended
+            # Step 2: Obs kernels via region-extended
             log_obs_kernels = (log_B_flat[None] + log_obs_channels
                                + safe_log_div(log_obs_channels,
                                               log_marginal_obs_channels[:, :, :, :, None]))
 
-            # Step 4: Reduced tensors from dyn kernels
-            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+            # Step 3: Reduced tensors (use prior instead of cavity)
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_prior_dyn)
 
-            # Step 5: obs->x messages
-            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
+            # Step 4: obs->x messages (use prior instead of cavity)
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_prior_obs)
 
-            # Step 6: Forward pass
+            # Step 5: Forward pass (with inertial damping)
             log_fwd_msgs = forward_pass(
-                log_reduced_per_t, log_q0, log_action_prior, log_obs_to_x, horizon
+                log_reduced_per_t, log_q0, log_action_prior, log_obs_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
             )
 
-            # Step 7: Backward pass + action marginals
+            # Step 6: Backward pass + action marginals (with inertial damping)
             log_bwd_msgs, q_u = backward_pass(
                 log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
-                log_obs_to_x, horizon
+                log_obs_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
             )
 
-            # Step 8: dyn->theta messages
-            new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_action_prior, horizon
-            )
-
-            # Step 9: obs->theta messages
-            new_log_obs_to_theta = compute_obs_to_theta_msgs(
-                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
-            )
-
-            # Step 10: Region beliefs
+            # Step 7: Region beliefs (use prior instead of cavity)
             log_dyn_regions = compute_dyn_region_beliefs(
                 log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_cavity_dyn, log_action_prior
+                log_prior_dyn, log_action_prior
             )
             log_obs_regions = compute_obs_region_beliefs(
                 log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_cavity_obs
+                log_prior_obs
             )
 
-            # Step 11: Action channels from dyn region beliefs (VBP style)
+            # Step 8: Action channels from dyn region beliefs (VBP style)
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
+                log_prev=log_r_ux_prev, momentum=momentum)
 
-            # Step 12: Obs channels from obs region beliefs (region-extended style)
+            # Step 9: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
+                log_prev=log_obs_ch_prev, momentum=momentum)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
+                log_prev=log_marg_obs_ch_prev, momentum=momentum)
 
-            return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_r_ux, new_log_obs_channels,
-                    new_log_marginal_obs_channels)
+            return (q_u, new_log_r_ux, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
-            (log_dyn_to_theta, log_obs_to_theta, q_u_init,
+            (q_u_init, log_r_ux_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
              log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init)
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init)
         )
-        _, _, q_u, log_r_ux, log_obs_channels, _ = result
+        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

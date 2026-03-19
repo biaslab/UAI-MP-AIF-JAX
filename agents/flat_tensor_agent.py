@@ -366,6 +366,7 @@ class RegionExtendedAgent:
     last_action: int
 
     damping: float
+    momentum: float
 
     @classmethod
     def create(
@@ -379,6 +380,7 @@ class RegionExtendedAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        momentum: float = 0.0,
     ) -> "RegionExtendedAgent":
         """Create a new region-extended agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -413,6 +415,7 @@ class RegionExtendedAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            momentum=momentum,
         )
 
     def reset(self) -> "RegionExtendedAgent":
@@ -448,6 +451,7 @@ class RegionExtendedAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
     def step(
@@ -483,6 +487,7 @@ class RegionExtendedAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -501,6 +506,7 @@ class RegionExtendedAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         return action, new_agent
@@ -531,6 +537,7 @@ class DynChannelLoopyBPAgent:
     last_action: int
 
     damping: float
+    momentum: float
 
     @classmethod
     def create(
@@ -544,6 +551,7 @@ class DynChannelLoopyBPAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        momentum: float = 0.0,
     ) -> "DynChannelLoopyBPAgent":
         """Create a new dyn-channel loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -578,6 +586,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            momentum=momentum,
         )
 
     def reset(self) -> "DynChannelLoopyBPAgent":
@@ -613,6 +622,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
     def step(
@@ -648,6 +658,7 @@ class DynChannelLoopyBPAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -666,6 +677,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         return action, new_agent
@@ -696,6 +708,7 @@ class VBPChannelAgent:
     last_action: int
 
     damping: float
+    momentum: float
 
     @classmethod
     def create(
@@ -709,6 +722,7 @@ class VBPChannelAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        momentum: float = 0.0,
     ) -> "VBPChannelAgent":
         """Create a new VBP channel agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -743,6 +757,7 @@ class VBPChannelAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            momentum=momentum,
         )
 
     def reset(self) -> "VBPChannelAgent":
@@ -778,6 +793,7 @@ class VBPChannelAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
     def step(
@@ -813,6 +829,7 @@ class VBPChannelAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -831,6 +848,7 @@ class VBPChannelAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         return action, new_agent
@@ -862,6 +880,7 @@ class PreciseInfoSeekingAgent:
     last_action: int
 
     damping: float
+    momentum: float
 
     @classmethod
     def create(
@@ -875,6 +894,7 @@ class PreciseInfoSeekingAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        momentum: float = 0.0,
     ) -> "PreciseInfoSeekingAgent":
         """Create a new precise info-seeking agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -909,6 +929,7 @@ class PreciseInfoSeekingAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            momentum=momentum,
         )
 
     def reset(self) -> "PreciseInfoSeekingAgent":
@@ -944,6 +965,7 @@ class PreciseInfoSeekingAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
     def step(
@@ -979,6 +1001,7 @@ class PreciseInfoSeekingAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -997,6 +1020,7 @@ class PreciseInfoSeekingAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            momentum=self.momentum,
         )
 
         return action, new_agent

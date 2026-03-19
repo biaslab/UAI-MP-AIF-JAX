@@ -85,6 +85,7 @@ def main():
                                  "precise-info-seeking"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
+    parser.add_argument("--momentum", type=float, default=0.0, help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--hole-penalty", type=float, default=1.0, help="Hole penalty in goal prior")
     parser.add_argument("--goal-temperature", type=float, default=1.0, help="Goal distribution temperature")
     parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight (lower = more costly)")
@@ -148,10 +149,13 @@ def main():
         planning_iterations=args.planning_iterations,
         action_prior=action_prior,
         damping=args.damping,
+        momentum=args.momentum,
     )
     print(f"  Method: {args.planning_method}")
     print(f"  Planning horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Planning iterations: {args.planning_iterations}")
+    if args.momentum > 0:
+        print(f"  Momentum: {args.momentum}")
     print()
 
     env = FrozenLakeEnv(

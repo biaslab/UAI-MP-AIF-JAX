@@ -103,6 +103,7 @@ class _FrozenLakeAgentBase:
     action_prior: jnp.ndarray | None
     last_action: int
     damping: float
+    momentum: float
 
     @property
     def _directional_obs(self) -> jnp.ndarray:
@@ -170,7 +171,8 @@ class _FrozenLakeAgentBase:
 # ---------------------------------------------------------------------------
 
 def _create(cls, transition_tensor, observation_tensor, goal, holes,
-            planning_horizon, planning_iterations, action_prior, damping=1.0):
+            planning_horizon, planning_iterations, action_prior, damping=1.0,
+            momentum=0.0):
     """Shared factory for all Frozen Lake agents."""
     n_states = transition_tensor.shape[0]
     n_static = holes.shape[0]
@@ -186,6 +188,7 @@ def _create(cls, transition_tensor, observation_tensor, goal, holes,
         action_prior=jnp.array(action_prior, dtype=jnp.float32) if action_prior is not None else None,
         last_action=-1,
         damping=damping,
+        momentum=momentum,
     )
 
 
@@ -196,10 +199,10 @@ class FrozenLakeLoopyBPAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeLoopyBPAgent, transition_tensor, observation_tensor,
                        goal, holes, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
+                       damping=damping, momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         return loopy_bp_planning(
@@ -216,10 +219,10 @@ class FrozenLakeLoopyVBPAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeLoopyVBPAgent, transition_tensor, observation_tensor,
                        goal, holes, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
+                       damping=damping, momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         return loopy_vbp_planning(
@@ -235,10 +238,11 @@ class FrozenLakeRegionExtendedAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeRegionExtendedAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = region_extended_loopy_bp_planning(
@@ -246,6 +250,7 @@ class FrozenLakeRegionExtendedAgent(_FrozenLakeAgentBase):
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -257,10 +262,11 @@ class FrozenLakeDynChannelAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeDynChannelAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
@@ -268,6 +274,7 @@ class FrozenLakeDynChannelAgent(_FrozenLakeAgentBase):
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -279,10 +286,11 @@ class FrozenLakeNuijtenMPAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeNuijtenMPAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = nuijten_mp_planning(
@@ -301,10 +309,11 @@ class FrozenLakeVBPChannelAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakeVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = vbp_channel_planning(
@@ -312,6 +321,7 @@ class FrozenLakeVBPChannelAgent(_FrozenLakeAgentBase):
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -323,10 +333,11 @@ class FrozenLakePreciseInfoSeekingAgent(_FrozenLakeAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(FrozenLakePreciseInfoSeekingAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = precise_info_seeking_planning(
@@ -334,6 +345,7 @@ class FrozenLakePreciseInfoSeekingAgent(_FrozenLakeAgentBase):
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -363,6 +375,7 @@ def create_agent(
     planning_iterations: int = 3,
     action_prior=None,
     damping: float = 1.0,
+    momentum: float = 0.0,
 ):
     """Create a Frozen Lake agent for the given planning method."""
     if method not in AGENT_CLASSES:
@@ -372,5 +385,5 @@ def create_agent(
     return cls.create(
         transition_tensor, observation_tensor, goal, holes,
         planning_horizon, planning_iterations, action_prior,
-        damping=damping,
+        damping=damping, momentum=momentum,
     )

@@ -1,141 +1,4 @@
 stages:
-  frozen_lake:
-    foreach: ${frozen_lake_methods}
-    do:
-      cmd: >-
-        uv run python run_frozen_lake.py
-        --planning-method ${key}
-        --grid-size ${frozen_lake.grid_size}
-        --n-configs ${frozen_lake.n_configs}
-        --hole-fraction ${frozen_lake.hole_fraction}
-        --min-hamming ${frozen_lake.min_hamming}
-        --base-noise ${frozen_lake.base_noise}
-        --noise-range ${frozen_lake.noise_range}
-        --slip-prob ${frozen_lake.slip_prob}
-        --episodes ${frozen_lake.episodes}
-        --max-steps ${frozen_lake.max_steps}
-        --planning-horizon ${frozen_lake.planning_horizon}
-        --planning-iterations ${item.planning_iterations}
-        --damping ${item.damping}
-        --hole-penalty ${frozen_lake.hole_penalty}
-        --goal-temperature ${frozen_lake.goal_temperature}
-        --scan-cost ${frozen_lake.scan_cost}
-        --seed ${frozen_lake.seed}
-        --output data/results/frozen_lake/${key}.json
-      deps:
-        - run_frozen_lake.py
-        - agents/frozen_lake_agent.py
-        - environments/frozen_lake.py
-        - inference/
-      params:
-        - frozen_lake
-        - frozen_lake_methods.${key}
-      metrics:
-        - data/results/frozen_lake/${key}.json:
-            cache: false
-
-  frozen_lake_damping:
-    cmd: >-
-      uv run python run_frozen_lake_damping.py
-      --grid-size ${frozen_lake.grid_size}
-      --n-configs ${frozen_lake.n_configs}
-      --hole-fraction ${frozen_lake.hole_fraction}
-      --min-hamming ${frozen_lake.min_hamming}
-      --base-noise ${frozen_lake.base_noise}
-      --noise-range ${frozen_lake.noise_range}
-      --slip-prob ${frozen_lake.slip_prob}
-      --planning-horizon ${frozen_lake.planning_horizon}
-      --hole-penalty ${frozen_lake.hole_penalty}
-      --goal-temperature ${frozen_lake.goal_temperature}
-      --scan-cost ${frozen_lake.scan_cost}
-      --seed ${frozen_lake.seed}
-      --n-iterations ${frozen_lake_damping.n_iterations}
-      --damping ${frozen_lake_damping.damping}
-      --output-dir data/frozen_lake_damping
-    deps:
-      - run_frozen_lake_damping.py
-      - environments/frozen_lake.py
-      - inference/
-    params:
-      - frozen_lake
-      - frozen_lake_damping
-    plots:
-      - data/frozen_lake_damping/vfe_traces.csv:
-          x: iteration
-          y_label: VFE
-
-  wumpus_world:
-    foreach: ${wumpus_world_methods}
-    do:
-      cmd: >-
-        uv run python run_wumpus_world.py
-        --planning-method ${key}
-        --grid-size ${wumpus_world.grid_size}
-        --n-configs ${wumpus_world.n_configs}
-        --n-pits ${wumpus_world.n_pits}
-        --obs-noise ${wumpus_world.obs_noise}
-        --pos-noise ${wumpus_world.pos_noise}
-        --slip-prob ${wumpus_world.slip_prob}
-        --episodes ${wumpus_world.episodes}
-        --max-steps ${wumpus_world.max_steps}
-        --planning-horizon ${wumpus_world.planning_horizon}
-        --planning-iterations ${item.planning_iterations}
-        --damping ${wumpus_world.damping}
-        --scan-cost ${wumpus_world.scan_cost}
-        --pit-penalty ${wumpus_world.pit_penalty}
-        --wumpus-penalty ${wumpus_world.wumpus_penalty}
-        --goal-temperature ${wumpus_world.goal_temperature}
-        --seed ${wumpus_world.seed}
-        --output data/results/wumpus_world/${key}.json
-      deps:
-        - run_wumpus_world.py
-        - agents/wumpus_agent.py
-        - environments/wumpus_world.py
-        - inference/
-      params:
-        - wumpus_world
-        - wumpus_world_methods.${key}
-      metrics:
-        - data/results/wumpus_world/${key}.json:
-            cache: false
-
-  rocksample:
-    foreach: ${rocksample_methods}
-    do:
-      cmd: >-
-        uv run python run_rocksample.py
-        --planning-method ${key}
-        --grid-size ${rocksample.grid_size}
-        --n-rocks ${rocksample.n_rocks}
-        --half-eff-dist ${rocksample.half_eff_dist}
-        --pos-noise ${rocksample.pos_noise}
-        --slip-prob ${rocksample.slip_prob}
-        --episodes ${rocksample.episodes}
-        --max-steps ${rocksample.max_steps}
-        --planning-horizon ${rocksample.planning_horizon}
-        --planning-iterations ${item.planning_iterations}
-        --damping ${item.damping}
-        --good-reward ${rocksample.good_reward}
-        --bad-penalty ${rocksample.bad_penalty}
-        --exit-reward ${rocksample.exit_reward}
-        --goal-temperature ${rocksample.goal_temperature}
-        --scan-cost ${rocksample.scan_cost}
-        --sample-cost ${rocksample.sample_cost}
-        --terminal-goal-only
-        --seed ${rocksample.seed}
-        --output data/results/rocksample/${key}.json
-      deps:
-        - run_rocksample.py
-        - agents/rocksample_agent.py
-        - environments/rocksample.py
-        - inference/
-      params:
-        - rocksample
-        - rocksample_methods.${key}
-      metrics:
-        - data/results/rocksample/${key}.json:
-            cache: false
-
   convergence_sweep_frozen_lake:
     cmd: >-
       uv run python run_convergence_sweep.py
@@ -262,3 +125,143 @@ stages:
       - data/convergence_sweep/plots/:
           cache: false
 
+  frozen_lake:
+    foreach: ${frozen_lake_methods}
+    do:
+      cmd: >-
+        uv run python run_frozen_lake.py
+        --planning-method ${key}
+        --grid-size ${frozen_lake.grid_size}
+        --n-configs ${frozen_lake.n_configs}
+        --hole-fraction ${frozen_lake.hole_fraction}
+        --min-hamming ${frozen_lake.min_hamming}
+        --base-noise ${frozen_lake.base_noise}
+        --noise-range ${frozen_lake.noise_range}
+        --slip-prob ${frozen_lake.slip_prob}
+        --episodes ${frozen_lake.episodes}
+        --max-steps ${frozen_lake.max_steps}
+        --planning-horizon ${frozen_lake.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --momentum ${item.momentum}
+        --hole-penalty ${frozen_lake.hole_penalty}
+        --goal-temperature ${frozen_lake.goal_temperature}
+        --scan-cost ${frozen_lake.scan_cost}
+        --seed ${frozen_lake.seed}
+        --output data/results/frozen_lake/${key}.json
+      deps:
+        - run_frozen_lake.py
+        - agents/frozen_lake_agent.py
+        - environments/frozen_lake.py
+        - inference/
+      params:
+        - frozen_lake
+        - frozen_lake_methods.${key}
+      metrics:
+        - data/results/frozen_lake/${key}.json:
+            cache: false
+
+  wumpus_world:
+    foreach: ${wumpus_world_methods}
+    do:
+      cmd: >-
+        uv run python run_wumpus_world.py
+        --planning-method ${key}
+        --grid-size ${wumpus_world.grid_size}
+        --n-configs ${wumpus_world.n_configs}
+        --n-pits ${wumpus_world.n_pits}
+        --obs-noise ${wumpus_world.obs_noise}
+        --pos-noise ${wumpus_world.pos_noise}
+        --slip-prob ${wumpus_world.slip_prob}
+        --episodes ${wumpus_world.episodes}
+        --max-steps ${wumpus_world.max_steps}
+        --planning-horizon ${wumpus_world.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --momentum ${item.momentum}
+        --scan-cost ${wumpus_world.scan_cost}
+        --pit-penalty ${wumpus_world.pit_penalty}
+        --wumpus-penalty ${wumpus_world.wumpus_penalty}
+        --goal-temperature ${wumpus_world.goal_temperature}
+        --seed ${wumpus_world.seed}
+        --output data/results/wumpus_world/${key}.json
+      deps:
+        - run_wumpus_world.py
+        - agents/wumpus_agent.py
+        - environments/wumpus_world.py
+        - inference/
+      params:
+        - wumpus_world
+        - wumpus_world_methods.${key}
+      metrics:
+        - data/results/wumpus_world/${key}.json:
+            cache: false
+
+  rocksample:
+    foreach: ${rocksample_methods}
+    do:
+      cmd: >-
+        uv run python run_rocksample.py
+        --planning-method ${key}
+        --grid-size ${rocksample.grid_size}
+        --n-rocks ${rocksample.n_rocks}
+        --half-eff-dist ${rocksample.half_eff_dist}
+        --pos-noise ${rocksample.pos_noise}
+        --slip-prob ${rocksample.slip_prob}
+        --episodes ${rocksample.episodes}
+        --max-steps ${rocksample.max_steps}
+        --planning-horizon ${rocksample.planning_horizon}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --momentum ${item.momentum}
+        --good-reward ${rocksample.good_reward}
+        --bad-penalty ${rocksample.bad_penalty}
+        --exit-reward ${rocksample.exit_reward}
+        --goal-temperature ${rocksample.goal_temperature}
+        --scan-cost ${rocksample.scan_cost}
+        --sample-cost ${rocksample.sample_cost}
+        --terminal-goal-only
+        --seed ${rocksample.seed}
+        --output data/results/rocksample/${key}.json
+      deps:
+        - run_rocksample.py
+        - agents/rocksample_agent.py
+        - environments/rocksample.py
+        - inference/
+      params:
+        - rocksample
+        - rocksample_methods.${key}
+      metrics:
+        - data/results/rocksample/${key}.json:
+            cache: false
+
+  minigrid:
+    foreach: ${minigrid_methods}
+    do:
+      cmd: >-
+        uv run python run_minigrid.py
+        --planning-method ${key}
+        --grid-size ${minigrid.grid_size}
+        --fov-size ${minigrid.fov_size}
+        --obs-alpha ${minigrid.obs_alpha}
+        --episodes ${minigrid.episodes}
+        --max-steps ${minigrid.max_steps}
+        --planning-horizon ${minigrid.planning_horizon}
+        --inference-iterations ${minigrid.inference_iterations}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --momentum ${item.momentum}
+        --seed ${minigrid.seed}
+        --output data/results/minigrid/${key}.json
+      deps:
+        - run_minigrid.py
+        - agents/flat_tensor_agent.py
+        - environments/minigrid.py
+        - environments/gym_wrapper.py
+        - inference/
+      params:
+        - minigrid
+        - minigrid_methods.${key}
+      metrics:
+        - data/results/minigrid/${key}.json:
+            cache: false

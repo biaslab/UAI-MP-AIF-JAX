@@ -43,6 +43,7 @@ def dyn_channel_loopy_bp_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
+    momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> tuple:
     """
     Plan actions via dyn-channel loopy BP with observation factors.
@@ -99,7 +100,7 @@ def dyn_channel_loopy_bp_planning(
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_dyn_channels) = carry
+             log_dyn_channels, log_dyn_ch_prev) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
@@ -152,20 +153,21 @@ def dyn_channel_loopy_bp_planning(
             )
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_dyn_channels)
+                    q_u, new_log_dyn_channels, log_dyn_channels)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_dyn_channels_init)
+             q_u_init, log_dyn_channels_init, log_dyn_channels_init)
         )
-        _, _, _, q_u, log_dyn_channels = result
+        _, _, _, q_u, log_dyn_channels, _ = result
     else:
         def body_fn(i, carry):
-            log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels = carry
+            log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels, log_dyn_ch_prev = carry
 
             # Step 1: theta cavities
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
@@ -210,17 +212,18 @@ def dyn_channel_loopy_bp_planning(
             )
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_dyn_channels)
+                    new_log_dyn_channels, log_dyn_channels)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_dyn_channels_init)
+             log_dyn_channels_init, log_dyn_channels_init)
         )
-        _, _, q_u, log_dyn_channels = result
+        _, _, q_u, log_dyn_channels, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

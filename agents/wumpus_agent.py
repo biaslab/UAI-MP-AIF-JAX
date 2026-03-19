@@ -103,6 +103,7 @@ class _WumpusAgentBase:
     action_prior: jnp.ndarray | None
     last_action: int
     damping: float
+    momentum: float
 
     def reset(self):
         n_states = self.goal.shape[0]
@@ -169,7 +170,8 @@ class _WumpusAgentBase:
 # ---------------------------------------------------------------------------
 
 def _create(cls, transition_tensor, observation_tensor, goal,
-            planning_horizon, planning_iterations, action_prior, damping=1.0):
+            planning_horizon, planning_iterations, action_prior, damping=1.0,
+            momentum=0.0):
     n_states = goal.shape[0]
     n_static = observation_tensor.shape[3]
     return cls(
@@ -183,6 +185,7 @@ def _create(cls, transition_tensor, observation_tensor, goal,
         action_prior=jnp.array(action_prior, dtype=jnp.float32) if action_prior is not None else None,
         last_action=-1,
         damping=damping,
+        momentum=momentum,
     )
 
 
@@ -193,10 +196,10 @@ class WumpusLoopyBPAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusLoopyBPAgent, transition_tensor, observation_tensor,
                        goal, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
+                       damping=damping, momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         return loopy_bp_planning(
@@ -213,10 +216,10 @@ class WumpusLoopyVBPAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusLoopyVBPAgent, transition_tensor, observation_tensor,
                        goal, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
+                       damping=damping, momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         return loopy_vbp_planning(
@@ -232,10 +235,11 @@ class WumpusRegionExtendedAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusRegionExtendedAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = region_extended_loopy_bp_planning(
@@ -243,6 +247,7 @@ class WumpusRegionExtendedAgent(_WumpusAgentBase):
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -254,10 +259,11 @@ class WumpusDynChannelAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusDynChannelAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
@@ -265,6 +271,7 @@ class WumpusDynChannelAgent(_WumpusAgentBase):
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -276,10 +283,11 @@ class WumpusNuijtenMPAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusNuijtenMPAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = nuijten_mp_planning(
@@ -298,10 +306,11 @@ class WumpusVBPChannelAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = vbp_channel_planning(
@@ -309,6 +318,7 @@ class WumpusVBPChannelAgent(_WumpusAgentBase):
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -320,10 +330,11 @@ class WumpusPreciseInfoSeekingAgent(_WumpusAgentBase):
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
+               damping=1.0, momentum=0.0):
         return _create(WumpusPreciseInfoSeekingAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = precise_info_seeking_planning(
@@ -331,6 +342,7 @@ class WumpusPreciseInfoSeekingAgent(_WumpusAgentBase):
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -359,6 +371,7 @@ def create_agent(
     planning_iterations: int = 3,
     action_prior=None,
     damping: float = 1.0,
+    momentum: float = 0.0,
 ):
     """Create a Wumpus World agent for the given planning method."""
     if method not in AGENT_CLASSES:
@@ -368,5 +381,5 @@ def create_agent(
     return cls.create(
         transition_tensor, observation_tensor, goal,
         planning_horizon, planning_iterations, action_prior,
-        damping=damping,
+        damping=damping, momentum=momentum,
     )

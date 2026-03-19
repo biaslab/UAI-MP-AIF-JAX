@@ -103,6 +103,7 @@ class _RockSampleAgentBase:
     action_prior: jnp.ndarray | None
     last_action: int
     damping: float
+    momentum: float
     start_state_idx: int            # flat index of start state
     terminal_goal_only: bool        # if True, goal applied only at final step
 
@@ -176,7 +177,7 @@ class _RockSampleAgentBase:
 def _create(cls, transition_tensor, observation_tensor, goal,
             rock_positions, qualities, n_pos, start_state_idx,
             planning_horizon, planning_iterations, action_prior, damping=1.0,
-            terminal_goal_only=False):
+            momentum=0.0, terminal_goal_only=False):
     """Shared factory for all RockSample agents."""
     n_states = transition_tensor.shape[0]
     n_static = transition_tensor.shape[2]
@@ -194,6 +195,7 @@ def _create(cls, transition_tensor, observation_tensor, goal,
         action_prior=jnp.array(action_prior, dtype=jnp.float32) if action_prior is not None else None,
         last_action=-1,
         damping=damping,
+        momentum=momentum,
         start_state_idx=start_state_idx,
         terminal_goal_only=terminal_goal_only,
     )
@@ -207,7 +209,7 @@ class RockSampleLoopyBPAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleLoopyBPAgent, transition_tensor, observation_tensor,
                        goal, rock_positions, qualities, n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
@@ -229,7 +231,7 @@ class RockSampleLoopyVBPAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleLoopyVBPAgent, transition_tensor, observation_tensor,
                        goal, rock_positions, qualities, n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
@@ -251,12 +253,13 @@ class RockSampleRegionExtendedAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleRegionExtendedAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping, momentum=momentum,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = region_extended_loopy_bp_planning(
@@ -264,6 +267,7 @@ class RockSampleRegionExtendedAgent(_RockSampleAgentBase):
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -276,12 +280,13 @@ class RockSampleDynChannelAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleDynChannelAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping, momentum=momentum,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
@@ -289,6 +294,7 @@ class RockSampleDynChannelAgent(_RockSampleAgentBase):
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -301,7 +307,7 @@ class RockSampleNuijtenMPAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleNuijtenMPAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
@@ -326,12 +332,13 @@ class RockSampleVBPChannelAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSampleVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping, momentum=momentum,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = vbp_channel_planning(
@@ -339,6 +346,7 @@ class RockSampleVBPChannelAgent(_RockSampleAgentBase):
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -351,12 +359,13 @@ class RockSamplePreciseInfoSeekingAgent(_RockSampleAgentBase):
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
         return _create(RockSamplePreciseInfoSeekingAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping, momentum=momentum,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = precise_info_seeking_planning(
@@ -364,6 +373,7 @@ class RockSamplePreciseInfoSeekingAgent(_RockSampleAgentBase):
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
             action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
         )
         return action_dist
 
@@ -396,6 +406,7 @@ def create_agent(
     planning_iterations: int = 3,
     action_prior=None,
     damping: float = 1.0,
+    momentum: float = 0.0,
     terminal_goal_only: bool = False,
 ):
     """Create a RockSample agent for the given planning method."""
@@ -407,5 +418,5 @@ def create_agent(
         transition_tensor, observation_tensor, goal,
         rock_positions, qualities, n_pos, start_state_idx,
         planning_horizon, planning_iterations, action_prior,
-        damping=damping, terminal_goal_only=terminal_goal_only,
+        damping=damping, momentum=momentum, terminal_goal_only=terminal_goal_only,
     )

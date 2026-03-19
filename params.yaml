@@ -7,39 +7,42 @@ frozen_lake:
   noise_range: 0.1
   slip_prob: 0.1
   episodes: 50
-  max_steps: 15
+  max_steps: 15 
   planning_horizon: 15
   hole_penalty: 2.0
   goal_temperature: 1.0
   scan_cost: 0.9
   seed: 0
 
-frozen_lake_damping:
-  n_iterations: 100
-  damping: "0.1 0.25 0.5 0.75 1.0"
-
 frozen_lake_methods:
   loopy-vbp:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   loopy:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   region-extended:
-    planning_iterations: 50
-    damping: 0.25
+    planning_iterations: 400
+    damping: 0.01
+    momentum: 0.0
   dyn-channel:
     planning_iterations: 50
     damping: 0.25
+    momentum: 0.0
   nuijten:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   vbp-channel:
     planning_iterations: 50
-    damping: 0.25
+    damping: 0.75
+    momentum: 0.0
   precise-info-seeking:
-    planning_iterations: 50
-    damping: 0.25
+    planning_iterations: 400
+    damping: 0.01
+    momentum: 0.0
 
 wumpus_world:
   grid_size: 5
@@ -51,7 +54,6 @@ wumpus_world:
   episodes: 50
   max_steps: 10
   planning_horizon: 7
-  damping: 0.25
   scan_cost: 0.7
   pit_penalty: 1.0
   wumpus_penalty: 1.0
@@ -61,20 +63,32 @@ wumpus_world:
 wumpus_world_methods:
   loopy-vbp:
     planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
   loopy:
     planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
   region-extended:
     planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
   dyn-channel:
     planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
   nuijten:
     planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
   vbp-channel:
     planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
   precise-info-seeking:
     planning_iterations: 50
-  reduced-vbp-channel:
-    planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
 
 rocksample:
   grid_size: 5
@@ -98,33 +112,86 @@ rocksample_methods:
   loopy-vbp:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   loopy:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   region-extended:
     planning_iterations: 50
     damping: 0.25
+    momentum: 0.0
   dyn-channel:
     planning_iterations: 50
     damping: 0.25
+    momentum: 0.0
   nuijten:
     planning_iterations: 50
     damping: 1.0
+    momentum: 0.0
   vbp-channel:
     planning_iterations: 50
     damping: 0.25
+    momentum: 0.0
   precise-info-seeking:
     planning_iterations: 50
     damping: 0.25
-  reduced-vbp-channel:
+    momentum: 0.0
+
+minigrid:
+  grid_size: 3
+  fov_size: 3
+  obs_alpha: 0.0
+  episodes: 100
+  max_steps: 15
+  planning_horizon: 15
+  inference_iterations: 10
+  seed: 0
+
+minigrid_methods:
+  loopy-vbp:
+    planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
+  loopy:
+    planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
+  region-extended:
     planning_iterations: 50
     damping: 0.25
+    momentum: 0.0
+  dyn-channel:
+    planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
+  nuijten:
+    planning_iterations: 50
+    damping: 1.0
+    momentum: 0.0
+  vbp-channel:
+    planning_iterations: 50
+    damping: 0.75
+    momentum: 0.0
+  precise-info-seeking:
+    planning_iterations: 50
+    damping: 0.01
+    momentum: 0.0
 
 convergence_sweep:
-  n_iterations: 200
-  damping: [0.1, 0.25, 0.5, 0.75, 1.0]
-  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-  methods: [loopy, region-extended, dyn-channel, nuijten, vbp-channel, precise-info-seeking]
+  n_iterations: 1000
+  damping: [0.01, 0.05, 0.25, 0.5, 0.75]
+  momentum: 0.0
+  seeds: [0,1,2,3,4]
+  methods: [
+    "loopy-vbp",
+    "loopy",
+    "region-extended",
+    "dyn-channel",
+    "nuijten",
+    "vbp-channel",
+    "precise-info-seeking",
+  ]
 
   frozen_lake:
     grid_size: 4
@@ -170,6 +237,6 @@ convergence_sweep:
   minigrid:
     grid_size: 3
     planning_horizon: 15
-    fov_size: 7
+    fov_size: 3
     obs_alpha: 0.0
     observe_first: true
