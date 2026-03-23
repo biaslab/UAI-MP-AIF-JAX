@@ -21,7 +21,7 @@ from environments.minigrid import (
     soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent, DynChannelLoopyBPAgent, NuijtenMPAgent, VBPChannelAgent, PreciseInfoSeekingAgent
+from agents.flat_tensor_agent import LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent, DynChannelLoopyBPAgent, NuijtenMPAgent, VBPChannelAgent, PreciseInfoSeekingAgent, ActiveInferenceAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -72,7 +72,7 @@ def main():
     parser.add_argument("--record", type=str, default=None,
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="loopy", choices=["loopy-vbp", "loopy", "region-extended", "dyn-channel", "nuijten", "vbp-channel", "precise-info-seeking"],
+    parser.add_argument("--planning-method", type=str, default="loopy", choices=["loopy-vbp", "loopy", "region-extended", "dyn-channel", "nuijten", "vbp-channel", "precise-info-seeking", "active-inference"],
                         help="Planning method: 'loopy-vbp' (loopy VBP with θ as variable), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'dyn-channel' (obs factors + dyn channels, θ inferred), 'nuijten' (region beliefs, no kernels, θ inferred), 'vbp-channel' (VBP with channels)")
     parser.add_argument("--fov-size", type=int, default=7,
                         help="Field-of-view size (must be odd and >= 3, default: 7)")
@@ -222,6 +222,19 @@ def main():
         )
     elif args.planning_method == "precise-info-seeking":
         agent = PreciseInfoSeekingAgent.create(
+            grid_size=grid_size,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+            momentum=args.momentum,
+        )
+    elif args.planning_method == "active-inference":
+        agent = ActiveInferenceAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
             observation_tensors=observation_tensor,

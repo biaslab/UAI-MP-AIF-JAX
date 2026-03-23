@@ -870,7 +870,7 @@ stages:
       --grid-size 4 --n-configs 15 --planning-horizon 15 --hole-fraction 0.2 
       --min-hamming 4 --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 
       --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.1 --n-iterations 
-      200 --output-dir data/convergence_sweep
+      1000 --output-dir data/convergence_sweep
     deps:
     - path: environments/frozen_lake.py
       hash: md5
@@ -878,41 +878,34 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 54a7cb627d42ebc5649caee29a083ab1.dir
-      size: 167416
-      nfiles: 11
+      md5: 4d9d6163dabef25452dec98a829bb877.dir
+      size: 202052
+      nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
-      md5: 0e74d8cd2c3e95c404e0563a80b4780b
-      size: 24803
+      md5: d42702e53c78e909f13aebba792cf946
+      size: 25855
     params:
       params.yaml:
         convergence_sweep:
-          n_iterations: 200
+          n_iterations: 1000
           damping:
-          - 0.1
+          - 0.01
+          - 0.05
           - 0.25
           - 0.5
           - 0.75
-          - 1.0
+          momentum: 0.0
           seeds:
           - 0
           - 1
           - 2
           - 3
           - 4
-          - 5
-          - 6
-          - 7
-          - 8
-          - 9
           methods:
-          - loopy
           - region-extended
-          - dyn-channel
-          - nuijten
-          - vbp-channel
           - precise-info-seeking
+          - active-inference
           frozen_lake: &id001
             grid_size: 4
             n_configs: 15
@@ -954,15 +947,15 @@ stages:
           minigrid:
             grid_size: 3
             planning_horizon: 15
-            fov_size: 7
+            fov_size: 3
             obs_alpha: 0.0
             observe_first: true
         convergence_sweep.frozen_lake: *id001
     outs:
     - path: data/convergence_sweep/frozen-lake/summary.csv
       hash: md5
-      md5: 2b9a3807365335ae46f362f0295882e8
-      size: 13024
+      md5: 05c293fd0212239fe15071da63523f3a
+      size: 4883
   frozen_lake@vbp-channel:
     cmd: uv run python run_frozen_lake.py --planning-method vbp-channel 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 

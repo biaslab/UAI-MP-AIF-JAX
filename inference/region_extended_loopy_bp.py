@@ -461,23 +461,10 @@ def region_extended_loopy_bp_planning(
     log_fwd_prev_init = jnp.zeros((horizon + 1, n_states))
     log_bwd_prev_init = jnp.zeros((horizon + 1, n_states))
 
-    # Initial dyn channels: r(x_new | x_old, u) from θ-marginalized transition
-    # This gives meaningful conditionals so damping doesn't corrupt with uniform.
-    log_dyn_ch0 = logsumexp(log_T + log_prior_theta[None, None, :, None], axis=2)
-    log_dyn_ch0 = log_dyn_ch0 - logsumexp(log_dyn_ch0, axis=0, keepdims=True)  # normalize over x_new
-    log_dyn_ch0 = log_dyn_ch0.transpose(1, 0, 2)  # (x_old, x_new, u)
-    log_dyn_channels_init = jnp.broadcast_to(log_dyn_ch0[None], (horizon, n_states, n_states, n_actions))
-
-    # Initial obs channels: r(y | x, θ) = B(y | x, θ) (already a proper conditional)
-    log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)  # normalize over obs_type
-    log_obs_channels_init = jnp.broadcast_to(log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
-
-    # Initial marginal obs channels: r(y | x) by marginalizing θ with prior weighting
-    log_marginal_obs_ch0 = logsumexp(
-        log_B_flat + log_prior_theta[None, None, None, :], axis=3)
-    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(log_marginal_obs_ch0, axis=1, keepdims=True)
-    log_marginal_obs_channels_init = jnp.broadcast_to(
-        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+    # Initial channels: uniform
+    log_dyn_channels_init = jnp.full((horizon, n_states, n_states, n_actions), -jnp.log(n_states))
+    log_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states, n_static), -jnp.log(n_obs_types))
+    log_marginal_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states), -jnp.log(n_obs_types))
 
     if has_pref:
         def body_fn(i, carry):

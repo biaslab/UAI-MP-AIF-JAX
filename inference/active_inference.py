@@ -1,10 +1,11 @@
-"""Precise info-seeking planning: VBP action channels + obs channel reparameterization.
+"""Active Inference planning: VBP action channels + dyn channels + obs channels.
 
-Combines two reparameterizations:
-- Obs channel from region_extended: obs kernels use r(y|x,θ) and r(y|x)
+Combines three channel reparameterizations:
 - VBP action channel from vbp_channel: r(u|x) enters dynamics kernel in NUMERATOR
+- Dyn channel from region_extended: r(x'|x,u) enters dynamics kernel in DENOMINATOR
+- Obs channel from region_extended: obs kernels use r(y|x,θ) and r(y|x)
 
-Modified dynamics kernel: κ_t(x_old, x_new, θ, u) = T(x_old, x_new, θ, u) · r_t(u|x_old)
+Modified dynamics kernel: κ_t(x_old, x_new, θ, u) = T(x_old, x_new, θ, u) · r_t(u|x_old) / r_t(x_new|x_old, u)
 Obs kernel: B(y|x,θ) · r(y|x,θ) · r(y|x,θ)/r(y|x) (same as region-extended)
 
 All internal computation is in log-space. Accepts probability-space tensors.
@@ -26,19 +27,39 @@ from .region_extended_loopy_bp import (
     compute_pref_to_x_msgs,
     compute_dyn_region_beliefs,
     compute_obs_region_beliefs,
+    compute_dyn_channels,
     compute_obs_channels,
     compute_marginal_obs_channels,
     damp_log_channel,
 )
 from .vbp_channel import (
-    compute_dyn_kernels_vbp,
     compute_pair_marginal,
     compute_action_channel,
 )
 
 
+def compute_dyn_kernels_aif(log_T_kernel, log_r_ux, log_dyn_channels):
+    """Compute AIF dynamics kernels: T * r(u|x) / r(x'|x,u).
+
+    Combines VBP action channel (numerator) with region-extended
+    dynamics channel (denominator).
+
+    Args:
+        log_T_kernel: (x_old, x_new, theta, u) log transition kernel
+        log_r_ux: (T, n_states, n_actions) log action channels
+        log_dyn_channels: (T, x_old, x_new, u) log dynamics channels
+
+    Returns:
+        (T, x_old, x_new, theta, u) log dynamics kernels
+    """
+    # T / r(x'|x,u) — denominator channel
+    kernel = safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+    # * r(u|x) — numerator channel
+    return kernel + log_r_ux[:, :, None, None, :]
+
+
 @partial(jax.jit, static_argnums=(5, 6))
-def precise_info_seeking_planning(
+def active_inference_planning(
     q_current_state,      # (n_states,)
     q_static_state,       # (n_static,) prior on theta
     transition_tensor,    # (n_states, n_states, n_static, n_actions)
@@ -51,11 +72,11 @@ def precise_info_seeking_planning(
     momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> tuple:
     """
-    Plan actions via precise info-seeking: VBP action channels + obs channels.
+    Plan actions via Active Inference: VBP action channels + dyn channels + obs channels.
 
     Returns:
         action_dist: (n_actions,)
-        log_action_channels: (T, n_states, n_actions)
+        log_dyn_channels: (T, n_states, n_states, n_actions)
         log_obs_channels: (T+1, n_channels, n_obs_types, n_states, n_static)
     """
     n_states = q_current_state.shape[0]
@@ -94,18 +115,19 @@ def precise_info_seeking_planning(
     # Initial action channels: uniform r(u|x) = 1/n_actions (from vbp_channel)
     log_r_ux_init = jnp.full((horizon, n_states, n_actions), -jnp.log(n_actions))
 
-    # Initial obs channels: uniform
+    # Initial channels: uniform
+    log_dyn_channels_init = jnp.full((horizon, n_states, n_states, n_actions), -jnp.log(n_states))
     log_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states, n_static), -jnp.log(n_obs_types))
     log_marginal_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states), -jnp.log(n_obs_types))
 
     if has_pref:
         def body_fn(i, carry):
-            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+            (_, log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
-            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
-            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
+            # Step 1: Dyn kernels via AIF (action channel in numerator, dyn channel in denominator)
+            log_dyn_kernels = compute_dyn_kernels_aif(log_T_kernel, log_r_ux, log_dyn_channels)
 
             # Step 2: Obs kernels via region-extended
             log_obs_kernels = (log_B_flat[None] + log_obs_channels
@@ -150,7 +172,13 @@ def precise_info_seeking_planning(
                 log_r_ux, raw_log_r_ux, damping, cond_axis=2,
                 log_prev=log_r_ux_prev, momentum=momentum)
 
-            # Step 9: Obs channels from obs region beliefs (region-extended style)
+            # Step 9: Dyn channels from dyn region beliefs (region-extended style)
+            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+            new_log_dyn_channels = damp_log_channel(
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
+
+            # Step 10: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
@@ -161,28 +189,28 @@ def precise_info_seeking_planning(
                 log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
                 log_prev=log_marg_obs_ch_prev, momentum=momentum)
 
-            return (q_u, new_log_r_ux, new_log_obs_channels,
+            return (q_u, new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
+                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
-            (q_u_init, log_r_ux_init, log_obs_channels_init,
+            (q_u_init, log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
+             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _ = result
     else:
         def body_fn(i, carry):
-            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+            (_, log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
-            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
-            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
+            # Step 1: Dyn kernels via AIF (action channel in numerator, dyn channel in denominator)
+            log_dyn_kernels = compute_dyn_kernels_aif(log_T_kernel, log_r_ux, log_dyn_channels)
 
             # Step 2: Obs kernels via region-extended
             log_obs_kernels = (log_B_flat[None] + log_obs_channels
@@ -225,7 +253,13 @@ def precise_info_seeking_planning(
                 log_r_ux, raw_log_r_ux, damping, cond_axis=2,
                 log_prev=log_r_ux_prev, momentum=momentum)
 
-            # Step 9: Obs channels from obs region beliefs (region-extended style)
+            # Step 9: Dyn channels from dyn region beliefs (region-extended style)
+            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+            new_log_dyn_channels = damp_log_channel(
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
+
+            # Step 10: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
@@ -236,21 +270,21 @@ def precise_info_seeking_planning(
                 log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
                 log_prev=log_marg_obs_ch_prev, momentum=momentum)
 
-            return (q_u, new_log_r_ux, new_log_obs_channels,
+            return (q_u, new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
+                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
-            (q_u_init, log_r_ux_init, log_obs_channels_init,
+            (q_u_init, log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
+             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
-    return action_dist, log_r_ux, log_obs_channels
+    return action_dist, log_dyn_channels, log_obs_channels

@@ -13,6 +13,7 @@ from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from inference.nuijten_mp import nuijten_mp_planning
 from inference.vbp_channel import vbp_channel_planning
 from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
@@ -1007,6 +1008,178 @@ class PreciseInfoSeekingAgent:
         action = int(jnp.argmax(action_dist))
 
         new_agent = PreciseInfoSeekingAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_tensor=self.transition_tensor,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
+            q_state=q_current,
+            q_static=q_static,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=action,
+            damping=self.damping,
+            momentum=self.momentum,
+        )
+
+        return action, new_agent
+
+
+@dataclass
+class ActiveInferenceAgent:
+    """
+    Agent using Active Inference planning: VBP action channels + dyn channels + obs channels.
+    Combines VBP-style action channel, region-extended dynamics channel, and
+    observation channel reparameterization.
+    """
+
+    grid_size: int
+    dims: dict[str, int]
+
+    transition_tensor: jnp.ndarray
+    observation_tensors: jnp.ndarray
+    orientation_tensor: jnp.ndarray
+
+    q_state: jnp.ndarray
+    q_static: jnp.ndarray
+    goal: jnp.ndarray
+
+    planning_horizon: int
+    n_inference_iterations: int
+    n_planning_iterations: int
+
+    last_action: int
+
+    damping: float
+    momentum: float
+
+    @classmethod
+    def create(
+        cls,
+        grid_size: int,
+        transition_tensor: jnp.ndarray,
+        observation_tensors: jnp.ndarray,
+        orientation_tensor: jnp.ndarray,
+        goal: jnp.ndarray,
+        planning_horizon: int = 10,
+        n_inference_iterations: int = 10,
+        n_planning_iterations: int = 10,
+        damping: float = 1.0,
+        momentum: float = 0.0,
+    ) -> "ActiveInferenceAgent":
+        """Create a new Active Inference agent with uniform initial beliefs."""
+        dims = get_dimensions(grid_size)
+        dims["n_static"] = transition_tensor.shape[2]
+
+        n_valid_locations = dims["n_locations"] - 2 * grid_size
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return cls(
+            grid_size=grid_size,
+            dims=dims,
+            transition_tensor=transition_tensor,
+            observation_tensors=observation_tensors,
+            orientation_tensor=orientation_tensor,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=goal,
+            planning_horizon=planning_horizon,
+            n_inference_iterations=n_inference_iterations,
+            n_planning_iterations=n_planning_iterations,
+            last_action=0,
+            damping=damping,
+            momentum=momentum,
+        )
+
+    def reset(self) -> "ActiveInferenceAgent":
+        """Reset beliefs to initial state."""
+        dims = self.dims
+        n_valid_locations = dims["n_locations"] - 2 * self.grid_size
+
+        state_probs = jnp.zeros(dims["n_states"])
+        for loc in range(n_valid_locations):
+            for ori in range(dims["n_orientations"]):
+                idx = flatten_state_index(
+                    loc, ori, 0,
+                    dims["n_locations"],
+                    dims["n_orientations"],
+                    dims["n_door_key_states"],
+                )
+                state_probs = state_probs.at[idx].set(1.0)
+        state_probs = state_probs / state_probs.sum()
+
+        static_probs = jnp.ones(dims["n_static"]) / dims["n_static"]
+
+        return ActiveInferenceAgent(
+            grid_size=self.grid_size,
+            dims=self.dims,
+            transition_tensor=self.transition_tensor,
+            observation_tensors=self.observation_tensors,
+            orientation_tensor=self.orientation_tensor,
+            q_state=state_probs,
+            q_static=static_probs,
+            goal=self.goal,
+            planning_horizon=self.planning_horizon,
+            n_inference_iterations=self.n_inference_iterations,
+            n_planning_iterations=self.n_planning_iterations,
+            last_action=0,
+            damping=self.damping,
+            momentum=self.momentum,
+        )
+
+    def step(
+        self,
+        vision_obs: jnp.ndarray,
+        orientation_obs: jnp.ndarray,
+        time_remaining: int,
+    ) -> tuple[int, "ActiveInferenceAgent"]:
+        """
+        Execute one agent step: perceive (standard BP), plan (active inference), act.
+        """
+        action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
+
+        q_current, q_static = state_inference_step(
+            q_old_state=self.q_state,
+            q_static_state=self.q_static,
+            transition_tensor=self.transition_tensor,
+            obs_tensors=self.observation_tensors,
+            ori_tensor=self.orientation_tensor,
+            vision_obs=vision_obs,
+            ori_obs=orientation_obs,
+            action_onehot=action_onehot,
+            n_iterations=self.n_inference_iterations,
+        )
+
+        horizon = min(time_remaining, self.planning_horizon)
+        action_dist, _, _ = active_inference_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=self.transition_tensor,
+            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
+            goal=self.goal,
+            horizon=horizon,
+            n_iterations=self.n_planning_iterations,
+            damping=self.damping,
+            momentum=self.momentum,
+        )
+
+        action = int(jnp.argmax(action_dist))
+
+        new_agent = ActiveInferenceAgent(
             grid_size=self.grid_size,
             dims=self.dims,
             transition_tensor=self.transition_tensor,

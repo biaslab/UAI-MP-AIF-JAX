@@ -17,6 +17,7 @@ from inference.nuijten_mp import nuijten_mp_planning
 from inference.loopy_vbp import loopy_vbp_planning
 from inference.vbp_channel import vbp_channel_planning
 from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 
 EPSILON = 1e-12
 
@@ -350,6 +351,30 @@ class FrozenLakePreciseInfoSeekingAgent(_FrozenLakeAgentBase):
         return action_dist
 
 
+@dataclass(frozen=True)
+class FrozenLakeActiveInferenceAgent(_FrozenLakeAgentBase):
+    """Active Inference (VBP action channels + dyn channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal, holes,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0, momentum=0.0):
+        return _create(FrozenLakeActiveInferenceAgent, transition_tensor,
+                       observation_tensor, goal, holes, planning_horizon,
+                       planning_iterations, action_prior, damping=damping,
+                       momentum=momentum)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = active_inference_planning(
+            q_current, q_static, self.transition_tensor,
+            self._directional_obs, self.goal,
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
+        )
+        return action_dist
+
+
 # ---------------------------------------------------------------------------
 # Agent registry
 # ---------------------------------------------------------------------------
@@ -362,6 +387,7 @@ AGENT_CLASSES = {
     "nuijten": FrozenLakeNuijtenMPAgent,
     "vbp_channel": FrozenLakeVBPChannelAgent,
     "precise_info_seeking": FrozenLakePreciseInfoSeekingAgent,
+    "active_inference": FrozenLakeActiveInferenceAgent,
 }
 
 

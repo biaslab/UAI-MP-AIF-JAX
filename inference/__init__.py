@@ -21,3 +21,4 @@ from .dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from .loopy_vbp import loopy_vbp_planning
 from .vbp_channel import vbp_channel_planning
 from .precise_info_seeking import precise_info_seeking_planning
+from .active_inference import active_inference_planning

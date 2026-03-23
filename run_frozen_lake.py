@@ -82,7 +82,7 @@ def main():
     parser.add_argument("--planning-method", type=str, default="loopy",
                         choices=["loopy-vbp", "loopy", "region-extended",
                                  "dyn-channel", "nuijten", "vbp-channel",
-                                 "precise-info-seeking"],
+                                 "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
     parser.add_argument("--momentum", type=float, default=0.0, help="Inertial momentum coefficient (0.0 = no momentum)")
@@ -135,6 +135,7 @@ def main():
         "nuijten": "nuijten",
         "vbp-channel": "vbp_channel",
         "precise-info-seeking": "precise_info_seeking",
+        "active-inference": "active_inference",
     }
     method_key = METHOD_MAP[args.planning_method]
 

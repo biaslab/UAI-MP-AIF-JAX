@@ -24,6 +24,7 @@ from agents.flat_tensor_agent import (
     LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent,
     DynChannelLoopyBPAgent,
     NuijtenMPAgent, VBPChannelAgent, PreciseInfoSeekingAgent,
+    ActiveInferenceAgent,
 )
 from inference.state_inference import state_inference_step
 from inference.loopy_bp import loopy_bp_planning
@@ -33,6 +34,7 @@ from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from inference.nuijten_mp import nuijten_mp_planning
 from inference.vbp_channel import vbp_channel_planning
 from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 from utils.tensors import (
     get_dimensions, flatten_state_index, unflatten_state_index,
     location_to_coords, create_onehot,
@@ -283,6 +285,19 @@ def call_planning(method, q_current, q_static, agent, horizon, damping=1.0, mome
             momentum=momentum,
         )
         return result[0]
+    elif method == "active-inference":
+        result = active_inference_planning(
+            q_current_state=q_current,
+            q_static_state=q_static,
+            transition_tensor=agent.transition_tensor,
+            observation_tensor=_flatten_obs(agent.observation_tensors),
+            goal=agent.goal,
+            horizon=horizon,
+            n_iterations=agent.n_planning_iterations,
+            damping=damping,
+            momentum=momentum,
+        )
+        return result[0]
     else:
         raise ValueError(f"Unknown planning method: {method}")
 
@@ -509,6 +524,8 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
         return VBPChannelAgent.create(damping=args.damping, momentum=args.momentum, **common)
     elif method == "precise-info-seeking":
         return PreciseInfoSeekingAgent.create(damping=args.damping, momentum=args.momentum, **common)
+    elif method == "active-inference":
+        return ActiveInferenceAgent.create(damping=args.damping, momentum=args.momentum, **common)
     else:
         raise ValueError(f"Unknown planning method: {method}")
 
@@ -523,7 +540,7 @@ def main():
     parser.add_argument("--planning-iterations", type=int, default=10, help="Planning iterations")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--planning-method", type=str, default="loopy",
-                        choices=["loopy-vbp", "loopy", "region-extended", "dyn-channel", "nuijten", "vbp-channel", "precise-info-seeking"],
+                        choices=["loopy-vbp", "loopy", "region-extended", "dyn-channel", "nuijten", "vbp-channel", "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--fov-size", type=int, default=7, help="Field-of-view size (odd, >= 3)")
     parser.add_argument("--no-orientation", action="store_true",

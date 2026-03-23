@@ -15,8 +15,9 @@ def safe_log(x):
 
 
 def safe_log_div(log_num, log_den):
-    """log(num/den) where 0/0 → LOG_ZERO (result is 0 in probability space)."""
-    return jnp.where(log_num > LOG_ZERO / 2, log_num - log_den, LOG_ZERO)
+    """log(num/den) where 0/0 and nonzero/0 → LOG_ZERO (0 in probability space)."""
+    valid = (log_num > LOG_ZERO / 2) & (log_den > LOG_ZERO / 2)
+    return jnp.where(valid, log_num - log_den, LOG_ZERO)
 
 
 # =============================================================================

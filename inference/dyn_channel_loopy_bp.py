@@ -91,11 +91,8 @@ def dyn_channel_loopy_bp_planning(
     log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
 
-    # Initial dyn channels: r(x_new | x_old, u) from θ-marginalized transition
-    log_dyn_ch0 = logsumexp(log_T + log_prior_theta[None, None, :, None], axis=2)
-    log_dyn_ch0 = log_dyn_ch0 - logsumexp(log_dyn_ch0, axis=0, keepdims=True)  # normalize over x_new
-    log_dyn_ch0 = log_dyn_ch0.transpose(1, 0, 2)  # (x_old, x_new, u)
-    log_dyn_channels_init = jnp.broadcast_to(log_dyn_ch0[None], (horizon, n_states, n_states, n_actions))
+    # Initial dyn channels: uniform r(x_new | x_old, u) = 1/n_states
+    log_dyn_channels_init = jnp.full((horizon, n_states, n_states, n_actions), -jnp.log(n_states))
 
     if has_pref:
         def body_fn(i, carry):

@@ -137,6 +137,7 @@ def run_inference_tests():
         TestNuijtenMP,
         TestVBPChannel,
         TestPreciseInfoSeeking,
+        TestActiveInference,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
         TestPerformanceRefactorEquivalence,
@@ -233,6 +234,16 @@ def run_inference_tests():
     t.test_obs_channels_shape()
     t.test_action_channels_shape()
     print("  Precise Info-Seeking: PASSED")
+
+    print("Running active inference tests...")
+    t = TestActiveInference()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_respects_action_mask()
+    t.test_multi_iteration_changes_result()
+    t.test_obs_channels_shape()
+    t.test_dyn_channels_conditional()
+    print("  Active Inference: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()

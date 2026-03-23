@@ -42,6 +42,7 @@ from inference.convergence import (
     nuijten_mp_convergence,
     vbp_channel_convergence,
     precise_info_seeking_convergence,
+    active_inference_convergence,
 )
 
 ConvergenceSetup = namedtuple('ConvergenceSetup', [
@@ -50,10 +51,10 @@ ConvergenceSetup = namedtuple('ConvergenceSetup', [
 
 ALL_METHODS = [
     "loopy", "loopy-vbp", "region-extended", "dyn-channel",
-    "nuijten", "vbp-channel", "precise-info-seeking",
+    "nuijten", "vbp-channel", "precise-info-seeking", "active-inference",
 ]
 
-METHODS_WITH_DAMPING = {"region-extended", "dyn-channel", "loopy-vbp", "vbp-channel", "precise-info-seeking"}
+METHODS_WITH_DAMPING = {"region-extended", "dyn-channel", "loopy-vbp", "vbp-channel", "precise-info-seeking", "active-inference"}
 METHODS_NO_DAMPING = {"loopy", "nuijten"}
 
 CONVERGENCE_FUNCS = {
@@ -64,12 +65,13 @@ CONVERGENCE_FUNCS = {
     "nuijten": nuijten_mp_convergence,
     "vbp-channel": vbp_channel_convergence,
     "precise-info-seeking": precise_info_seeking_convergence,
+    "active-inference": active_inference_convergence,
 }
 
 # Methods that need observation_tensor argument
 METHODS_WITH_OBS = {
     "region-extended", "dyn-channel", "nuijten",
-    "loopy-vbp", "vbp-channel", "precise-info-seeking",
+    "loopy-vbp", "vbp-channel", "precise-info-seeking", "active-inference",
 }
 
 
@@ -266,7 +268,7 @@ def setup_minigrid(args, seed):
     from agents.flat_tensor_agent import (
         LoopyBPAgent, RegionExtendedAgent,
         DynChannelLoopyBPAgent, NuijtenMPAgent, VBPChannelAgent,
-        PreciseInfoSeekingAgent,
+        PreciseInfoSeekingAgent, ActiveInferenceAgent,
     )
     from inference.state_inference import state_inference_step
     from utils.tensors import get_dimensions, flatten_state_index

@@ -19,6 +19,7 @@ from functools import partial
 
 from .messages import LOG_ZERO, safe_log, safe_log_div
 from .vbp_channel import compute_dyn_kernels_vbp, compute_pair_marginal, compute_action_channel
+from .active_inference import compute_dyn_kernels_aif
 from .loopy_bp import (
     compute_reduced_per_t,
     forward_pass as loopy_forward_pass,
@@ -1609,3 +1610,301 @@ def precise_info_seeking_convergence(
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
     return action_dist, log_r_ux, log_obs_channels, vfe_trace
+
+
+# =============================================================================
+# Active Inference VFE and convergence
+# =============================================================================
+
+
+def compute_active_inference_vfe(log_T, log_reduced_per_t, log_fwd_msgs,
+                                  log_bwd_msgs, q_u, log_cavity_dyn,
+                                  log_prior_theta, log_action_prior,
+                                  log_dyn_regions, log_obs_regions):
+    """VFE for Active Inference: F_p + action_cond_entropy + obs_correction - dyn_cond_entropy."""
+    horizon = q_u.shape[0]
+    F_p = compute_bethe_vfe_loopy(log_T, log_reduced_per_t, log_fwd_msgs,
+                                   log_bwd_msgs, q_u, log_cavity_dyn,
+                                   log_prior_theta, log_action_prior)
+    return (F_p
+            + _action_cond_entropy(log_dyn_regions, horizon)
+            + _obs_cond_entropy(log_obs_regions, horizon)
+            - _dyn_cond_entropy(log_dyn_regions, horizon))
+
+
+def active_inference_convergence(
+    q_current_state,
+    q_static_state,
+    transition_tensor,
+    observation_tensor,
+    goal,
+    horizon,
+    n_iterations,
+    damping=1.0,
+    action_prior=None,
+    momentum=0.0,
+):
+    """Active Inference planning with per-iteration VFE trace.
+
+    Returns:
+        action_dist: (n_actions,)
+        log_dyn_channels: (T, n_states, n_states, n_actions)
+        log_obs_channels: (T+1, n_channels, n_obs_types, n_states, n_static)
+        vfe_trace: (n_iterations,)
+    """
+    n_states = q_current_state.shape[0]
+    n_static = q_static_state.shape[0]
+    n_actions = transition_tensor.shape[3]
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+    has_pref = goal.ndim == 2
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    log_action_prior = safe_log(action_prior)
+
+    log_T = safe_log(transition_tensor)
+    log_T_kernel = log_T.transpose(1, 0, 2, 3)
+    log_B_flat = safe_log(observation_tensor)
+    log_q0 = safe_log(q_current_state)
+    log_prior_theta = safe_log(q_static_state)
+
+    if has_pref:
+        log_C = safe_log(goal)
+        log_goal = jnp.zeros(n_states)
+    else:
+        log_C = None
+        log_goal = safe_log(goal)
+
+    log_dyn_to_theta = jnp.zeros((horizon, n_static))
+    log_obs_to_theta = jnp.zeros((horizon + 1, n_static))
+    log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
+    q_u_init = jnp.zeros((horizon, n_actions))
+
+    # Initial action channels: uniform r(u|x) = 1/n_actions
+    log_r_ux_init = jnp.full((horizon, n_states, n_actions), -jnp.log(n_actions))
+
+    # Initial dyn channels: r(x_new | x_old, u) from θ-marginalized transition
+    log_dyn_ch0 = logsumexp(log_T + log_prior_theta[None, None, :, None], axis=2)
+    log_dyn_ch0 = log_dyn_ch0 - logsumexp(log_dyn_ch0, axis=0, keepdims=True)
+    log_dyn_ch0 = log_dyn_ch0.transpose(1, 0, 2)
+    log_dyn_channels_init = jnp.broadcast_to(log_dyn_ch0[None], (horizon, n_states, n_states, n_actions))
+
+    # Initial obs channels: r(y | x, θ) = B(y | x, θ)
+    log_obs_ch0 = log_B_flat - logsumexp(log_B_flat, axis=1, keepdims=True)
+    log_obs_channels_init = jnp.broadcast_to(
+        log_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states, n_static))
+
+    # Initial marginal obs channels: r(y | x) by marginalizing θ with prior
+    log_marginal_obs_ch0 = logsumexp(
+        log_B_flat + log_prior_theta[None, None, None, :], axis=3)
+    log_marginal_obs_ch0 = log_marginal_obs_ch0 - logsumexp(
+        log_marginal_obs_ch0, axis=1, keepdims=True)
+    log_marginal_obs_channels_init = jnp.broadcast_to(
+        log_marginal_obs_ch0[None], (horizon + 1, n_fov, n_obs_types, n_states))
+
+    vfe_trace = jnp.zeros(n_iterations)
+    log_fwd_prev_init = jnp.zeros((horizon + 1, n_states))
+    log_bwd_prev_init = jnp.zeros((horizon + 1, n_states))
+
+    if has_pref:
+        def body_fn(i, carry):
+            (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
+             log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+             log_fwd_prev, log_bwd_prev,
+             vfe_trace) = carry
+
+            log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
+                log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
+            )
+
+            log_dyn_kernels = compute_dyn_kernels_aif(log_T_kernel, log_r_ux, log_dyn_channels)
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
+
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
+            log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_pref)
+            log_local_to_x = log_obs_to_x + log_pref_to_x
+
+            log_fwd_msgs = re_forward_pass(
+                log_reduced_per_t, log_q0, log_action_prior, log_local_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
+            )
+            log_bwd_msgs, q_u = re_backward_pass(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
+                log_local_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
+            )
+
+            new_log_dyn_to_theta = re_dyn_to_theta(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_action_prior, horizon
+            )
+            new_log_obs_to_theta = compute_obs_to_theta_msgs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_extra_to_x=log_pref_to_x
+            )
+            new_log_pref_to_theta = compute_pref_to_theta_msgs(
+                log_C, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
+            )
+
+            log_dyn_regions = compute_dyn_region_beliefs(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_cavity_dyn, log_action_prior
+            )
+            log_obs_regions = compute_obs_region_beliefs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_cavity_obs
+            )
+
+            # Action channels (VBP style)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
+                log_prev=log_r_ux_prev, momentum=momentum)
+
+            # Dyn channels (region-extended style)
+            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+            new_log_dyn_channels = damp_log_channel(
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
+
+            # Obs channels (region-extended style)
+            raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
+            new_log_obs_channels = damp_log_channel(
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
+                log_prev=log_obs_ch_prev, momentum=momentum)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
+                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+
+            vfe = compute_active_inference_vfe(
+                log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
+                log_cavity_dyn, log_prior_theta, log_action_prior,
+                log_dyn_regions, log_obs_regions,
+            )
+            vfe_trace = vfe_trace.at[i].set(vfe)
+
+            return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
+                    q_u, new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs,
+                    vfe_trace)
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
+             q_u_init, log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init,
+             vfe_trace)
+        )
+        _, _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _, vfe_trace = result
+    else:
+        def body_fn(i, carry):
+            (log_dyn_to_theta, log_obs_to_theta, _,
+             log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
+             log_fwd_prev, log_bwd_prev,
+             vfe_trace) = carry
+
+            log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
+                log_prior_theta, log_dyn_to_theta, log_obs_to_theta
+            )
+
+            log_dyn_kernels = compute_dyn_kernels_aif(log_T_kernel, log_r_ux, log_dyn_channels)
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
+
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_cavity_obs)
+
+            log_fwd_msgs = re_forward_pass(
+                log_reduced_per_t, log_q0, log_action_prior, log_obs_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
+            )
+            log_bwd_msgs, q_u = re_backward_pass(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
+                log_obs_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
+            )
+
+            new_log_dyn_to_theta = re_dyn_to_theta(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_action_prior, horizon
+            )
+            new_log_obs_to_theta = compute_obs_to_theta_msgs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
+            )
+
+            log_dyn_regions = compute_dyn_region_beliefs(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_cavity_dyn, log_action_prior
+            )
+            log_obs_regions = compute_obs_region_beliefs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_cavity_obs
+            )
+
+            # Action channels (VBP style)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
+                log_prev=log_r_ux_prev, momentum=momentum)
+
+            # Dyn channels (region-extended style)
+            raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
+            new_log_dyn_channels = damp_log_channel(
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
+                log_prev=log_dyn_ch_prev, momentum=momentum)
+
+            # Obs channels (region-extended style)
+            raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
+            new_log_obs_channels = damp_log_channel(
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
+                log_prev=log_obs_ch_prev, momentum=momentum)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
+                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+
+            vfe = compute_active_inference_vfe(
+                log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
+                log_cavity_dyn, log_prior_theta, log_action_prior,
+                log_dyn_regions, log_obs_regions,
+            )
+            vfe_trace = vfe_trace.at[i].set(vfe)
+
+            return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
+                    new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs,
+                    vfe_trace)
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_dyn_to_theta, log_obs_to_theta, q_u_init,
+             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init,
+             vfe_trace)
+        )
+        _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _, vfe_trace = result
+
+    action_dist = q_u[0]
+    action_dist = action_dist / (action_dist.sum() + 1e-10)
+    return action_dist, log_dyn_channels, log_obs_channels, vfe_trace

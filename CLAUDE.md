@@ -32,9 +32,10 @@ Each environment also has `run_*_diagnostics.py` for single-episode inspection.
 - `inference/nuijten_mp.py` — Region beliefs without kernels
 - `inference/vbp_channel.py` — VBP with action channel reparameterization
 - `inference/precise_info_seeking.py` — VBP action channels + obs channel reparameterization
+- `inference/active_inference.py` — VBP action channels + dyn channels + obs channels (Active Inference)
 - `inference/state_inference.py` — Loopy BP for Bayesian state estimation
 - `inference/messages.py` — Low-level message operations + shared utilities (LOG_ZERO, safe_log, marginalize_static)
-- `agents/flat_tensor_agent.py` — MiniGrid agents (6 loopy variants)
+- `agents/flat_tensor_agent.py` — MiniGrid agents (8 planning variants)
 - `agents/frozen_lake_agent.py` — Frozen Lake agents
 - `agents/wumpus_agent.py` — Wumpus World agents
 - `agents/rocksample_agent.py` — RockSample agents
@@ -57,6 +58,7 @@ Available via `--planning-method`:
 | `nuijten` | `nuijten_mp.py` | Variable node, no kernels |
 | `vbp-channel` | `vbp_channel.py` | Variable node + action channels |
 | `precise-info-seeking` | `precise_info_seeking.py` | Variable node + action channels + obs channels |
+| `active-inference` | `active_inference.py` | Variable node + action channels + dyn channels + obs channels |
 
 ## Running
 
@@ -97,7 +99,7 @@ uv run dvc repro -s frozen_lake  # Run single stage
 ## Important Details
 
 **MiniGrid agent representations:**
-All agents use indexed tensor storage for efficient state inference. Seven planning variants available: `LoopyBPAgent`, `LoopyVBPAgent`, `RegionExtendedAgent`, `DynChannelLoopyBPAgent`, `NuijtenMPAgent`, `VBPChannelAgent`, `PreciseInfoSeekingAgent`.
+All agents use indexed tensor storage for efficient state inference. Eight planning variants available: `LoopyBPAgent`, `LoopyVBPAgent`, `RegionExtendedAgent`, `DynChannelLoopyBPAgent`, `NuijtenMPAgent`, `VBPChannelAgent`, `PreciseInfoSeekingAgent`, `ActiveInferenceAgent`.
 
 **JAX requirements:**
 - All inference functions are JIT-compiled (`@jax.jit`)

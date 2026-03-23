@@ -43,6 +43,10 @@ frozen_lake_methods:
     planning_iterations: 400
     damping: 0.01
     momentum: 0.0
+  active-inference:
+    planning_iterations: 400
+    damping: 0.01
+    momentum: 0.0
 
 wumpus_world:
   grid_size: 5
@@ -86,6 +90,10 @@ wumpus_world_methods:
     damping: 0.25
     momentum: 0.0
   precise-info-seeking:
+    planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
+  active-inference:
     planning_iterations: 50
     damping: 0.25
     momentum: 0.0
@@ -137,6 +145,10 @@ rocksample_methods:
     planning_iterations: 50
     damping: 0.25
     momentum: 0.0
+  active-inference:
+    planning_iterations: 50
+    damping: 0.25
+    momentum: 0.0
 
 minigrid:
   grid_size: 3
@@ -177,10 +189,14 @@ minigrid_methods:
     planning_iterations: 50
     damping: 0.01
     momentum: 0.0
+  active-inference:
+    planning_iterations: 50
+    damping: 0.01
+    momentum: 0.0
 
 convergence_sweep:
   n_iterations: 1000
-  damping: [0.01, 0.05, 0.25, 0.5, 0.75]
+  damping: [0.01, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0]
   momentum: 0.0
   seeds: [0,1,2,3,4]
   methods: [
@@ -191,6 +207,7 @@ convergence_sweep:
     "nuijten",
     "vbp-channel",
     "precise-info-seeking",
+    "active-inference",
   ]
 
   frozen_lake:

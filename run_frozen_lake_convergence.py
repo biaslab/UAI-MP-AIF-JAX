@@ -29,6 +29,7 @@ from inference.convergence import (
     dyn_channel_convergence,
     vbp_channel_convergence,
     precise_info_seeking_convergence,
+    active_inference_convergence,
 )
 
 ACTION_NAMES = ["left", "down", "right", "up"]
@@ -39,6 +40,7 @@ CONVERGENCE_FUNCS = {
     "dyn-channel": dyn_channel_convergence,
     "vbp-channel": vbp_channel_convergence,
     "precise-info-seeking": precise_info_seeking_convergence,
+    "active-inference": active_inference_convergence,
 }
 
 

@@ -19,6 +19,7 @@ from inference.nuijten_mp import nuijten_mp_planning
 from inference.loopy_vbp import loopy_vbp_planning
 from inference.vbp_channel import vbp_channel_planning
 from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 
 EPSILON = 1e-12
 
@@ -378,6 +379,33 @@ class RockSamplePreciseInfoSeekingAgent(_RockSampleAgentBase):
         return action_dist
 
 
+@dataclass(frozen=True)
+class RockSampleActiveInferenceAgent(_RockSampleAgentBase):
+    """Active Inference (VBP action channels + dyn channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal,
+               rock_positions, qualities, n_pos, start_state_idx,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0, momentum=0.0, terminal_goal_only=False):
+        return _create(RockSampleActiveInferenceAgent, transition_tensor,
+                       observation_tensor, goal, rock_positions, qualities,
+                       n_pos, start_state_idx,
+                       planning_horizon, planning_iterations, action_prior,
+                       damping=damping, momentum=momentum,
+                       terminal_goal_only=terminal_goal_only)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = active_inference_planning(
+            q_current, q_static, self.transition_tensor,
+            self._rock_obs, self._planning_goal(q_static),
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
+            momentum=self.momentum,
+        )
+        return action_dist
+
+
 # ---------------------------------------------------------------------------
 # Agent registry
 # ---------------------------------------------------------------------------
@@ -390,6 +418,7 @@ AGENT_CLASSES = {
     "nuijten": RockSampleNuijtenMPAgent,
     "vbp_channel": RockSampleVBPChannelAgent,
     "precise_info_seeking": RockSamplePreciseInfoSeekingAgent,
+    "active_inference": RockSampleActiveInferenceAgent,
 }
 
 

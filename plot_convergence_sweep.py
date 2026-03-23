@@ -20,10 +20,10 @@ ALL_ENVIRONMENTS = ["frozen-lake", "wumpus-world", "rocksample", "minigrid"]
 
 ALL_METHODS = [
     "loopy", "region-extended", "dyn-channel",
-    "nuijten", "vbp-channel", "precise-info-seeking",
+    "nuijten", "vbp-channel", "precise-info-seeking", "active-inference",
 ]
 
-METHODS_WITH_DAMPING = {"region-extended", "dyn-channel", "vbp-channel", "precise-info-seeking"}
+METHODS_WITH_DAMPING = {"region-extended", "dyn-channel", "vbp-channel", "precise-info-seeking", "active-inference"}
 
 METHOD_LABELS = {
     "loopy": "Loopy BP",
@@ -32,6 +32,7 @@ METHOD_LABELS = {
     "nuijten": "Nuijten MP",
     "vbp-channel": "VBP Channel",
     "precise-info-seeking": "Precise Info-Seeking",
+    "active-inference": "Active Inference",
 }
 
 ENV_LABELS = {
@@ -144,6 +145,7 @@ def plot_damping_sweep(results, env_name, output_dir, fmt, generate_tex):
         ax.set_title(f"{ENV_LABELS.get(env_name, env_name)}: {METHOD_LABELS.get(method, method)}")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
+        _set_robust_ylim(ax)
         fig.tight_layout()
 
         for ext in _extensions(fmt):
@@ -255,6 +257,7 @@ def plot_method_comparison(results, env_name, output_dir, fmt):
     ax.set_title(f"{ENV_LABELS.get(env_name, env_name)}: Method Comparison (best damping)")
     ax.legend(fontsize=7, loc="best")
     ax.grid(True, alpha=0.3)
+    _set_robust_ylim(ax)
     fig.tight_layout()
 
     for ext in _extensions(fmt):
@@ -385,6 +388,7 @@ def plot_final_vfe(results, env_name, output_dir, fmt):
     ax.set_title(f"{ENV_LABELS.get(env_name, env_name)}: Final VFE by Method & Damping")
     ax.legend(fontsize=7, loc="best")
     ax.grid(True, axis="y", alpha=0.3)
+    _set_robust_ylim(ax)
     fig.tight_layout()
 
     for ext in _extensions(fmt):
@@ -402,6 +406,25 @@ def _extensions(fmt):
     if fmt == "both":
         return ["pdf", "png"]
     return [fmt]
+
+
+def _set_robust_ylim(ax, margin=0.05):
+    """Set y-axis limits based on 5th/95th percentile to exclude outliers."""
+    all_y = []
+    for line in ax.get_lines():
+        all_y.extend(line.get_ydata())
+    for patch in ax.patches:
+        if patch is None:
+            continue
+        h = patch.get_height()
+        if np.isfinite(h):
+            all_y.append(h)
+    all_y = np.array([v for v in all_y if np.isfinite(v)])
+    if len(all_y) < 2:
+        return
+    lo, hi = np.percentile(all_y, [5, 95])
+    pad = max((hi - lo) * margin, 1e-6)
+    ax.set_ylim(lo - pad, hi + pad)
 
 
 # =============================================================================

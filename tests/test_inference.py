@@ -1168,7 +1168,7 @@ class TestPerformanceRefactorEquivalence:
         from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 
         action_prior = jnp.array([0.2, 0.2, 0.2, 0.2, 0.0, 0.2, 0.0])
-        ref = jnp.array([7.0264194e-13, 7.0264058e-13, 8.3333308e-01, 1.6666692e-01, 0.0, 3.2265592e-20, 0.0])
+        ref = jnp.array([0.16383089, 0.17721373, 0.09412774, 0.26431727, 0.0, 0.30051038, 0.0])
         action_dist, _, _ = region_extended_loopy_bp_planning(
             self.q_current, self.q_static, self.transition_tensor,
             self.observation_tensor_flat, self.goal, horizon=5, n_iterations=3,
@@ -1441,6 +1441,131 @@ class TestPreciseInfoSeeking:
         log_sums = logsumexp(log_r_ux, axis=2)
         assert np.allclose(log_sums, 0.0, atol=1e-4), (
             f"Action channel not properly normalized: max |logsumexp - 0| = {np.abs(np.array(log_sums)).max()}"
+        )
+
+
+class TestActiveInference:
+    """Tests for Active Inference planning (VBP action channels + dyn channels + obs channels)."""
+
+    def setup_method(self):
+        import jax.numpy as jnp
+        from environments.minigrid import (
+            generate_transition_tensor,
+            generate_observation_tensor,
+            get_valid_static_configs,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+
+        self.n = 3
+        n_loc = self.n * self.n
+        n_key = n_loc - 2 * self.n
+        n_door = n_loc - 2 * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.valid_configs = get_valid_static_configs(self.n)
+        self.n_static = len(self.valid_configs)
+        self.n_actions = 7
+
+        self.transition_tensor = jnp.array(generate_transition_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(generate_observation_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:]
+        )
+
+        # State beliefs
+        self.q_current = jnp.ones(self.n_states) / self.n_states
+        self.q_static = jnp.ones(self.n_static) / self.n_static
+        self.goal = jnp.ones(self.n_states) / self.n_states
+
+    def test_output_shape(self):
+        """Verify tuple shapes: (n_actions,), (T, n_states, n_states, n_actions), (T+1, ...)."""
+        import jax.numpy as jnp
+        from inference.active_inference import active_inference_planning
+
+        horizon = 3
+        result = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, self.goal,
+            horizon=horizon, n_iterations=2,
+        )
+        assert len(result) == 3
+        action_dist, log_dyn_channels, log_obs_channels = result
+        assert action_dist.shape == (self.n_actions,)
+        assert np.isclose(float(action_dist.sum()), 1.0, atol=1e-5)
+        assert log_dyn_channels.shape == (horizon, self.n_states, self.n_states, self.n_actions)
+
+    def test_respects_action_mask(self):
+        """Masked actions have near-zero probability."""
+        import jax.numpy as jnp
+        from inference.active_inference import active_inference_planning
+
+        action_prior = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+        action_prior = action_prior / action_prior.sum()
+
+        action_dist, _, _ = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, self.goal,
+            horizon=3, n_iterations=3, action_prior=action_prior,
+        )
+        assert action_dist[3] < 1e-6, f"Masked action 3 should be ~0, got {action_dist[3]}"
+        assert action_dist[4] < 1e-6, f"Masked action 4 should be ~0, got {action_dist[4]}"
+        assert action_dist[6] < 1e-6, f"Masked action 6 should be ~0, got {action_dist[6]}"
+
+    def test_multi_iteration_changes_result(self):
+        """More iterations should change the action distribution."""
+        import jax.numpy as jnp
+        from inference.active_inference import active_inference_planning
+
+        goal = jnp.zeros(self.n_states).at[0].set(1.0)
+
+        action_dist_1, _, _ = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, goal,
+            horizon=3, n_iterations=1,
+        )
+        action_dist_5, _, _ = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, goal,
+            horizon=3, n_iterations=5,
+        )
+        assert not np.allclose(action_dist_1, action_dist_5, atol=1e-6), (
+            "1 and 5 iterations should give different results"
+        )
+
+    def test_obs_channels_shape(self):
+        """Verify obs channels have correct shape."""
+        import jax.numpy as jnp
+        from inference.active_inference import active_inference_planning
+
+        horizon = 3
+        n_fov = self.observation_tensor_flat.shape[0]
+        n_obs_types = self.observation_tensor_flat.shape[1]
+
+        _, _, log_obs_channels = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, self.goal,
+            horizon=horizon, n_iterations=2,
+        )
+        assert log_obs_channels.shape == (horizon + 1, n_fov, n_obs_types, self.n_states, self.n_static)
+
+    def test_dyn_channels_conditional(self):
+        """Verify dyn channels are proper conditionals over x_new."""
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.active_inference import active_inference_planning
+
+        horizon = 3
+        _, log_dyn_channels, _ = active_inference_planning(
+            self.q_current, self.q_static, self.transition_tensor,
+            self.observation_tensor_flat, self.goal,
+            horizon=horizon, n_iterations=3,
+        )
+        assert log_dyn_channels.shape == (horizon, self.n_states, self.n_states, self.n_actions)
+        # logsumexp over x_new (axis=2) should be ~0 (r(x'|x,u) sums to 1)
+        log_sums = logsumexp(log_dyn_channels, axis=2)
+        assert np.allclose(log_sums, 0.0, atol=1e-4), (
+            f"Dyn channel not properly normalized: max |logsumexp - 0| = {np.abs(np.array(log_sums)).max()}"
         )
 
 
