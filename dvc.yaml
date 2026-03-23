@@ -148,6 +148,7 @@ stages:
         --goal-temperature ${frozen_lake.goal_temperature}
         --scan-cost ${frozen_lake.scan_cost}
         --seed ${frozen_lake.seed}
+        --receding-horizon
         --output data/results/frozen_lake/${key}.json
       deps:
         - run_frozen_lake.py
@@ -184,6 +185,7 @@ stages:
         --wumpus-penalty ${wumpus_world.wumpus_penalty}
         --goal-temperature ${wumpus_world.goal_temperature}
         --seed ${wumpus_world.seed}
+        --receding-horizon
         --output data/results/wumpus_world/${key}.json
       deps:
         - run_wumpus_world.py
@@ -222,6 +224,7 @@ stages:
         --sample-cost ${rocksample.sample_cost}
         --terminal-goal-only
         --seed ${rocksample.seed}
+        --receding-horizon
         --output data/results/rocksample/${key}.json
       deps:
         - run_rocksample.py
@@ -252,7 +255,9 @@ stages:
         --damping ${item.damping}
         --momentum ${item.momentum}
         --seed ${minigrid.seed}
+        --receding-horizon
         --output data/results/minigrid/${key}.json
+        --record first,last
       deps:
         - run_minigrid.py
         - agents/flat_tensor_agent.py
