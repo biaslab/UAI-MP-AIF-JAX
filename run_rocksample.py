@@ -100,7 +100,6 @@ def main():
                                  "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
-    parser.add_argument("--momentum", type=float, default=0.0, help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--good-reward", type=float, default=10.0, help="Reward for collecting a good rock")
     parser.add_argument("--bad-penalty", type=float, default=10.0, help="Penalty for collecting a bad rock")
     parser.add_argument("--exit-reward", type=float, default=10.0, help="Reward for reaching exit")
@@ -191,7 +190,6 @@ def main():
         planning_iterations=args.planning_iterations,
         action_prior=action_prior,
         damping=args.damping,
-        momentum=args.momentum,
         terminal_goal_only=args.terminal_goal_only,
     )
     print(f"  Method: {args.planning_method}")
@@ -199,8 +197,6 @@ def main():
     if args.terminal_goal_only:
         print(f"  Terminal goal only: enabled")
     print(f"  Planning iterations: {args.planning_iterations}")
-    if args.momentum > 0:
-        print(f"  Momentum: {args.momentum}")
     print()
 
     env = RockSampleEnv(

@@ -34,23 +34,15 @@ from .messages import safe_log_div
 # =============================================================================
 
 
-def damp_log_channel(log_old, log_new, damping, cond_axis,
-                     log_prev=None, momentum=0.0):
-    """Geometric damping with optional inertial (momentum) term.
+def damp_log_channel(log_old, log_new, damping, cond_axis):
+    """Geometric damping of log-space channels.
 
-    Geometric:  (1-α)*log_old + α*log_new
-    Heavy-ball: (1-α+β)*log_old + α*log_new - β*log_prev
+    damped = (1-α)*log_old + α*log_new
 
     damping=1.0 -> new channels (no damping)
     damping=0.5 -> geometric mean in probability space
     """
-    alpha = damping
-    beta = momentum
-    if log_prev is not None:
-        safe_prev = jnp.where(log_prev > LOG_ZERO / 2, log_prev, log_old)
-        damped = (1.0 - alpha + beta) * log_old + alpha * log_new - beta * safe_prev
-    else:
-        damped = (1.0 - alpha) * log_old + alpha * log_new
+    damped = (1.0 - damping) * log_old + damping * log_new
 
     # Structural zeros: only zero if BOTH old and new are LOG_ZERO
     valid = (log_old > LOG_ZERO / 2) | (log_new > LOG_ZERO / 2)
@@ -359,6 +351,22 @@ def compute_dyn_channels(log_region_beliefs):
     return log_joint - logsumexp(log_joint, axis=2, keepdims=True)
 
 
+def compute_dyn_channels_and_pair_marginal(log_region_beliefs):
+    """Compute both dyn channels and pair marginal from shared θ-marginalization.
+
+    Fuses the common logsumexp(region_beliefs, axis=3) that both
+    compute_dyn_channels and compute_pair_marginal need.
+
+    Returns:
+        log_dyn_channels: (T, x_old, x_new, u) log-conditional r(x_new | x_old, u)
+        log_pair_marginal: (T, n_states, n_actions) log pair marginal q(x_old, u)
+    """
+    log_theta_marg = logsumexp(log_region_beliefs, axis=3)  # marginalize θ
+    log_dyn_channels = log_theta_marg - logsumexp(log_theta_marg, axis=2, keepdims=True)
+    log_pair_marginal = logsumexp(log_theta_marg, axis=2)  # marginalize x_new
+    return log_dyn_channels, log_pair_marginal
+
+
 def compute_obs_region_beliefs(log_obs_kernels, log_fwd_msgs, log_bwd_msgs,
                                 log_obs_to_x, log_cavity_obs):
     """
@@ -412,7 +420,6 @@ def region_extended_loopy_bp_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
-    momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> jnp.ndarray:
     """
     Plan actions via region-extended loopy BP with observation factors.
@@ -469,7 +476,6 @@ def region_extended_loopy_bp_planning(
     if has_pref:
         def body_fn(i, carry):
             (_, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
-             log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
             # Step 1: Inline kernels
@@ -509,39 +515,32 @@ def region_extended_loopy_bp_planning(
                 log_prior_obs
             )
 
-            # Step 7: Channels from region beliefs (with geometric + momentum damping)
+            # Step 7: Channels from region beliefs (with geometric damping)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (q_u, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (q_u_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_dyn_channels, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, log_dyn_channels, log_obs_channels, _, _, _ = result
     else:
         def body_fn(i, carry):
             (_, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
-             log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
             # Step 1: Inline kernels
@@ -579,35 +578,29 @@ def region_extended_loopy_bp_planning(
                 log_prior_obs
             )
 
-            # Step 7: Channels from region beliefs (with geometric + momentum damping)
+            # Step 7: Channels from region beliefs (with geometric damping)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (q_u, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (q_u_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_dyn_channels, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, log_dyn_channels, log_obs_channels, _, _, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

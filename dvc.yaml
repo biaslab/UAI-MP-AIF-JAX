@@ -143,7 +143,6 @@ stages:
         --planning-horizon ${frozen_lake.planning_horizon}
         --planning-iterations ${item.planning_iterations}
         --damping ${item.damping}
-        --momentum ${item.momentum}
         --hole-penalty ${frozen_lake.hole_penalty}
         --goal-temperature ${frozen_lake.goal_temperature}
         --scan-cost ${frozen_lake.scan_cost}
@@ -179,13 +178,11 @@ stages:
         --planning-horizon ${wumpus_world.planning_horizon}
         --planning-iterations ${item.planning_iterations}
         --damping ${item.damping}
-        --momentum ${item.momentum}
         --scan-cost ${wumpus_world.scan_cost}
         --pit-penalty ${wumpus_world.pit_penalty}
         --wumpus-penalty ${wumpus_world.wumpus_penalty}
         --goal-temperature ${wumpus_world.goal_temperature}
         --seed ${wumpus_world.seed}
-        --receding-horizon
         --output data/results/wumpus_world/${key}.json
       deps:
         - run_wumpus_world.py
@@ -215,7 +212,6 @@ stages:
         --planning-horizon ${rocksample.planning_horizon}
         --planning-iterations ${item.planning_iterations}
         --damping ${item.damping}
-        --momentum ${item.momentum}
         --good-reward ${rocksample.good_reward}
         --bad-penalty ${rocksample.bad_penalty}
         --exit-reward ${rocksample.exit_reward}
@@ -253,7 +249,6 @@ stages:
         --inference-iterations ${minigrid.inference_iterations}
         --planning-iterations ${item.planning_iterations}
         --damping ${item.damping}
-        --momentum ${item.momentum}
         --seed ${minigrid.seed}
         --receding-horizon
         --output data/results/minigrid/${key}.json

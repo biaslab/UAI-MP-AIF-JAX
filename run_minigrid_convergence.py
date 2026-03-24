@@ -84,19 +84,19 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
             transition_tensor=transition_tensor, **common)
     elif method == "vbp-channel":
         return VBPChannelAgent.create(
-            transition_tensor=transition_tensor, damping=args.damping, momentum=args.momentum, **common)
+            transition_tensor=transition_tensor, damping=args.damping, **common)
     elif method == "precise-info-seeking":
         return PreciseInfoSeekingAgent.create(
-            transition_tensor=transition_tensor, damping=args.damping, momentum=args.momentum, **common)
+            transition_tensor=transition_tensor, damping=args.damping, **common)
     elif method == "active-inference":
         return ActiveInferenceAgent.create(
-            transition_tensor=transition_tensor, damping=args.damping, momentum=args.momentum, **common)
+            transition_tensor=transition_tensor, damping=args.damping, **common)
     else:
         raise ValueError(f"Unknown planning method: {method}")
 
 
 def call_convergence_planning(method, q_current, q_static, agent, horizon,
-                               n_iterations, damping=1.0, momentum=0.0):
+                               n_iterations, damping=1.0):
     """Dispatch to the correct convergence planning function."""
     if method == "loopy":
         action_dist, vfe_trace = loopy_bp_convergence(
@@ -118,7 +118,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             horizon=horizon,
             n_iterations=n_iterations,
             damping=damping,
-            momentum=momentum,
+
         )
         return action_dist, vfe_trace
     elif method == "dyn-channel":
@@ -131,7 +131,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             horizon=horizon,
             n_iterations=n_iterations,
             damping=damping,
-            momentum=momentum,
+
         )
         return action_dist, vfe_trace
     elif method == "nuijten":
@@ -155,7 +155,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             horizon=horizon,
             n_iterations=n_iterations,
             damping=damping,
-            momentum=momentum,
+
         )
         return action_dist, vfe_trace
     elif method == "precise-info-seeking":
@@ -168,7 +168,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             horizon=horizon,
             n_iterations=n_iterations,
             damping=damping,
-            momentum=momentum,
+
         )
         return action_dist, vfe_trace
     elif method == "active-inference":
@@ -181,7 +181,7 @@ def call_convergence_planning(method, q_current, q_static, agent, horizon,
             horizon=horizon,
             n_iterations=n_iterations,
             damping=damping,
-            momentum=momentum,
+
         )
         return action_dist, vfe_trace
     else:
@@ -237,8 +237,6 @@ def main():
     parser.add_argument("--no-orientation", action="store_true")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
-    parser.add_argument("--momentum", type=float, default=0.0,
-                        help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--output", type=str, default=None, help="JSON output file")
     parser.add_argument("--plot", nargs="?", const="auto", default=None,
                         help="Save VFE plot + TikZ to data/convergence/ (optional: custom basename)")
@@ -266,8 +264,6 @@ def main():
           f"Iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"Channel damping: {args.damping}")
-    if args.momentum > 0:
-        print(f"Momentum: {args.momentum}")
     if args.obs_alpha > 0.0:
         print(f"Observation softening: alpha={args.obs_alpha}")
     print()
@@ -337,7 +333,7 @@ def main():
     t0 = time.time()
     action_dist, vfe_trace = call_convergence_planning(
         args.planning_method, q_state, q_static, agent, horizon,
-        n_iterations, damping=args.damping, momentum=args.momentum,
+        n_iterations, damping=args.damping,
     )
     action_dist.block_until_ready()
     elapsed = time.time() - t0
@@ -372,7 +368,6 @@ def main():
                 "planning_iterations": n_iterations,
                 "fov_size": args.fov_size,
                 "damping": args.damping,
-                "momentum": args.momentum,
                 "obs_alpha": args.obs_alpha,
                 "observe_first": args.observe_first,
                 "seed": args.seed,

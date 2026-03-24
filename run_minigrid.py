@@ -80,8 +80,6 @@ def main():
                         help="Replace orientation observation with uniform (agent must infer orientation)")
     parser.add_argument("--damping", type=float, default=1.0,
                         help="Channel update damping (1.0 = no damping, 0.5 = equal blend)")
-    parser.add_argument("--momentum", type=float, default=0.0,
-                        help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--obs-alpha", type=float, default=0.0,
                         help="Observation softening rate per Manhattan distance (0.0 = no softening)")
     args = parser.parse_args()
@@ -181,7 +179,6 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-            momentum=args.momentum,
         )
     elif args.planning_method == "dyn-channel":
         agent = DynChannelLoopyBPAgent.create(
@@ -194,7 +191,6 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-            momentum=args.momentum,
         )
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
@@ -218,7 +214,6 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-            momentum=args.momentum,
         )
     elif args.planning_method == "precise-info-seeking":
         agent = PreciseInfoSeekingAgent.create(
@@ -231,7 +226,6 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-            momentum=args.momentum,
         )
     elif args.planning_method == "active-inference":
         agent = ActiveInferenceAgent.create(
@@ -244,7 +238,6 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-            momentum=args.momentum,
         )
     else:
         raise ValueError(f"Unknown planning method: {args.planning_method}")
@@ -256,8 +249,6 @@ def main():
     print(f"  Planning iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"  Channel damping: {args.damping}")
-    if args.momentum > 0:
-        print(f"  Momentum: {args.momentum}")
     print()
 
     if record_episodes:
@@ -308,7 +299,6 @@ def main():
                 "planning_iterations": args.planning_iterations,
                 "no_orientation": args.no_orientation,
                 "damping": args.damping,
-                "momentum": args.momentum,
                 "obs_alpha": args.obs_alpha,
                 "seed_start": args.seed,
             },

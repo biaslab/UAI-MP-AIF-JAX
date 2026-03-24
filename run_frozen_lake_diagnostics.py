@@ -428,7 +428,6 @@ def main():
                                  "dyn-channel", "nuijten", "vbp-channel",
                                  "precise-info-seeking", "active-inference"])
     parser.add_argument("--damping", type=float, default=1.0)
-    parser.add_argument("--momentum", type=float, default=0.0, help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--hole-penalty", type=float, default=1.0)
     parser.add_argument("--goal-temperature", type=float, default=1.0)
     parser.add_argument("--scan-cost", type=float, default=0.5,
@@ -456,8 +455,6 @@ def main():
     print(f"  Iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"  Damping: {args.damping}")
-    if args.momentum > 0:
-        print(f"  Momentum: {args.momentum}")
     print(f"  Hole penalty: {args.hole_penalty}, goal temperature: {args.goal_temperature}")
     print(f"  Scan cost: {args.scan_cost}")
     print(f"  Seed: {args.seed}")
@@ -507,7 +504,6 @@ def main():
         planning_iterations=args.planning_iterations,
         action_prior=action_prior,
         damping=args.damping,
-        momentum=args.momentum,
     )
 
     compare_bp_agent = None

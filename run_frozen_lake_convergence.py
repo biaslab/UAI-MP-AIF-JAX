@@ -45,7 +45,7 @@ CONVERGENCE_FUNCS = {
 
 
 def run_convergence(method, q_current, q_static, T, B_dir, goal,
-                    horizon, n_iterations, damping, momentum=0.0):
+                    horizon, n_iterations, damping):
     """Run convergence analysis and return (action_dist, vfe_trace)."""
     func = CONVERGENCE_FUNCS[method]
 
@@ -58,7 +58,6 @@ def run_convergence(method, q_current, q_static, T, B_dir, goal,
         horizon=horizon,
         n_iterations=n_iterations,
         damping=damping,
-        momentum=momentum,
     )
 
     # All return (action_dist, ..., vfe_trace) — vfe_trace is always last
@@ -84,8 +83,6 @@ def main():
     parser.add_argument("--damping", type=float, nargs="+",
                         default=[0.1, 0.25, 0.5, 0.75, 1.0],
                         help="Damping values to test")
-    parser.add_argument("--momentum", type=float, default=0.0,
-                        help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--hole-penalty", type=float, default=5.0)
     parser.add_argument("--goal-temperature", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=0)
@@ -105,8 +102,6 @@ def main():
           f"min_hamming: {args.min_hamming}")
     print(f"  Horizon: {args.planning_horizon}  Iterations: {args.n_iterations}")
     print(f"  Damping values: {args.damping}")
-    if args.momentum > 0:
-        print(f"  Momentum: {args.momentum}")
     print(f"  hole_penalty={args.hole_penalty}  goal_temp={args.goal_temperature}")
     print()
 
@@ -164,7 +159,6 @@ def main():
         action_dist, vfe_trace = run_convergence(
             args.method, q_current, q_static, T, B_dir, goal,
             args.planning_horizon, args.n_iterations, d,
-            momentum=args.momentum,
         )
         action_dist.block_until_ready()
         elapsed = time.time() - t0

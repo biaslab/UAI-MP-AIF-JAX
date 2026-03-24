@@ -88,7 +88,6 @@ def vbp_channel_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
-    momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> tuple:
     """
     Plan actions via VBP channel planning with action channel reparameterization.
@@ -142,7 +141,7 @@ def vbp_channel_planning(
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_r_ux, log_r_ux_prev) = carry
+             log_r_ux) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
@@ -196,21 +195,20 @@ def vbp_channel_planning(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_r_ux, log_r_ux)
+                    q_u, new_log_r_ux)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_r_ux_init, log_r_ux_init)
+             q_u_init, log_r_ux_init)
         )
-        _, _, _, q_u, log_r_ux, _ = result
+        _, _, _, q_u, log_r_ux = result
     else:
         def body_fn(i, carry):
-            log_dyn_to_theta, log_obs_to_theta, _, log_r_ux, log_r_ux_prev = carry
+            log_dyn_to_theta, log_obs_to_theta, _, log_r_ux = carry
 
             # Step 1: theta cavities
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
@@ -256,18 +254,17 @@ def vbp_channel_planning(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_r_ux, log_r_ux)
+                    new_log_r_ux)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_r_ux_init, log_r_ux_init)
+             log_r_ux_init)
         )
-        _, _, q_u, log_r_ux, _ = result
+        _, _, q_u, log_r_ux = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

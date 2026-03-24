@@ -3,28 +3,28 @@ stages:
   frozen_lake@loopy-vbp:
     cmd: uv run python run_frozen_lake.py --planning-method loopy-vbp 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
-      --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
-      1.0 --momentum 0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 
-      0.9 --seed 0 --output data/results/frozen_lake/loopy-vbp.json
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
+      1.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/loopy-vbp.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -35,7 +35,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -43,39 +43,38 @@ stages:
           scan_cost: 0.9
           seed: 0
         frozen_lake_methods.loopy-vbp:
-          planning_iterations: 50
+          planning_iterations: 400
           damping: 1.0
-          momentum: 0.0
     outs:
     - path: data/results/frozen_lake/loopy-vbp.json
       hash: md5
-      md5: fd331103ff31f2bde76f6f073b3f26d1
-      size: 609
+      md5: a3d12f50b2a8c4e54e42e35ab37fc0f3
+      size: 611
   frozen_lake@loopy:
     cmd: uv run python run_frozen_lake.py --planning-method loopy --grid-size 4 
       --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
-      --noise-range 0.1 --slip-prob 0.1 --episodes 50 --max-steps 15 
-      --planning-horizon 15 --planning-iterations 50 --damping 1.0 --momentum 
-      0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
-      --output data/results/frozen_lake/loopy.json
+      --noise-range 0.1 --slip-prob 0.1 --episodes 200 --max-steps 15 
+      --planning-horizon 15 --planning-iterations 400 --damping 1.0 
+      --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/loopy.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -86,7 +85,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -94,39 +93,38 @@ stages:
           scan_cost: 0.9
           seed: 0
         frozen_lake_methods.loopy:
-          planning_iterations: 50
+          planning_iterations: 400
           damping: 1.0
-          momentum: 0.0
     outs:
     - path: data/results/frozen_lake/loopy.json
       hash: md5
-      md5: 63c6ee595e2451c95de79524c804e265
-      size: 604
+      md5: 23decee528cae9d0e2e0efa47a120cd7
+      size: 607
   frozen_lake@region-extended:
     cmd: uv run python run_frozen_lake.py --planning-method region-extended 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
       --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
-      0.01 --momentum 0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 
-      0.9 --seed 0 --output data/results/frozen_lake/region-extended.json
+      0.5 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/region-extended.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -137,7 +135,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -146,38 +144,37 @@ stages:
           seed: 0
         frozen_lake_methods.region-extended:
           planning_iterations: 400
-          damping: 0.01
-          momentum: 0.0
+          damping: 0.5
     outs:
     - path: data/results/frozen_lake/region-extended.json
       hash: md5
-      md5: df7417258f2c494405084dba2732bd1c
+      md5: c9882e21dc185123fa58be58001e9565
       size: 617
   frozen_lake@dyn-channel:
     cmd: uv run python run_frozen_lake.py --planning-method dyn-channel 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
-      --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
-      0.25 --momentum 0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 
-      0.9 --seed 0 --output data/results/frozen_lake/dyn-channel.json
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
+      0.55 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/dyn-channel.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -188,7 +185,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -196,39 +193,38 @@ stages:
           scan_cost: 0.9
           seed: 0
         frozen_lake_methods.dyn-channel:
-          planning_iterations: 50
-          damping: 0.25
-          momentum: 0.0
+          planning_iterations: 400
+          damping: 0.55
     outs:
     - path: data/results/frozen_lake/dyn-channel.json
       hash: md5
-      md5: 810dd7d6e0ec465d92f53dee2f680b8c
-      size: 609
+      md5: caade3657f7ba3b5812bee20c78d7448
+      size: 612
   frozen_lake@nuijten:
     cmd: uv run python run_frozen_lake.py --planning-method nuijten --grid-size 
       4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
-      --noise-range 0.1 --slip-prob 0.1 --episodes 50 --max-steps 15 
-      --planning-horizon 15 --planning-iterations 50 --damping 1.0 --momentum 
-      0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
-      --output data/results/frozen_lake/nuijten.json
+      --noise-range 0.1 --slip-prob 0.1 --episodes 200 --max-steps 15 
+      --planning-horizon 15 --planning-iterations 400 --damping 1.0 
+      --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/nuijten.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -239,7 +235,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -247,14 +243,13 @@ stages:
           scan_cost: 0.9
           seed: 0
         frozen_lake_methods.nuijten:
-          planning_iterations: 50
+          planning_iterations: 400
           damping: 1.0
-          momentum: 0.0
     outs:
     - path: data/results/frozen_lake/nuijten.json
       hash: md5
-      md5: 60156bce1e18d8b9bdb007f30ece9a06
-      size: 606
+      md5: 329abd503206502e968add2050041b16
+      size: 609
   frozen_lake_damping:
     cmd: uv run python run_frozen_lake_damping.py --grid-size 4 --n-configs 15 
       --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 --noise-range 0.1 
@@ -303,28 +298,28 @@ stages:
   wumpus_world@loopy-vbp:
     cmd: uv run python run_wumpus_world.py --planning-method loopy-vbp 
       --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
-      --slip-prob 0.01 --episodes 50 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      --slip-prob 0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 1.0 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/loopy-vbp.json
     deps:
     - path: agents/wumpus_agent.py
       hash: md5
-      md5: 5091c8856b6c9eb2fdd82125442d4b04
-      size: 18408
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
     - path: environments/wumpus_world.py
       hash: md5
       md5: e6190094a1f6ecf9c6bb03d104e6540f
       size: 18138
     - path: inference/
       hash: md5
-      md5: c381ffbb8effa90de9917f1f6dfd239c.dir
-      size: 202433
-      nfiles: 15
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_wumpus_world.py
       hash: md5
-      md5: 71a9390fbbd3c13447547f4c9ef11e92
-      size: 9163
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
     params:
       params.yaml:
         wumpus_world:
@@ -333,48 +328,48 @@ stages:
           n_pits: 4
           obs_noise: 0.1
           pos_noise: 0.4
-          slip_prob: 0.01
-          episodes: 50
+          slip_prob: 0.5
+          episodes: 200
           max_steps: 10
           planning_horizon: 7
-          damping: 0.25
           scan_cost: 0.7
           pit_penalty: 1.0
           wumpus_penalty: 1.0
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.loopy-vbp:
-          planning_iterations: 50
+          planning_iterations: 400
+          damping: 1.0
     outs:
     - path: data/results/wumpus_world/loopy-vbp.json
       hash: md5
-      md5: 8a1953676d3027c078cb4bd24072e4c2
-      size: 543
+      md5: 836c268438acfba761d7d07cb7b040b5
+      size: 548
   wumpus_world@loopy:
     cmd: uv run python run_wumpus_world.py --planning-method loopy --grid-size 5
-      --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 --slip-prob 0.01
-      --episodes 50 --max-steps 10 --planning-horizon 7 --planning-iterations 50
-      --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 --wumpus-penalty 1.0 
+      --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 --slip-prob 0.5 
+      --episodes 200 --max-steps 10 --planning-horizon 7 --planning-iterations 
+      400 --damping 1.0 --scan-cost 0.7 --pit-penalty 1.0 --wumpus-penalty 1.0 
       --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/loopy.json
     deps:
     - path: agents/wumpus_agent.py
       hash: md5
-      md5: 5091c8856b6c9eb2fdd82125442d4b04
-      size: 18408
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
     - path: environments/wumpus_world.py
       hash: md5
       md5: e6190094a1f6ecf9c6bb03d104e6540f
       size: 18138
     - path: inference/
       hash: md5
-      md5: c381ffbb8effa90de9917f1f6dfd239c.dir
-      size: 202433
-      nfiles: 15
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_wumpus_world.py
       hash: md5
-      md5: 71a9390fbbd3c13447547f4c9ef11e92
-      size: 9163
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
     params:
       params.yaml:
         wumpus_world:
@@ -383,48 +378,48 @@ stages:
           n_pits: 4
           obs_noise: 0.1
           pos_noise: 0.4
-          slip_prob: 0.01
-          episodes: 50
+          slip_prob: 0.5
+          episodes: 200
           max_steps: 10
           planning_horizon: 7
-          damping: 0.25
           scan_cost: 0.7
           pit_penalty: 1.0
           wumpus_penalty: 1.0
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.loopy:
-          planning_iterations: 50
+          planning_iterations: 400
+          damping: 1.0
     outs:
     - path: data/results/wumpus_world/loopy.json
       hash: md5
-      md5: 0138cde4b1e18c25378db4a5d580f705
-      size: 541
+      md5: fe53c1e518a264b7bdb602e8a9ee733d
+      size: 545
   wumpus_world@region-extended:
     cmd: uv run python run_wumpus_world.py --planning-method region-extended 
       --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
-      --slip-prob 0.01 --episodes 50 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      --slip-prob 0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 0.6 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/region-extended.json
     deps:
     - path: agents/wumpus_agent.py
       hash: md5
-      md5: 5091c8856b6c9eb2fdd82125442d4b04
-      size: 18408
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
     - path: environments/wumpus_world.py
       hash: md5
       md5: e6190094a1f6ecf9c6bb03d104e6540f
       size: 18138
     - path: inference/
       hash: md5
-      md5: c381ffbb8effa90de9917f1f6dfd239c.dir
-      size: 202433
-      nfiles: 15
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_wumpus_world.py
       hash: md5
-      md5: 71a9390fbbd3c13447547f4c9ef11e92
-      size: 9163
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
     params:
       params.yaml:
         wumpus_world:
@@ -433,48 +428,48 @@ stages:
           n_pits: 4
           obs_noise: 0.1
           pos_noise: 0.4
-          slip_prob: 0.01
-          episodes: 50
+          slip_prob: 0.5
+          episodes: 200
           max_steps: 10
           planning_horizon: 7
-          damping: 0.25
           scan_cost: 0.7
           pit_penalty: 1.0
           wumpus_penalty: 1.0
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.region-extended:
-          planning_iterations: 50
+          planning_iterations: 400
+          damping: 0.6
     outs:
     - path: data/results/wumpus_world/region-extended.json
       hash: md5
-      md5: 21f29e31eab3a0e6b86c86e108d5deb9
-      size: 549
+      md5: dbd875a09093e9be7a3d6159855ea007
+      size: 551
   wumpus_world@dyn-channel:
     cmd: uv run python run_wumpus_world.py --planning-method dyn-channel 
       --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
-      --slip-prob 0.01 --episodes 50 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      --slip-prob 0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 0.6 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/dyn-channel.json
     deps:
     - path: agents/wumpus_agent.py
       hash: md5
-      md5: 5091c8856b6c9eb2fdd82125442d4b04
-      size: 18408
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
     - path: environments/wumpus_world.py
       hash: md5
       md5: e6190094a1f6ecf9c6bb03d104e6540f
       size: 18138
     - path: inference/
       hash: md5
-      md5: c381ffbb8effa90de9917f1f6dfd239c.dir
-      size: 202433
-      nfiles: 15
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_wumpus_world.py
       hash: md5
-      md5: 71a9390fbbd3c13447547f4c9ef11e92
-      size: 9163
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
     params:
       params.yaml:
         wumpus_world:
@@ -483,48 +478,48 @@ stages:
           n_pits: 4
           obs_noise: 0.1
           pos_noise: 0.4
-          slip_prob: 0.01
-          episodes: 50
+          slip_prob: 0.5
+          episodes: 200
           max_steps: 10
           planning_horizon: 7
-          damping: 0.25
           scan_cost: 0.7
           pit_penalty: 1.0
           wumpus_penalty: 1.0
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.dyn-channel:
-          planning_iterations: 50
+          planning_iterations: 400
+          damping: 0.6
     outs:
     - path: data/results/wumpus_world/dyn-channel.json
       hash: md5
-      md5: 383d01e2ecc7cba81b4f481935e45885
-      size: 546
+      md5: 649d9c5cd1009bcf66a12f678078354a
+      size: 547
   wumpus_world@nuijten:
     cmd: uv run python run_wumpus_world.py --planning-method nuijten --grid-size
       5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 --slip-prob 
-      0.01 --episodes 50 --max-steps 10 --planning-horizon 7 
-      --planning-iterations 50 --damping 0.25 --scan-cost 0.7 --pit-penalty 1.0 
+      0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 1.0 --scan-cost 0.7 --pit-penalty 1.0 
       --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
       data/results/wumpus_world/nuijten.json
     deps:
     - path: agents/wumpus_agent.py
       hash: md5
-      md5: 5091c8856b6c9eb2fdd82125442d4b04
-      size: 18408
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
     - path: environments/wumpus_world.py
       hash: md5
       md5: e6190094a1f6ecf9c6bb03d104e6540f
       size: 18138
     - path: inference/
       hash: md5
-      md5: c381ffbb8effa90de9917f1f6dfd239c.dir
-      size: 202433
-      nfiles: 15
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_wumpus_world.py
       hash: md5
-      md5: 71a9390fbbd3c13447547f4c9ef11e92
-      size: 9163
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
     params:
       params.yaml:
         wumpus_world:
@@ -533,49 +528,49 @@ stages:
           n_pits: 4
           obs_noise: 0.1
           pos_noise: 0.4
-          slip_prob: 0.01
-          episodes: 50
+          slip_prob: 0.5
+          episodes: 200
           max_steps: 10
           planning_horizon: 7
-          damping: 0.25
           scan_cost: 0.7
           pit_penalty: 1.0
           wumpus_penalty: 1.0
           goal_temperature: 1.0
           seed: 0
         wumpus_world_methods.nuijten:
-          planning_iterations: 50
+          planning_iterations: 400
+          damping: 1.0
     outs:
     - path: data/results/wumpus_world/nuijten.json
       hash: md5
-      md5: ff4e74f8496a4ef2453af454faa3918c
-      size: 541
+      md5: 4dd03df47a8fdc828b5535b3c4f0810d
+      size: 546
   rocksample@loopy-vbp:
     cmd: uv run python run_rocksample.py --planning-method loopy-vbp --grid-size
       5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 
-      --episodes 50 --max-steps 15 --planning-horizon 15 --planning-iterations 
+      --episodes 200 --max-steps 15 --planning-horizon 15 --planning-iterations 
       50 --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
-      --terminal-goal-only --seed 0 --output 
+      --terminal-goal-only --seed 0 --receding-horizon --output 
       data/results/rocksample/loopy-vbp.json
     deps:
     - path: agents/rocksample_agent.py
       hash: md5
-      md5: c99dbfb69b8cae11b2905eb3bebef8c6
-      size: 15385
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
     - path: environments/rocksample.py
       hash: md5
       md5: cea8cfd698200d6f3c178452839c4c91
       size: 21431
     - path: inference/
       hash: md5
-      md5: 262966272f99c85b96d039646c0b4bed.dir
-      size: 141195
-      nfiles: 10
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_rocksample.py
       hash: md5
-      md5: 71245d041a6c92cdc7f68ff34c3d5962
-      size: 11763
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
     params:
       params.yaml:
         rocksample:
@@ -584,7 +579,7 @@ stages:
           half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           good_reward: 2.0
@@ -601,33 +596,34 @@ stages:
     outs:
     - path: data/results/rocksample/loopy-vbp.json
       hash: md5
-      md5: dba674dd2d201daf267b66bacd8ccc00
-      size: 817
+      md5: 1a90a027d35f7a3bdc385f04a2ef1648
+      size: 854
   rocksample@loopy:
     cmd: uv run python run_rocksample.py --planning-method loopy --grid-size 5 
       --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
-      50 --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping
-      1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
+      200 --max-steps 15 --planning-horizon 15 --planning-iterations 50 
+      --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
-      --terminal-goal-only --seed 0 --output data/results/rocksample/loopy.json
+      --terminal-goal-only --seed 0 --receding-horizon --output 
+      data/results/rocksample/loopy.json
     deps:
     - path: agents/rocksample_agent.py
       hash: md5
-      md5: 6673efc4d683481a2a2363db082b554d
-      size: 16709
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
     - path: environments/rocksample.py
       hash: md5
       md5: cea8cfd698200d6f3c178452839c4c91
       size: 21431
     - path: inference/
       hash: md5
-      md5: 599e5940f394f314fda6bf608db3ec18.dir
-      size: 153419
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_rocksample.py
       hash: md5
-      md5: 3345eb2a1fbdaa8e29db47d9fc52a4be
-      size: 11876
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
     params:
       params.yaml:
         rocksample:
@@ -636,7 +632,7 @@ stages:
           half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           good_reward: 2.0
@@ -653,34 +649,34 @@ stages:
     outs:
     - path: data/results/rocksample/loopy.json
       hash: md5
-      md5: d189cf1f33c65ea42d3222b4341a311e
-      size: 831
+      md5: 25982357f8a050061e7d0e6c0bfcd32e
+      size: 851
   rocksample@region-extended:
     cmd: uv run python run_rocksample.py --planning-method region-extended 
       --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
-      0.0 --episodes 1000 --max-steps 15 --planning-horizon 15 
-      --planning-iterations 50 --damping 0.25 --good-reward 2.0 --bad-penalty 
+      0.0 --episodes 200 --max-steps 15 --planning-horizon 15 
+      --planning-iterations 200 --damping 0.6 --good-reward 2.0 --bad-penalty 
       3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
-      1.0 --terminal-goal-only --seed 0 --output 
+      1.0 --terminal-goal-only --seed 0 --receding-horizon --output 
       data/results/rocksample/region-extended.json
     deps:
     - path: agents/rocksample_agent.py
       hash: md5
-      md5: 3196e4d8d3ff95b2f7953d9056674545
-      size: 18934
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
     - path: environments/rocksample.py
       hash: md5
       md5: cea8cfd698200d6f3c178452839c4c91
       size: 21431
     - path: inference/
       hash: md5
-      md5: 8d2ebd57507ac06db9c46f4b3aef49c1.dir
-      size: 180778
-      nfiles: 13
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_rocksample.py
       hash: md5
-      md5: d7419e934e9ea577cef1fd0fcb1552a2
-      size: 11997
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
     params:
       params.yaml:
         rocksample:
@@ -689,7 +685,7 @@ stages:
           half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 1000
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           good_reward: 2.0
@@ -701,39 +697,39 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.region-extended:
-          planning_iterations: 50
-          damping: 0.25
+          planning_iterations: 200
+          damping: 0.6
     outs:
     - path: data/results/rocksample/region-extended.json
       hash: md5
-      md5: 181088fb71c43f49e1e22237d3ad2d4a
-      size: 864
+      md5: 6a4e93f76f99e4ca54968da0e1fefabd
+      size: 866
   rocksample@dyn-channel:
     cmd: uv run python run_rocksample.py --planning-method dyn-channel 
       --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
-      0.0 --episodes 1000 --max-steps 15 --planning-horizon 15 
-      --planning-iterations 50 --damping 0.25 --good-reward 2.0 --bad-penalty 
+      0.0 --episodes 200 --max-steps 15 --planning-horizon 15 
+      --planning-iterations 200 --damping 0.6 --good-reward 2.0 --bad-penalty 
       3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
-      1.0 --terminal-goal-only --seed 0 --output 
+      1.0 --terminal-goal-only --seed 0 --receding-horizon --output 
       data/results/rocksample/dyn-channel.json
     deps:
     - path: agents/rocksample_agent.py
       hash: md5
-      md5: 3196e4d8d3ff95b2f7953d9056674545
-      size: 18934
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
     - path: environments/rocksample.py
       hash: md5
       md5: cea8cfd698200d6f3c178452839c4c91
       size: 21431
     - path: inference/
       hash: md5
-      md5: 8d2ebd57507ac06db9c46f4b3aef49c1.dir
-      size: 180778
-      nfiles: 13
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_rocksample.py
       hash: md5
-      md5: d7419e934e9ea577cef1fd0fcb1552a2
-      size: 11997
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
     params:
       params.yaml:
         rocksample:
@@ -742,7 +738,7 @@ stages:
           half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 1000
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           good_reward: 2.0
@@ -754,39 +750,39 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.dyn-channel:
-          planning_iterations: 50
-          damping: 0.25
+          planning_iterations: 200
+          damping: 0.6
     outs:
     - path: data/results/rocksample/dyn-channel.json
       hash: md5
-      md5: df88fc0de1b7ae3fcadbcff57ee988d5
-      size: 861
+      md5: 662387a84b415215a379485e2cad3fa8
+      size: 858
   rocksample@nuijten:
     cmd: uv run python run_rocksample.py --planning-method nuijten --grid-size 5
       --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 0.0 --episodes
-      1000 --max-steps 15 --planning-horizon 15 --planning-iterations 50 
+      200 --max-steps 15 --planning-horizon 15 --planning-iterations 200 
       --damping 1.0 --good-reward 2.0 --bad-penalty 3.0 --exit-reward 1.0 
       --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0 
-      --terminal-goal-only --seed 0 --output 
+      --terminal-goal-only --seed 0 --receding-horizon --output 
       data/results/rocksample/nuijten.json
     deps:
     - path: agents/rocksample_agent.py
       hash: md5
-      md5: 3196e4d8d3ff95b2f7953d9056674545
-      size: 18934
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
     - path: environments/rocksample.py
       hash: md5
       md5: cea8cfd698200d6f3c178452839c4c91
       size: 21431
     - path: inference/
       hash: md5
-      md5: 8d2ebd57507ac06db9c46f4b3aef49c1.dir
-      size: 180778
-      nfiles: 13
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_rocksample.py
       hash: md5
-      md5: d7419e934e9ea577cef1fd0fcb1552a2
-      size: 11997
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
     params:
       params.yaml:
         rocksample:
@@ -795,7 +791,7 @@ stages:
           half_eff_dist: 2.0
           pos_noise: 0.3
           slip_prob: 0.0
-          episodes: 1000
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           good_reward: 2.0
@@ -807,38 +803,39 @@ stages:
           terminal_goal_only: true
           seed: 0
         rocksample_methods.nuijten:
-          planning_iterations: 50
+          planning_iterations: 200
           damping: 1.0
     outs:
     - path: data/results/rocksample/nuijten.json
       hash: md5
-      md5: 3252c4bc09020af060fd940ad77b2884
-      size: 860
+      md5: d1518d388fad35594466672fcd8076f1
+      size: 840
   frozen_lake@precise-info-seeking:
     cmd: uv run python run_frozen_lake.py --planning-method precise-info-seeking
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
       --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
-      0.01 --momentum 0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 
-      0.9 --seed 0 --output data/results/frozen_lake/precise-info-seeking.json
+      0.5 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output 
+      data/results/frozen_lake/precise-info-seeking.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -849,7 +846,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -858,13 +855,12 @@ stages:
           seed: 0
         frozen_lake_methods.precise-info-seeking:
           planning_iterations: 400
-          damping: 0.01
-          momentum: 0.0
+          damping: 0.5
     outs:
     - path: data/results/frozen_lake/precise-info-seeking.json
       hash: md5
-      md5: 8677b80e2a2aa330c06dc67c2f59975e
-      size: 620
+      md5: 767285c8f765134cba534993541c9e9c
+      size: 622
   convergence_sweep_frozen_lake:
     cmd: uv run python run_convergence_sweep.py --environment frozen-lake 
       --grid-size 4 --n-configs 15 --planning-horizon 15 --hole-fraction 0.2 
@@ -878,24 +874,25 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 4d9d6163dabef25452dec98a829bb877.dir
-      size: 202052
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
       nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
-      md5: d42702e53c78e909f13aebba792cf946
-      size: 25855
+      md5: 05d5ebdda65fbc34dcc0f47519473289
+      size: 25454
     params:
       params.yaml:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.01
-          - 0.05
+          - 0.1
           - 0.25
+          - 0.4
           - 0.5
+          - 0.6
           - 0.75
-          momentum: 0.0
+          - 1.0
           seeds:
           - 0
           - 1
@@ -903,7 +900,12 @@ stages:
           - 3
           - 4
           methods:
+          - loopy-vbp
+          - loopy
           - region-extended
+          - dyn-channel
+          - nuijten
+          - vbp-channel
           - precise-info-seeking
           - active-inference
           frozen_lake: &id001
@@ -925,7 +927,7 @@ stages:
             planning_horizon: 7
             obs_noise: 0.1
             pos_noise: 0.4
-            slip_prob: 0.01
+            slip_prob: 0.5
             pit_penalty: 1.0
             wumpus_penalty: 1.0
             goal_temperature: 1.0
@@ -954,33 +956,33 @@ stages:
     outs:
     - path: data/convergence_sweep/frozen-lake/summary.csv
       hash: md5
-      md5: 05c293fd0212239fe15071da63523f3a
-      size: 4883
+      md5: 8e332f0b6b7545b691f0a9944fa7e2d2
+      size: 12935
   frozen_lake@vbp-channel:
     cmd: uv run python run_frozen_lake.py --planning-method vbp-channel 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
-      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 50 
-      --max-steps 15 --planning-horizon 15 --planning-iterations 50 --damping 
-      0.75 --momentum 0.0 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 
-      0.9 --seed 0 --output data/results/frozen_lake/vbp-channel.json
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
+      0.75 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/vbp-channel.json
     deps:
     - path: agents/frozen_lake_agent.py
       hash: md5
-      md5: f65b1ea4c88a0a2bc4817118aeb36438
-      size: 15104
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
     - path: environments/frozen_lake.py
       hash: md5
       md5: f2b509c0fa6f4e890b7b770e8805a252
       size: 19656
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
-      md5: 9c8a905ea2e3e00cd66a20f844f35530
-      size: 9368
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
     params:
       params.yaml:
         frozen_lake:
@@ -991,7 +993,7 @@ stages:
           base_noise: 0.4
           noise_range: 0.1
           slip_prob: 0.1
-          episodes: 50
+          episodes: 200
           max_steps: 15
           planning_horizon: 15
           hole_penalty: 2.0
@@ -999,20 +1001,19 @@ stages:
           scan_cost: 0.9
           seed: 0
         frozen_lake_methods.vbp-channel:
-          planning_iterations: 50
+          planning_iterations: 400
           damping: 0.75
-          momentum: 0.0
     outs:
     - path: data/results/frozen_lake/vbp-channel.json
       hash: md5
-      md5: d3dbb691e4d9fcda6f2623f17a9a045c
-      size: 609
+      md5: 333274099aa8814dc33aaa1dfb67190e
+      size: 615
   convergence_sweep_wumpus_world:
     cmd: uv run python run_convergence_sweep.py --environment wumpus-world 
       --grid-size 5 --n-configs 25 --n-pits 4 --planning-horizon 7 --obs-noise 
-      0.1 --pos-noise 0.4 --slip-prob 0.01 --pit-penalty 1.0 --wumpus-penalty 
-      1.0 --goal-temperature 1.0 --scan-cost 0.7 --n-iterations 1000 
-      --output-dir data/convergence_sweep
+      0.1 --pos-noise 0.4 --slip-prob 0.5 --pit-penalty 1.0 --wumpus-penalty 1.0
+      --goal-temperature 1.0 --scan-cost 0.7 --n-iterations 1000 --output-dir 
+      data/convergence_sweep
     deps:
     - path: environments/wumpus_world.py
       hash: md5
@@ -1020,24 +1021,25 @@ stages:
       size: 18138
     - path: inference/
       hash: md5
-      md5: a714ec7275cceb04773ee116c2164565.dir
-      size: 176198
-      nfiles: 11
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
-      md5: 9b4f1d5bb80f100d499271a8b86d63b4
-      size: 25685
+      md5: 05d5ebdda65fbc34dcc0f47519473289
+      size: 25454
     params:
       params.yaml:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.01
-          - 0.05
+          - 0.1
           - 0.25
+          - 0.4
           - 0.5
+          - 0.6
           - 0.75
-          momentum: 0.0
+          - 1.0
           seeds:
           - 0
           - 1
@@ -1052,6 +1054,7 @@ stages:
           - nuijten
           - vbp-channel
           - precise-info-seeking
+          - active-inference
           frozen_lake:
             grid_size: 4
             n_configs: 15
@@ -1071,7 +1074,7 @@ stages:
             planning_horizon: 7
             obs_noise: 0.1
             pos_noise: 0.4
-            slip_prob: 0.01
+            slip_prob: 0.5
             pit_penalty: 1.0
             wumpus_penalty: 1.0
             goal_temperature: 1.0
@@ -1100,5 +1103,964 @@ stages:
     outs:
     - path: data/convergence_sweep/wumpus-world/summary.csv
       hash: md5
-      md5: 09ef9a59c9062c269c632ca4a526682f
-      size: 8041
+      md5: 89f78891ceb51d9f2a25544b3b429016
+      size: 12907
+  convergence_sweep_rocksample:
+    cmd: uv run python run_convergence_sweep.py --environment rocksample 
+      --grid-size 5 --n-rocks 2 --planning-horizon 15 --half-eff-dist 2.0 
+      --pos-noise 0.3 --slip-prob 0.0 --good-reward 2.0 --bad-penalty 3.0 
+      --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost 1.0
+      --terminal-goal-only --n-iterations 1000 --output-dir 
+      data/convergence_sweep
+    deps:
+    - path: environments/rocksample.py
+      hash: md5
+      md5: cea8cfd698200d6f3c178452839c4c91
+      size: 21431
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_convergence_sweep.py
+      hash: md5
+      md5: 05d5ebdda65fbc34dcc0f47519473289
+      size: 25454
+    params:
+      params.yaml:
+        convergence_sweep:
+          n_iterations: 1000
+          damping:
+          - 0.1
+          - 0.25
+          - 0.4
+          - 0.5
+          - 0.6
+          - 0.75
+          - 1.0
+          seeds:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          methods:
+          - loopy-vbp
+          - loopy
+          - region-extended
+          - dyn-channel
+          - nuijten
+          - vbp-channel
+          - precise-info-seeking
+          - active-inference
+          frozen_lake:
+            grid_size: 4
+            n_configs: 15
+            planning_horizon: 15
+            hole_fraction: 0.2
+            min_hamming: 4
+            base_noise: 0.4
+            noise_range: 0.1
+            slip_prob: 0.1
+            hole_penalty: 2.0
+            goal_temperature: 1.0
+            scan_cost: 0.1
+          wumpus_world:
+            grid_size: 5
+            n_configs: 25
+            n_pits: 4
+            planning_horizon: 7
+            obs_noise: 0.1
+            pos_noise: 0.4
+            slip_prob: 0.5
+            pit_penalty: 1.0
+            wumpus_penalty: 1.0
+            goal_temperature: 1.0
+            scan_cost: 0.7
+          rocksample: &id003
+            grid_size: 5
+            n_rocks: 2
+            planning_horizon: 15
+            half_eff_dist: 2.0
+            pos_noise: 0.3
+            slip_prob: 0.0
+            good_reward: 2.0
+            bad_penalty: 3.0
+            exit_reward: 1.0
+            goal_temperature: 0.5
+            scan_cost: 0.5
+            sample_cost: 1.0
+            terminal_goal_only: true
+          minigrid:
+            grid_size: 3
+            planning_horizon: 15
+            fov_size: 3
+            obs_alpha: 0.0
+            observe_first: true
+        convergence_sweep.rocksample: *id003
+    outs:
+    - path: data/convergence_sweep/rocksample/summary.csv
+      hash: md5
+      md5: c0247490fb59db82811b7903ad91277a
+      size: 12508
+  convergence_sweep_minigrid:
+    cmd: uv run python run_convergence_sweep.py --environment minigrid 
+      --grid-size 3 --planning-horizon 15 --fov-size 3 --obs-alpha 0.0 
+      --observe-first --n-iterations 1000 --output-dir data/convergence_sweep
+    deps:
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_convergence_sweep.py
+      hash: md5
+      md5: 05d5ebdda65fbc34dcc0f47519473289
+      size: 25454
+    params:
+      params.yaml:
+        convergence_sweep:
+          n_iterations: 1000
+          damping:
+          - 0.1
+          - 0.25
+          - 0.4
+          - 0.5
+          - 0.6
+          - 0.75
+          - 1.0
+          seeds:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          methods:
+          - loopy-vbp
+          - loopy
+          - region-extended
+          - dyn-channel
+          - nuijten
+          - vbp-channel
+          - precise-info-seeking
+          - active-inference
+          frozen_lake:
+            grid_size: 4
+            n_configs: 15
+            planning_horizon: 15
+            hole_fraction: 0.2
+            min_hamming: 4
+            base_noise: 0.4
+            noise_range: 0.1
+            slip_prob: 0.1
+            hole_penalty: 2.0
+            goal_temperature: 1.0
+            scan_cost: 0.1
+          wumpus_world:
+            grid_size: 5
+            n_configs: 25
+            n_pits: 4
+            planning_horizon: 7
+            obs_noise: 0.1
+            pos_noise: 0.4
+            slip_prob: 0.5
+            pit_penalty: 1.0
+            wumpus_penalty: 1.0
+            goal_temperature: 1.0
+            scan_cost: 0.7
+          rocksample:
+            grid_size: 5
+            n_rocks: 2
+            planning_horizon: 15
+            half_eff_dist: 2.0
+            pos_noise: 0.3
+            slip_prob: 0.0
+            good_reward: 2.0
+            bad_penalty: 3.0
+            exit_reward: 1.0
+            goal_temperature: 0.5
+            scan_cost: 0.5
+            sample_cost: 1.0
+            terminal_goal_only: true
+          minigrid: &id004
+            grid_size: 3
+            planning_horizon: 15
+            fov_size: 3
+            obs_alpha: 0.0
+            observe_first: true
+        convergence_sweep.minigrid: *id004
+    outs:
+    - path: data/convergence_sweep/minigrid/summary.csv
+      hash: md5
+      md5: c20539002d65a2dd5fdb002b5d1d6339
+      size: 12694
+  convergence_sweep_plots:
+    cmd: uv run python plot_convergence_sweep.py --environment all --input-dir 
+      data/convergence_sweep --output-dir data/convergence_sweep/plots --format 
+      both --tex
+    deps:
+    - path: data/convergence_sweep/frozen-lake/summary.csv
+      hash: md5
+      md5: 8e332f0b6b7545b691f0a9944fa7e2d2
+      size: 12935
+    - path: data/convergence_sweep/minigrid/summary.csv
+      hash: md5
+      md5: c20539002d65a2dd5fdb002b5d1d6339
+      size: 12694
+    - path: data/convergence_sweep/rocksample/summary.csv
+      hash: md5
+      md5: c0247490fb59db82811b7903ad91277a
+      size: 12508
+    - path: data/convergence_sweep/wumpus-world/summary.csv
+      hash: md5
+      md5: 89f78891ceb51d9f2a25544b3b429016
+      size: 12907
+    - path: plot_convergence_sweep.py
+      hash: md5
+      md5: 3d2ca57070e2ce0c49a7904ddd1edfba
+      size: 17002
+    outs:
+    - path: data/convergence_sweep/plots/
+      hash: md5
+      md5: ec947af94b11f1a3c3699df671f8f36d.dir
+      size: 9601649
+      nfiles: 120
+  frozen_lake@active-inference:
+    cmd: uv run python run_frozen_lake.py --planning-method active-inference 
+      --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
+      --base-noise 0.4 --noise-range 0.1 --slip-prob 0.1 --episodes 200 
+      --max-steps 15 --planning-horizon 15 --planning-iterations 400 --damping 
+      0.4 --hole-penalty 2.0 --goal-temperature 1.0 --scan-cost 0.9 --seed 0 
+      --receding-horizon --output data/results/frozen_lake/active-inference.json
+    deps:
+    - path: agents/frozen_lake_agent.py
+      hash: md5
+      md5: 4118233372bc0a2871dde536883974df
+      size: 15578
+    - path: environments/frozen_lake.py
+      hash: md5
+      md5: f2b509c0fa6f4e890b7b770e8805a252
+      size: 19656
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_frozen_lake.py
+      hash: md5
+      md5: 7add2a4b41c593f7150dd3f501611e1c
+      size: 9211
+    params:
+      params.yaml:
+        frozen_lake:
+          grid_size: 4
+          n_configs: 15
+          hole_fraction: 0.2
+          min_hamming: 4
+          base_noise: 0.4
+          noise_range: 0.1
+          slip_prob: 0.1
+          episodes: 200
+          max_steps: 15
+          planning_horizon: 15
+          hole_penalty: 2.0
+          goal_temperature: 1.0
+          scan_cost: 0.9
+          seed: 0
+        frozen_lake_methods.active-inference:
+          planning_iterations: 400
+          damping: 0.4
+    outs:
+    - path: data/results/frozen_lake/active-inference.json
+      hash: md5
+      md5: b9a0879921a5a502096d90c6c70339b3
+      size: 619
+  wumpus_world@vbp-channel:
+    cmd: uv run python run_wumpus_world.py --planning-method vbp-channel 
+      --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
+      --slip-prob 0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 0.6 --scan-cost 0.7 --pit-penalty 1.0 
+      --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
+      data/results/wumpus_world/vbp-channel.json
+    deps:
+    - path: agents/wumpus_agent.py
+      hash: md5
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
+    - path: environments/wumpus_world.py
+      hash: md5
+      md5: e6190094a1f6ecf9c6bb03d104e6540f
+      size: 18138
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_wumpus_world.py
+      hash: md5
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
+    params:
+      params.yaml:
+        wumpus_world:
+          grid_size: 5
+          n_configs: 25
+          n_pits: 4
+          obs_noise: 0.1
+          pos_noise: 0.4
+          slip_prob: 0.5
+          episodes: 200
+          max_steps: 10
+          planning_horizon: 7
+          scan_cost: 0.7
+          pit_penalty: 1.0
+          wumpus_penalty: 1.0
+          goal_temperature: 1.0
+          seed: 0
+        wumpus_world_methods.vbp-channel:
+          planning_iterations: 400
+          damping: 0.6
+    outs:
+    - path: data/results/wumpus_world/vbp-channel.json
+      hash: md5
+      md5: 375d2a3cf1620add1f7fefedbdabdc8e
+      size: 547
+  wumpus_world@precise-info-seeking:
+    cmd: uv run python run_wumpus_world.py --planning-method 
+      precise-info-seeking --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 
+      0.1 --pos-noise 0.4 --slip-prob 0.5 --episodes 200 --max-steps 10 
+      --planning-horizon 7 --planning-iterations 400 --damping 0.6 --scan-cost 
+      0.7 --pit-penalty 1.0 --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0
+      --output data/results/wumpus_world/precise-info-seeking.json
+    deps:
+    - path: agents/wumpus_agent.py
+      hash: md5
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
+    - path: environments/wumpus_world.py
+      hash: md5
+      md5: e6190094a1f6ecf9c6bb03d104e6540f
+      size: 18138
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_wumpus_world.py
+      hash: md5
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
+    params:
+      params.yaml:
+        wumpus_world:
+          grid_size: 5
+          n_configs: 25
+          n_pits: 4
+          obs_noise: 0.1
+          pos_noise: 0.4
+          slip_prob: 0.5
+          episodes: 200
+          max_steps: 10
+          planning_horizon: 7
+          scan_cost: 0.7
+          pit_penalty: 1.0
+          wumpus_penalty: 1.0
+          goal_temperature: 1.0
+          seed: 0
+        wumpus_world_methods.precise-info-seeking:
+          planning_iterations: 400
+          damping: 0.6
+    outs:
+    - path: data/results/wumpus_world/precise-info-seeking.json
+      hash: md5
+      md5: c35a2e5f4d9a47822959d85af9be216f
+      size: 558
+  wumpus_world@active-inference:
+    cmd: uv run python run_wumpus_world.py --planning-method active-inference 
+      --grid-size 5 --n-configs 25 --n-pits 4 --obs-noise 0.1 --pos-noise 0.4 
+      --slip-prob 0.5 --episodes 200 --max-steps 10 --planning-horizon 7 
+      --planning-iterations 400 --damping 0.6 --scan-cost 0.7 --pit-penalty 1.0 
+      --wumpus-penalty 1.0 --goal-temperature 1.0 --seed 0 --output 
+      data/results/wumpus_world/active-inference.json
+    deps:
+    - path: agents/wumpus_agent.py
+      hash: md5
+      md5: d4aec8b98ba68cd2c58b2328adb53313
+      size: 15693
+    - path: environments/wumpus_world.py
+      hash: md5
+      md5: e6190094a1f6ecf9c6bb03d104e6540f
+      size: 18138
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_wumpus_world.py
+      hash: md5
+      md5: 64952f903deeab408cc4134f1e17937b
+      size: 8947
+    params:
+      params.yaml:
+        wumpus_world:
+          grid_size: 5
+          n_configs: 25
+          n_pits: 4
+          obs_noise: 0.1
+          pos_noise: 0.4
+          slip_prob: 0.5
+          episodes: 200
+          max_steps: 10
+          planning_horizon: 7
+          scan_cost: 0.7
+          pit_penalty: 1.0
+          wumpus_penalty: 1.0
+          goal_temperature: 1.0
+          seed: 0
+        wumpus_world_methods.active-inference:
+          planning_iterations: 400
+          damping: 0.6
+    outs:
+    - path: data/results/wumpus_world/active-inference.json
+      hash: md5
+      md5: 5ae6e557b848e716f9f3d44e1dd1c2fc
+      size: 554
+  rocksample@vbp-channel:
+    cmd: uv run python run_rocksample.py --planning-method vbp-channel 
+      --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
+      0.0 --episodes 200 --max-steps 15 --planning-horizon 15 
+      --planning-iterations 200 --damping 0.6 --good-reward 2.0 --bad-penalty 
+      3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
+      1.0 --terminal-goal-only --seed 0 --receding-horizon --output 
+      data/results/rocksample/vbp-channel.json
+    deps:
+    - path: agents/rocksample_agent.py
+      hash: md5
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
+    - path: environments/rocksample.py
+      hash: md5
+      md5: cea8cfd698200d6f3c178452839c4c91
+      size: 21431
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_rocksample.py
+      hash: md5
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
+    params:
+      params.yaml:
+        rocksample:
+          grid_size: 5
+          n_rocks: 2
+          half_eff_dist: 2.0
+          pos_noise: 0.3
+          slip_prob: 0.0
+          episodes: 200
+          max_steps: 15
+          planning_horizon: 15
+          good_reward: 2.0
+          bad_penalty: 3.0
+          exit_reward: 1.0
+          goal_temperature: 0.5
+          scan_cost: 0.5
+          sample_cost: 1.0
+          terminal_goal_only: true
+          seed: 0
+        rocksample_methods.vbp-channel:
+          planning_iterations: 200
+          damping: 0.6
+    outs:
+    - path: data/results/rocksample/vbp-channel.json
+      hash: md5
+      md5: 4fe600158dc6e83c4b93144ec8c5cc6f
+      size: 856
+  rocksample@precise-info-seeking:
+    cmd: uv run python run_rocksample.py --planning-method precise-info-seeking 
+      --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
+      0.0 --episodes 200 --max-steps 15 --planning-horizon 15 
+      --planning-iterations 200 --damping 0.6 --good-reward 2.0 --bad-penalty 
+      3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
+      1.0 --terminal-goal-only --seed 0 --receding-horizon --output 
+      data/results/rocksample/precise-info-seeking.json
+    deps:
+    - path: agents/rocksample_agent.py
+      hash: md5
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
+    - path: environments/rocksample.py
+      hash: md5
+      md5: cea8cfd698200d6f3c178452839c4c91
+      size: 21431
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_rocksample.py
+      hash: md5
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
+    params:
+      params.yaml:
+        rocksample:
+          grid_size: 5
+          n_rocks: 2
+          half_eff_dist: 2.0
+          pos_noise: 0.3
+          slip_prob: 0.0
+          episodes: 200
+          max_steps: 15
+          planning_horizon: 15
+          good_reward: 2.0
+          bad_penalty: 3.0
+          exit_reward: 1.0
+          goal_temperature: 0.5
+          scan_cost: 0.5
+          sample_cost: 1.0
+          terminal_goal_only: true
+          seed: 0
+        rocksample_methods.precise-info-seeking:
+          planning_iterations: 200
+          damping: 0.6
+    outs:
+    - path: data/results/rocksample/precise-info-seeking.json
+      hash: md5
+      md5: b1f55deae55714cc7bcd88e734326ab4
+      size: 852
+  rocksample@active-inference:
+    cmd: uv run python run_rocksample.py --planning-method active-inference 
+      --grid-size 5 --n-rocks 2 --half-eff-dist 2.0 --pos-noise 0.3 --slip-prob 
+      0.0 --episodes 200 --max-steps 15 --planning-horizon 15 
+      --planning-iterations 200 --damping 0.6 --good-reward 2.0 --bad-penalty 
+      3.0 --exit-reward 1.0 --goal-temperature 0.5 --scan-cost 0.5 --sample-cost
+      1.0 --terminal-goal-only --seed 0 --receding-horizon --output 
+      data/results/rocksample/active-inference.json
+    deps:
+    - path: agents/rocksample_agent.py
+      hash: md5
+      md5: 2553186aa46c8be32d05145baffe1a42
+      size: 18134
+    - path: environments/rocksample.py
+      hash: md5
+      md5: cea8cfd698200d6f3c178452839c4c91
+      size: 21431
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_rocksample.py
+      hash: md5
+      md5: 287ee9f323f4f4fad336f29a1c00f312
+      size: 11944
+    params:
+      params.yaml:
+        rocksample:
+          grid_size: 5
+          n_rocks: 2
+          half_eff_dist: 2.0
+          pos_noise: 0.3
+          slip_prob: 0.0
+          episodes: 200
+          max_steps: 15
+          planning_horizon: 15
+          good_reward: 2.0
+          bad_penalty: 3.0
+          exit_reward: 1.0
+          goal_temperature: 0.5
+          scan_cost: 0.5
+          sample_cost: 1.0
+          terminal_goal_only: true
+          seed: 0
+        rocksample_methods.active-inference:
+          planning_iterations: 200
+          damping: 0.6
+    outs:
+    - path: data/results/rocksample/active-inference.json
+      hash: md5
+      md5: 5c36c89a5a8842dec2e9aaab225ef5ae
+      size: 848
+  minigrid@loopy-vbp:
+    cmd: uv run python run_minigrid.py --planning-method loopy-vbp --grid-size 4
+      --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 1.0 --seed 0 --receding-horizon --output 
+      data/results/minigrid/loopy-vbp.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 4
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 1
+          max_steps: 25
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.loopy-vbp:
+          planning_iterations: 200
+          damping: 1.0
+    outs:
+    - path: data/results/minigrid/loopy-vbp.json
+      hash: md5
+      md5: 458f1fc099ac0496fe1b77ef5024625e
+      size: 547
+  minigrid@loopy:
+    cmd: uv run python run_minigrid.py --planning-method loopy --grid-size 4 
+      --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 1.0 --seed 0 --receding-horizon --output 
+      data/results/minigrid/loopy.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 4
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 1
+          max_steps: 25
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.loopy:
+          planning_iterations: 200
+          damping: 1.0
+    outs:
+    - path: data/results/minigrid/loopy.json
+      hash: md5
+      md5: b56c882a73e45c3236f1ad02a7490502
+      size: 541
+  minigrid@region-extended:
+    cmd: uv run python run_minigrid.py --planning-method region-extended 
+      --grid-size 4 --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 0.25 --seed 0 --receding-horizon --output 
+      data/results/minigrid/region-extended.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 4
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 1
+          max_steps: 25
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.region-extended:
+          planning_iterations: 200
+          damping: 0.25
+    outs:
+    - path: data/results/minigrid/region-extended.json
+      hash: md5
+      md5: d76d7beb2c22e71e1cb1fc5317afdc35
+      size: 552
+  minigrid@dyn-channel:
+    cmd: uv run python run_minigrid.py --planning-method dyn-channel --grid-size
+      4 --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 0.25 --seed 0 --receding-horizon --output 
+      data/results/minigrid/dyn-channel.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 4
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 1
+          max_steps: 25
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.dyn-channel:
+          planning_iterations: 200
+          damping: 0.25
+    outs:
+    - path: data/results/minigrid/dyn-channel.json
+      hash: md5
+      md5: 346160b5b8afca4486ffcbd01eb4b849
+      size: 546
+  minigrid@nuijten:
+    cmd: uv run python run_minigrid.py --planning-method nuijten --grid-size 4 
+      --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 1.0 --seed 0 --receding-horizon --output 
+      data/results/minigrid/nuijten.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 4
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 1
+          max_steps: 25
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.nuijten:
+          planning_iterations: 200
+          damping: 1.0
+    outs:
+    - path: data/results/minigrid/nuijten.json
+      hash: md5
+      md5: 258b856a9b52b83638648e2950884481
+      size: 543
+  minigrid@vbp-channel:
+    cmd: uv run python run_minigrid.py --planning-method vbp-channel --grid-size
+      3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 0.75 --seed 0 --receding-horizon --output 
+      data/results/minigrid/vbp-channel.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 3
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 30
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.vbp-channel:
+          planning_iterations: 200
+          damping: 0.75
+    outs:
+    - path: data/results/minigrid/vbp-channel.json
+      hash: md5
+      md5: 228a07b87c6600adb507444310f8dd59
+      size: 551
+  minigrid@precise-info-seeking:
+    cmd: uv run python run_minigrid.py --planning-method precise-info-seeking 
+      --grid-size 3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 0.4 --seed 0 --receding-horizon --output 
+      data/results/minigrid/precise-info-seeking.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 3
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 30
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.precise-info-seeking:
+          planning_iterations: 200
+          damping: 0.4
+    outs:
+    - path: data/results/minigrid/precise-info-seeking.json
+      hash: md5
+      md5: 12b1d18b337474d664f02ac9c1b827c3
+      size: 559
+  minigrid@active-inference:
+    cmd: uv run python run_minigrid.py --planning-method active-inference 
+      --grid-size 3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
+      --damping 0.4 --seed 0 --receding-horizon --output 
+      data/results/minigrid/active-inference.json --record first,last
+    deps:
+    - path: agents/flat_tensor_agent.py
+      hash: md5
+      md5: 6f89fa9d1653c6dfa66ba71ffe71553d
+      size: 45895
+    - path: environments/gym_wrapper.py
+      hash: md5
+      md5: 60ba8dcfc82ead16e0b54747611c229b
+      size: 12176
+    - path: environments/minigrid.py
+      hash: md5
+      md5: 70fb865d8b1698cd867925d17a7ba9fc
+      size: 16740
+    - path: inference/
+      hash: md5
+      md5: 473a59e85317ea4cd77672c24745bd67.dir
+      size: 195885
+      nfiles: 12
+    - path: run_minigrid.py
+      hash: md5
+      md5: 0d30d6a201491d361bef4d5b8c599196
+      size: 13772
+    params:
+      params.yaml:
+        minigrid:
+          grid_size: 3
+          fov_size: 3
+          obs_alpha: 0.0
+          episodes: 30
+          max_steps: 15
+          planning_horizon: 15
+          inference_iterations: 10
+          seed: 0
+        minigrid_methods.active-inference:
+          planning_iterations: 200
+          damping: 0.4
+    outs:
+    - path: data/results/minigrid/active-inference.json
+      hash: md5
+      md5: 735d68807b5f7157ecd023eaf5376e79
+      size: 569

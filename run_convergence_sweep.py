@@ -360,7 +360,7 @@ def setup_minigrid(args, seed):
 # =============================================================================
 
 
-def call_convergence(method, setup, horizon, n_iterations, damping=1.0, momentum=0.0):
+def call_convergence(method, setup, horizon, n_iterations, damping=1.0):
     """Dispatch to the correct convergence function.
 
     Returns (action_dist, vfe_trace).
@@ -384,7 +384,6 @@ def call_convergence(method, setup, horizon, n_iterations, damping=1.0, momentum
 
     if method in METHODS_WITH_DAMPING:
         kwargs["damping"] = damping
-        kwargs["momentum"] = momentum
 
     result = func(**kwargs)
     # All return (action_dist, ..., vfe_trace)
@@ -422,7 +421,6 @@ def save_result_json(output_dir, env_name, method, damping, seed, args,
             "environment": env_name,
             "method": method,
             "damping": damping,
-            "momentum": args.momentum,
             "seed": seed,
             "horizon": args.planning_horizon,
             "n_iterations": args.n_iterations,
@@ -526,9 +524,6 @@ def main():
                         choices=ALL_METHODS)
     parser.add_argument("--damping", type=float, nargs="+",
                         default=sweep_cfg.get("damping", [0.1, 0.25, 0.5, 0.75, 1.0]))
-    parser.add_argument("--momentum", type=float,
-                        default=sweep_cfg.get("momentum", 0.0),
-                        help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--seeds", type=int, nargs="+",
                         default=sweep_cfg.get("seeds", list(range(10))))
     parser.add_argument("--n-iterations", type=int,
@@ -598,8 +593,6 @@ def main():
     print(f"Environment: {env}")
     print(f"Methods: {args.methods}")
     print(f"Damping values: {args.damping}")
-    if args.momentum > 0:
-        print(f"Momentum: {args.momentum}")
     print(f"Seeds: {args.seeds}")
     print(f"Iterations: {args.n_iterations}  Horizon: {args.planning_horizon}")
     print(f"Output: {output_dir / env}")
@@ -633,7 +626,6 @@ def main():
                 action_dist, vfe_trace = call_convergence(
                     method, setup,
                     args.planning_horizon, args.n_iterations, damping,
-                    momentum=args.momentum,
                 )
                 action_dist.block_until_ready()
                 elapsed = time.time() - t0

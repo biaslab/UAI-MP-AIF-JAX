@@ -528,7 +528,6 @@ def region_extended_convergence(
     n_iterations,
     damping=1.0,
     action_prior=None,
-    momentum=0.0,
 ):
     """Region-extended loopy BP planning with per-iteration VFE trace.
 
@@ -592,7 +591,6 @@ def region_extended_convergence(
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
              log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
-             log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -649,14 +647,11 @@ def region_extended_convergence(
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_region_extended_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -668,7 +663,6 @@ def region_extended_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
                     q_u, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -677,17 +671,14 @@ def region_extended_convergence(
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
              q_u_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, _, q_u, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, vfe_trace = result
+        _, _, _, q_u, log_dyn_channels, log_obs_channels, _, _, _, vfe_trace = result
     else:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels,
              log_obs_channels, log_marginal_obs_channels,
-             log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -735,14 +726,11 @@ def region_extended_convergence(
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_region_extended_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -754,7 +742,6 @@ def region_extended_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
                     new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -763,12 +750,10 @@ def region_extended_convergence(
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
              log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, q_u, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, vfe_trace = result
+        _, _, q_u, log_dyn_channels, log_obs_channels, _, _, _, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
@@ -971,7 +956,6 @@ def dyn_channel_convergence(
     n_iterations,
     damping=1.0,
     action_prior=None,
-    momentum=0.0,
 ):
     """Dyn-channel loopy BP planning with per-iteration VFE trace.
 
@@ -1025,7 +1009,7 @@ def dyn_channel_convergence(
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_dyn_channels, log_dyn_ch_prev, vfe_trace) = carry
+             log_dyn_channels, vfe_trace) = carry
 
             # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
@@ -1078,8 +1062,7 @@ def dyn_channel_convergence(
             )
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
 
             vfe = compute_dyn_channel_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1089,18 +1072,18 @@ def dyn_channel_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_dyn_channels, log_dyn_channels, vfe_trace)
+                    q_u, new_log_dyn_channels, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_dyn_channels_init, log_dyn_channels_init, vfe_trace)
+             q_u_init, log_dyn_channels_init, vfe_trace)
         )
-        _, _, _, q_u, log_dyn_channels, _, vfe_trace = result
+        _, _, _, q_u, log_dyn_channels, vfe_trace = result
     else:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, _, log_dyn_channels,
-             log_dyn_ch_prev, vfe_trace) = carry
+             vfe_trace) = carry
 
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
@@ -1134,8 +1117,7 @@ def dyn_channel_convergence(
 
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
 
             vfe = compute_dyn_channel_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1145,14 +1127,14 @@ def dyn_channel_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_dyn_channels, log_dyn_channels, vfe_trace)
+                    new_log_dyn_channels, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_dyn_channels_init, log_dyn_channels_init, vfe_trace)
+             log_dyn_channels_init, vfe_trace)
         )
-        _, _, q_u, log_dyn_channels, _, vfe_trace = result
+        _, _, q_u, log_dyn_channels, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
@@ -1175,7 +1157,6 @@ def vbp_channel_convergence(
     n_iterations,
     damping=1.0,
     action_prior=None,
-    momentum=0.0,
 ):
     """VBP channel planning with per-iteration VFE trace.
 
@@ -1226,7 +1207,7 @@ def vbp_channel_convergence(
     if has_pref:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
-             log_r_ux, log_r_ux_prev, vfe_trace) = carry
+             log_r_ux, vfe_trace) = carry
 
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
@@ -1266,8 +1247,7 @@ def vbp_channel_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             vfe = compute_vbp_channel_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1277,17 +1257,17 @@ def vbp_channel_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
-                    q_u, new_log_r_ux, log_r_ux, vfe_trace)
+                    q_u, new_log_r_ux, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
-             q_u_init, log_r_ux_init, log_r_ux_init, vfe_trace)
+             q_u_init, log_r_ux_init, vfe_trace)
         )
-        _, _, _, q_u, log_r_ux, _, vfe_trace = result
+        _, _, _, q_u, log_r_ux, vfe_trace = result
     else:
         def body_fn(i, carry):
-            log_dyn_to_theta, log_obs_to_theta, _, log_r_ux, log_r_ux_prev, vfe_trace = carry
+            log_dyn_to_theta, log_obs_to_theta, _, log_r_ux, vfe_trace = carry
 
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
@@ -1321,8 +1301,7 @@ def vbp_channel_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             vfe = compute_vbp_channel_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1332,14 +1311,14 @@ def vbp_channel_convergence(
             vfe_trace = vfe_trace.at[i].set(vfe)
 
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
-                    new_log_r_ux, log_r_ux, vfe_trace)
+                    new_log_r_ux, vfe_trace)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
-             log_r_ux_init, log_r_ux_init, vfe_trace)
+             log_r_ux_init, vfe_trace)
         )
-        _, _, q_u, log_r_ux, _, vfe_trace = result
+        _, _, q_u, log_r_ux, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
@@ -1362,7 +1341,6 @@ def precise_info_seeking_convergence(
     n_iterations,
     damping=1.0,
     action_prior=None,
-    momentum=0.0,
 ):
     """Precise info-seeking planning with per-iteration VFE trace.
 
@@ -1425,7 +1403,6 @@ def precise_info_seeking_convergence(
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
              log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -1479,18 +1456,15 @@ def precise_info_seeking_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Obs channels (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_precise_info_seeking_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1502,7 +1476,6 @@ def precise_info_seeking_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
                     q_u, new_log_r_ux, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -1511,17 +1484,14 @@ def precise_info_seeking_convergence(
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
              q_u_init, log_r_ux_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, _, q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _, vfe_trace = result
+        _, _, _, q_u, log_r_ux, log_obs_channels, _, _, _, vfe_trace = result
     else:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, _,
              log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -1568,18 +1538,15 @@ def precise_info_seeking_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Obs channels (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_precise_info_seeking_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1591,7 +1558,6 @@ def precise_info_seeking_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
                     new_log_r_ux, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -1600,12 +1566,10 @@ def precise_info_seeking_convergence(
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
              log_r_ux_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _, vfe_trace = result
+        _, _, q_u, log_r_ux, log_obs_channels, _, _, _, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)
@@ -1642,7 +1606,6 @@ def active_inference_convergence(
     n_iterations,
     damping=1.0,
     action_prior=None,
-    momentum=0.0,
 ):
     """Active Inference planning with per-iteration VFE trace.
 
@@ -1711,7 +1674,6 @@ def active_inference_convergence(
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta, _,
              log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -1765,24 +1727,20 @@ def active_inference_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Dyn channels (region-extended style)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
 
             # Obs channels (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_active_inference_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1794,7 +1752,6 @@ def active_inference_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, new_log_pref_to_theta,
                     q_u, new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -1803,17 +1760,14 @@ def active_inference_convergence(
             (log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta_init,
              q_u_init, log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _, vfe_trace = result
+        _, _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, vfe_trace = result
     else:
         def body_fn(i, carry):
             (log_dyn_to_theta, log_obs_to_theta, _,
              log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_dyn_ch_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev,
              vfe_trace) = carry
 
@@ -1860,24 +1814,20 @@ def active_inference_convergence(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Dyn channels (region-extended style)
             raw_log_dyn_channels = compute_dyn_channels(log_dyn_regions)
             new_log_dyn_channels = damp_log_channel(
-                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2,
-                log_prev=log_dyn_ch_prev, momentum=momentum)
+                log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
 
             # Obs channels (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             vfe = compute_active_inference_vfe(
                 log_T, log_reduced_per_t, log_fwd_msgs, log_bwd_msgs, q_u,
@@ -1889,7 +1839,6 @@ def active_inference_convergence(
             return (new_log_dyn_to_theta, new_log_obs_to_theta, q_u,
                     new_log_r_ux, new_log_dyn_channels, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_dyn_channels, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs,
                     vfe_trace)
 
@@ -1898,12 +1847,10 @@ def active_inference_convergence(
             (log_dyn_to_theta, log_obs_to_theta, q_u_init,
              log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_dyn_channels_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init,
              vfe_trace)
         )
-        _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, _, _, _, _, vfe_trace = result
+        _, _, q_u, _, log_dyn_channels, log_obs_channels, _, _, _, vfe_trace = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

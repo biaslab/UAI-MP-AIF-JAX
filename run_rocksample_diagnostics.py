@@ -434,7 +434,6 @@ def main():
                                  "dyn-channel", "nuijten", "vbp-channel",
                                  "precise-info-seeking", "active-inference"])
     parser.add_argument("--damping", type=float, default=1.0)
-    parser.add_argument("--momentum", type=float, default=0.0, help="Inertial momentum coefficient (0.0 = no momentum)")
     parser.add_argument("--good-reward", type=float, default=10.0)
     parser.add_argument("--bad-penalty", type=float, default=10.0)
     parser.add_argument("--exit-reward", type=float, default=10.0)
@@ -474,8 +473,6 @@ def main():
     print(f"  Iterations: {args.planning_iterations}")
     if args.damping < 1.0:
         print(f"  Damping: {args.damping}")
-    if args.momentum > 0:
-        print(f"  Momentum: {args.momentum}")
     if args.terminal_goal_only:
         print(f"  Terminal goal only: enabled")
     print(f"  Seed: {args.seed}")
@@ -537,7 +534,6 @@ def main():
         planning_iterations=args.planning_iterations,
         action_prior=action_prior,
         damping=args.damping,
-        momentum=args.momentum,
         terminal_goal_only=args.terminal_goal_only,
     )
 

@@ -48,7 +48,6 @@ def precise_info_seeking_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
-    momentum=0.0,         # float - inertial (heavy-ball) momentum coefficient
 ) -> tuple:
     """
     Plan actions via precise info-seeking: VBP action channels + obs channels.
@@ -101,7 +100,6 @@ def precise_info_seeking_planning(
     if has_pref:
         def body_fn(i, carry):
             (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
             # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
@@ -147,38 +145,31 @@ def precise_info_seeking_planning(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Step 9: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (q_u, new_log_r_ux, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (q_u_init, log_r_ux_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, log_r_ux, log_obs_channels, _, _, _ = result
     else:
         def body_fn(i, carry):
             (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
-             log_r_ux_prev, log_obs_ch_prev, log_marg_obs_ch_prev,
              log_fwd_prev, log_bwd_prev) = carry
 
             # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
@@ -222,34 +213,28 @@ def precise_info_seeking_planning(
             log_pair = compute_pair_marginal(log_dyn_regions)
             raw_log_r_ux = compute_action_channel(log_pair)
             new_log_r_ux = damp_log_channel(
-                log_r_ux, raw_log_r_ux, damping, cond_axis=2,
-                log_prev=log_r_ux_prev, momentum=momentum)
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
 
             # Step 9: Obs channels from obs region beliefs (region-extended style)
             raw_log_obs_channels = compute_obs_channels(log_obs_regions)
             raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
 
             new_log_obs_channels = damp_log_channel(
-                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2,
-                log_prev=log_obs_ch_prev, momentum=momentum)
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
             new_log_marginal_obs_channels = damp_log_channel(
-                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2,
-                log_prev=log_marg_obs_ch_prev, momentum=momentum)
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
 
             return (q_u, new_log_r_ux, new_log_obs_channels,
                     new_log_marginal_obs_channels,
-                    log_r_ux, log_obs_channels, log_marginal_obs_channels,
                     log_fwd_msgs, log_bwd_msgs)
 
         result = lax.fori_loop(
             0, n_iterations, body_fn,
             (q_u_init, log_r_ux_init, log_obs_channels_init,
              log_marginal_obs_channels_init,
-             log_r_ux_init, log_obs_channels_init,
-             log_marginal_obs_channels_init,
              log_fwd_prev_init, log_bwd_prev_init)
         )
-        q_u, log_r_ux, log_obs_channels, _, _, _, _, _, _ = result
+        q_u, log_r_ux, log_obs_channels, _, _, _ = result
 
     action_dist = q_u[0]
     action_dist = action_dist / (action_dist.sum() + 1e-10)

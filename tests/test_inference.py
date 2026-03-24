@@ -1570,7 +1570,7 @@ class TestActiveInference:
 
 
 class TestGeometricDamping:
-    """Tests for geometric damping and momentum in damp_log_channel."""
+    """Tests for geometric damping in damp_log_channel."""
 
     def test_geometric_damping_is_geometric_mean(self):
         """Geometric damping with α=0.5 should give geometric mean in prob space."""
@@ -1622,47 +1622,6 @@ class TestGeometricDamping:
 
         assert np.allclose(result, expected, atol=1e-5)
 
-    def test_momentum_zero_matches_pure_geometric(self):
-        """momentum=0.0 with log_prev should give same result as without log_prev."""
-        import jax.numpy as jnp
-        from inference.region_extended_loopy_bp import damp_log_channel
-
-        log_old = jnp.log(jnp.array([[0.7, 0.2], [0.2, 0.6], [0.1, 0.2]]))
-        log_new = jnp.log(jnp.array([[0.1, 0.5], [0.3, 0.3], [0.6, 0.2]]))
-        log_prev = jnp.log(jnp.array([[0.4, 0.3], [0.3, 0.4], [0.3, 0.3]]))
-
-        result_no_prev = damp_log_channel(log_old, log_new, damping=0.5, cond_axis=0)
-        result_with_prev = damp_log_channel(
-            log_old, log_new, damping=0.5, cond_axis=0,
-            log_prev=log_prev, momentum=0.0)
-
-        assert np.allclose(result_no_prev, result_with_prev, atol=1e-5)
-
-    def test_momentum_formula(self):
-        """Verify heavy-ball formula: (1-α+β)*old + α*new - β*prev."""
-        import jax.numpy as jnp
-        from inference.region_extended_loopy_bp import damp_log_channel
-        from inference.messages import LOG_ZERO
-        from jax.scipy.special import logsumexp
-
-        log_old = jnp.log(jnp.array([[0.7, 0.2], [0.2, 0.6], [0.1, 0.2]]))
-        log_new = jnp.log(jnp.array([[0.1, 0.5], [0.3, 0.3], [0.6, 0.2]]))
-        log_prev = jnp.log(jnp.array([[0.4, 0.3], [0.3, 0.4], [0.3, 0.3]]))
-
-        alpha, beta = 0.5, 0.1
-        result = damp_log_channel(
-            log_old, log_new, damping=alpha, cond_axis=0,
-            log_prev=log_prev, momentum=beta)
-
-        # Manual formula
-        damped = (1.0 - alpha + beta) * log_old + alpha * log_new - beta * log_prev
-        valid = (log_old > LOG_ZERO / 2) | (log_new > LOG_ZERO / 2)
-        damped = jnp.where(valid, damped, LOG_ZERO)
-        normalizer = logsumexp(damped, axis=0, keepdims=True)
-        expected = jnp.where(valid, damped - normalizer, LOG_ZERO)
-
-        assert np.allclose(result, expected, atol=1e-5)
-
     def test_normalized_output(self):
         """Damped channels should be properly normalized conditionals."""
         import jax.numpy as jnp
@@ -1671,42 +1630,15 @@ class TestGeometricDamping:
 
         log_old = jnp.log(jnp.array([[0.7, 0.2], [0.2, 0.6], [0.1, 0.2]]))
         log_new = jnp.log(jnp.array([[0.1, 0.5], [0.3, 0.3], [0.6, 0.2]]))
-        log_prev = jnp.log(jnp.array([[0.4, 0.3], [0.3, 0.4], [0.3, 0.3]]))
 
         for alpha in [0.25, 0.5, 0.75, 1.0]:
-            for beta in [0.0, 0.1, 0.2]:
-                result = damp_log_channel(
-                    log_old, log_new, damping=alpha, cond_axis=0,
-                    log_prev=log_prev, momentum=beta)
-                log_sums = logsumexp(result, axis=0)
-                assert np.allclose(log_sums, 0.0, atol=1e-4), (
-                    f"Not normalized for α={alpha}, β={beta}: "
-                    f"logsumexp = {np.array(log_sums)}"
-                )
+            result = damp_log_channel(
+                log_old, log_new, damping=alpha, cond_axis=0)
+            log_sums = logsumexp(result, axis=0)
+            assert np.allclose(log_sums, 0.0, atol=1e-4), (
+                f"Not normalized for α={alpha}: "
+                f"logsumexp = {np.array(log_sums)}"
+            )
 
-    def test_region_extended_with_momentum(self):
-        """Region-extended planning runs with non-zero momentum."""
-        import jax.numpy as jnp
-        from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
 
-        rng = np.random.RandomState(42)
-        n_states, n_static, n_actions = 4, 2, 3
-        n_fov, n_obs_types = 2, 3
-
-        T = rng.dirichlet(np.ones(n_states), size=(n_states, n_static, n_actions))
-        T = jnp.array(T.transpose(3, 0, 1, 2), dtype=jnp.float32)
-        B = rng.dirichlet(np.ones(n_obs_types), size=(n_fov, n_states, n_static))
-        B = jnp.array(B.transpose(0, 3, 1, 2), dtype=jnp.float32)
-        q0 = jnp.array(rng.dirichlet(np.ones(n_states)), dtype=jnp.float32)
-        q_static = jnp.array(rng.dirichlet(np.ones(n_static)), dtype=jnp.float32)
-        goal = jnp.zeros(n_states, dtype=jnp.float32).at[0].set(1.0)
-
-        action_dist, _, _ = region_extended_loopy_bp_planning(
-            q0, q_static, T, B, goal,
-            horizon=3, n_iterations=5,
-            damping=0.5, momentum=0.1,
-        )
-        assert action_dist.shape == (n_actions,)
-        assert np.isclose(float(action_dist.sum()), 1.0, atol=1e-4)
-        assert np.all(np.array(action_dist) >= 0)
 
