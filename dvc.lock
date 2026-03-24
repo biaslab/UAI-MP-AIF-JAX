@@ -18,8 +18,8 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
@@ -48,8 +48,8 @@ stages:
     outs:
     - path: data/results/frozen_lake/loopy-vbp.json
       hash: md5
-      md5: a3d12f50b2a8c4e54e42e35ab37fc0f3
-      size: 611
+      md5: ec31c9a2ebaefc1cbb60e2df80aca1ab
+      size: 612
   frozen_lake@loopy:
     cmd: uv run python run_frozen_lake.py --planning-method loopy --grid-size 4 
       --n-configs 15 --hole-fraction 0.2 --min-hamming 4 --base-noise 0.4 
@@ -68,8 +68,8 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_frozen_lake.py
       hash: md5
@@ -98,7 +98,7 @@ stages:
     outs:
     - path: data/results/frozen_lake/loopy.json
       hash: md5
-      md5: 23decee528cae9d0e2e0efa47a120cd7
+      md5: 7f06f47195ebe63d2ec29ec127cb963f
       size: 607
   frozen_lake@region-extended:
     cmd: uv run python run_frozen_lake.py --planning-method region-extended 
@@ -874,8 +874,8 @@ stages:
       size: 19656
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
@@ -886,7 +886,6 @@ stages:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.1
           - 0.25
           - 0.4
           - 0.5
@@ -956,8 +955,8 @@ stages:
     outs:
     - path: data/convergence_sweep/frozen-lake/summary.csv
       hash: md5
-      md5: 8e332f0b6b7545b691f0a9944fa7e2d2
-      size: 12935
+      md5: a08b2964c50389fc3b1560e4441ec09c
+      size: 11308
   frozen_lake@vbp-channel:
     cmd: uv run python run_frozen_lake.py --planning-method vbp-channel 
       --grid-size 4 --n-configs 15 --hole-fraction 0.2 --min-hamming 4 
@@ -1021,8 +1020,8 @@ stages:
       size: 18138
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
@@ -1033,7 +1032,6 @@ stages:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.1
           - 0.25
           - 0.4
           - 0.5
@@ -1103,8 +1101,8 @@ stages:
     outs:
     - path: data/convergence_sweep/wumpus-world/summary.csv
       hash: md5
-      md5: 89f78891ceb51d9f2a25544b3b429016
-      size: 12907
+      md5: b5c974222013999f47c239973131c837
+      size: 11177
   convergence_sweep_rocksample:
     cmd: uv run python run_convergence_sweep.py --environment rocksample 
       --grid-size 5 --n-rocks 2 --planning-horizon 15 --half-eff-dist 2.0 
@@ -1119,8 +1117,8 @@ stages:
       size: 21431
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
@@ -1131,7 +1129,6 @@ stages:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.1
           - 0.25
           - 0.4
           - 0.5
@@ -1201,8 +1198,8 @@ stages:
     outs:
     - path: data/convergence_sweep/rocksample/summary.csv
       hash: md5
-      md5: c0247490fb59db82811b7903ad91277a
-      size: 12508
+      md5: 2f7b01d12e87590fffaa7336a2e9a355
+      size: 10909
   convergence_sweep_minigrid:
     cmd: uv run python run_convergence_sweep.py --environment minigrid 
       --grid-size 3 --planning-horizon 15 --fov-size 3 --obs-alpha 0.0 
@@ -1214,8 +1211,8 @@ stages:
       size: 16740
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 977e77c42fc6d3dfa262c839ae2c6e96.dir
+      size: 190944
       nfiles: 12
     - path: run_convergence_sweep.py
       hash: md5
@@ -1226,7 +1223,6 @@ stages:
         convergence_sweep:
           n_iterations: 1000
           damping:
-          - 0.1
           - 0.25
           - 0.4
           - 0.5
@@ -1296,8 +1292,8 @@ stages:
     outs:
     - path: data/convergence_sweep/minigrid/summary.csv
       hash: md5
-      md5: c20539002d65a2dd5fdb002b5d1d6339
-      size: 12694
+      md5: 1b736508530b64e40acc9f03e572e723
+      size: 11037
   convergence_sweep_plots:
     cmd: uv run python plot_convergence_sweep.py --environment all --input-dir 
       data/convergence_sweep --output-dir data/convergence_sweep/plots --format 
@@ -1305,20 +1301,20 @@ stages:
     deps:
     - path: data/convergence_sweep/frozen-lake/summary.csv
       hash: md5
-      md5: 8e332f0b6b7545b691f0a9944fa7e2d2
-      size: 12935
+      md5: a08b2964c50389fc3b1560e4441ec09c
+      size: 11308
     - path: data/convergence_sweep/minigrid/summary.csv
       hash: md5
-      md5: c20539002d65a2dd5fdb002b5d1d6339
-      size: 12694
+      md5: 1b736508530b64e40acc9f03e572e723
+      size: 11037
     - path: data/convergence_sweep/rocksample/summary.csv
       hash: md5
-      md5: c0247490fb59db82811b7903ad91277a
-      size: 12508
+      md5: 2f7b01d12e87590fffaa7336a2e9a355
+      size: 10909
     - path: data/convergence_sweep/wumpus-world/summary.csv
       hash: md5
-      md5: 89f78891ceb51d9f2a25544b3b429016
-      size: 12907
+      md5: b5c974222013999f47c239973131c837
+      size: 11177
     - path: plot_convergence_sweep.py
       hash: md5
       md5: 3d2ca57070e2ce0c49a7904ddd1edfba
@@ -1326,8 +1322,8 @@ stages:
     outs:
     - path: data/convergence_sweep/plots/
       hash: md5
-      md5: ec947af94b11f1a3c3699df671f8f36d.dir
-      size: 9601649
+      md5: 340632ab66b5fe786190d3c00f6d93aa.dir
+      size: 6310926
       nfiles: 120
   frozen_lake@active-inference:
     cmd: uv run python run_frozen_lake.py --planning-method active-inference 
@@ -1925,7 +1921,7 @@ stages:
       size: 543
   minigrid@vbp-channel:
     cmd: uv run python run_minigrid.py --planning-method vbp-channel --grid-size
-      3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      4 --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
       --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
       --damping 0.75 --seed 0 --receding-horizon --output 
       data/results/minigrid/vbp-channel.json --record first,last
@@ -1954,11 +1950,11 @@ stages:
     params:
       params.yaml:
         minigrid:
-          grid_size: 3
+          grid_size: 4
           fov_size: 3
           obs_alpha: 0.0
-          episodes: 30
-          max_steps: 15
+          episodes: 1
+          max_steps: 25
           planning_horizon: 15
           inference_iterations: 10
           seed: 0
@@ -1968,11 +1964,11 @@ stages:
     outs:
     - path: data/results/minigrid/vbp-channel.json
       hash: md5
-      md5: 228a07b87c6600adb507444310f8dd59
-      size: 551
+      md5: 0eae2d1a509e6d6f2f50040e4e176557
+      size: 549
   minigrid@precise-info-seeking:
     cmd: uv run python run_minigrid.py --planning-method precise-info-seeking 
-      --grid-size 3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      --grid-size 4 --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
       --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
       --damping 0.4 --seed 0 --receding-horizon --output 
       data/results/minigrid/precise-info-seeking.json --record first,last
@@ -1991,8 +1987,8 @@ stages:
       size: 16740
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: 66507531afe06ad6c5960a3e97e212e3.dir
+      size: 195881
       nfiles: 12
     - path: run_minigrid.py
       hash: md5
@@ -2001,11 +1997,11 @@ stages:
     params:
       params.yaml:
         minigrid:
-          grid_size: 3
+          grid_size: 4
           fov_size: 3
           obs_alpha: 0.0
-          episodes: 30
-          max_steps: 15
+          episodes: 1
+          max_steps: 25
           planning_horizon: 15
           inference_iterations: 10
           seed: 0
@@ -2015,11 +2011,11 @@ stages:
     outs:
     - path: data/results/minigrid/precise-info-seeking.json
       hash: md5
-      md5: 12b1d18b337474d664f02ac9c1b827c3
-      size: 559
+      md5: 8cb192150b000f576a6e4497597655f2
+      size: 556
   minigrid@active-inference:
     cmd: uv run python run_minigrid.py --planning-method active-inference 
-      --grid-size 3 --fov-size 3 --obs-alpha 0.0 --episodes 30 --max-steps 15 
+      --grid-size 4 --fov-size 3 --obs-alpha 0.0 --episodes 1 --max-steps 25 
       --planning-horizon 15 --inference-iterations 10 --planning-iterations 200 
       --damping 0.4 --seed 0 --receding-horizon --output 
       data/results/minigrid/active-inference.json --record first,last
@@ -2038,8 +2034,8 @@ stages:
       size: 16740
     - path: inference/
       hash: md5
-      md5: 473a59e85317ea4cd77672c24745bd67.dir
-      size: 195885
+      md5: ae1abd893c9cb6439cda3ae5166aa4c0.dir
+      size: 194218
       nfiles: 12
     - path: run_minigrid.py
       hash: md5
@@ -2048,11 +2044,11 @@ stages:
     params:
       params.yaml:
         minigrid:
-          grid_size: 3
+          grid_size: 4
           fov_size: 3
           obs_alpha: 0.0
-          episodes: 30
-          max_steps: 15
+          episodes: 1
+          max_steps: 25
           planning_horizon: 15
           inference_iterations: 10
           seed: 0
@@ -2062,5 +2058,5 @@ stages:
     outs:
     - path: data/results/minigrid/active-inference.json
       hash: md5
-      md5: 735d68807b5f7157ecd023eaf5376e79
-      size: 569
+      md5: f239c383f2330bed6aecb609074f4714
+      size: 552

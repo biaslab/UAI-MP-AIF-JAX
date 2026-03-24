@@ -154,7 +154,7 @@ minigrid:
   grid_size: 4
   fov_size: 3
   obs_alpha: 0.0
-  episodes: 1
+  episodes: 100
   max_steps: 25
   planning_horizon: 15
   inference_iterations: 10
@@ -196,7 +196,7 @@ minigrid_methods:
 
 convergence_sweep:
   n_iterations: 1000
-  damping: [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0]
+  damping: [0.25, 0.4, 0.5, 0.6, 0.75, 1.0]
   seeds: [0,1,2,3,4]
   methods: [
     "loopy-vbp",
