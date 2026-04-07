@@ -27,9 +27,9 @@ frozen_lake_methods:
     planning_iterations: 400
     damping: 0.5
 
-  dyn-channel:
-    planning_iterations: 400
-    damping: 0.55
+  # dyn-channel:
+  #   planning_iterations: 400
+  #   damping: 0.55
 
   nuijten:
     planning_iterations: 400
@@ -39,9 +39,9 @@ frozen_lake_methods:
     planning_iterations: 400
     damping: 0.75
 
-  precise-info-seeking:
-    planning_iterations: 400
-    damping: 0.5
+  # precise-info-seeking:
+  #   planning_iterations: 400
+  #   damping: 0.5
 
   active-inference:
     planning_iterations: 400
@@ -52,9 +52,9 @@ wumpus_world:
   grid_size: 5
   n_configs: 25
   n_pits: 4
-  obs_noise: 0.1
+  obs_noise: 0.2
   pos_noise: 0.4
-  slip_prob: 0.5
+  slip_prob: 0.01
   episodes: 200
   max_steps: 10
   planning_horizon: 7
@@ -77,9 +77,9 @@ wumpus_world_methods:
     planning_iterations: 400
     damping: 0.6
 
-  dyn-channel:
-    planning_iterations: 400
-    damping: 0.6
+  # dyn-channel:
+  #   planning_iterations: 400
+  #   damping: 0.6
 
   nuijten:
     planning_iterations: 400
@@ -89,13 +89,13 @@ wumpus_world_methods:
     planning_iterations: 400
     damping: 0.6
 
-  precise-info-seeking:
-    planning_iterations: 400
-    damping: 0.6
+  # precise-info-seeking:
+  #   planning_iterations: 400
+  #   damping: 0.6
 
   active-inference:
     planning_iterations: 400
-    damping: 0.6
+    damping: 0.4
 
 
 rocksample:
@@ -129,9 +129,9 @@ rocksample_methods:
     planning_iterations: 200
     damping: 0.6
 
-  dyn-channel:
-    planning_iterations: 200
-    damping: 0.6
+  # dyn-channel:
+  #   planning_iterations: 200
+  #   damping: 0.6
 
   nuijten:
     planning_iterations: 200
@@ -141,9 +141,9 @@ rocksample_methods:
     planning_iterations: 200
     damping: 0.6
 
-  precise-info-seeking:
-    planning_iterations: 200
-    damping: 0.6
+  # precise-info-seeking:
+  #   planning_iterations: 200
+  #   damping: 0.6
 
   active-inference:
     planning_iterations: 200
@@ -173,9 +173,9 @@ minigrid_methods:
     planning_iterations: 200
     damping: 0.25
 
-  dyn-channel:
-    planning_iterations: 200
-    damping: 0.25
+  # dyn-channel:
+  #   planning_iterations: 200
+  #   damping: 0.25
 
   nuijten:
     planning_iterations: 200
@@ -185,9 +185,9 @@ minigrid_methods:
     planning_iterations: 200
     damping: 0.75
 
-  precise-info-seeking:
-    planning_iterations: 200
-    damping: 0.4
+  # precise-info-seeking:
+  #   planning_iterations: 200
+  #   damping: 0.4
 
   active-inference:
     planning_iterations: 200
@@ -202,10 +202,8 @@ convergence_sweep:
     "loopy-vbp",
     "loopy",
     "region-extended",
-    "dyn-channel",
     "nuijten",
     "vbp-channel",
-    "precise-info-seeking",
     "active-inference",
   ]
 
@@ -227,9 +225,9 @@ convergence_sweep:
     n_configs: 25
     n_pits: 4
     planning_horizon: 7
-    obs_noise: 0.1
+    obs_noise: 0.2
     pos_noise: 0.4
-    slip_prob: 0.5
+    slip_prob: 0.01
     pit_penalty: 1.0
     wumpus_penalty: 1.0
     goal_temperature: 1.0

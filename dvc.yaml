@@ -184,6 +184,7 @@ stages:
         --goal-temperature ${wumpus_world.goal_temperature}
         --seed ${wumpus_world.seed}
         --output data/results/wumpus_world/${key}.json
+        --receding-horizon
       deps:
         - run_wumpus_world.py
         - agents/wumpus_agent.py
