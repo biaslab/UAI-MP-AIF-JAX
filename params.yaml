@@ -196,11 +196,9 @@ minigrid_methods:
 
 convergence_sweep:
   n_iterations: 1000
-  damping: [0.25, 0.4, 0.5, 0.6, 0.75, 1.0]
+  damping: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
   seeds: [0,1,2,3,4]
   methods: [
-    "loopy-vbp",
-    "loopy",
     "region-extended",
     "nuijten",
     "vbp-channel",
