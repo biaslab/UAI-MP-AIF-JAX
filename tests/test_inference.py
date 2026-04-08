@@ -1641,4 +1641,553 @@ class TestGeometricDamping:
             )
 
 
+class TestActiveInferenceOptimizations:
+    """Tests for memory-optimized active inference components."""
 
+    def setup_method(self):
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from environments.minigrid import (
+            generate_transition_tensor,
+            generate_observation_tensor,
+            get_valid_static_configs,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+        from inference.messages import safe_log
+
+        self.n = 3
+        n_loc = self.n * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.valid_configs = get_valid_static_configs(self.n)
+        self.n_static = len(self.valid_configs)
+        self.n_actions = 7
+
+        # Dense tensors
+        self.transition_tensor = jnp.array(
+            generate_transition_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        self.observation_tensor = jnp.array(
+            generate_observation_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        self.observation_tensor_flat = self.observation_tensor.reshape(
+            self.observation_tensor.shape[0] * self.observation_tensor.shape[1],
+            *self.observation_tensor.shape[2:])
+
+        # Sparse index: derive from dense tensor (deterministic transitions → argmax)
+        # transition_tensor shape: (x_new, x_old, θ, action)
+        # T_idx[x_old, action, θ] = argmax over x_new
+        self.T_idx = jnp.argmax(self.transition_tensor, axis=0).transpose(0, 2, 1).astype(jnp.int32)
+        # Result shape: (S, A, θ)
+
+        # Beliefs
+        self.q_current = jnp.ones(self.n_states) / self.n_states
+        self.q_static = jnp.ones(self.n_static) / self.n_static
+        self.log_prior_theta = safe_log(self.q_static)
+
+        # Dense log_base (reference)
+        log_T = safe_log(self.transition_tensor)
+        log_T_kernel = log_T.transpose(1, 0, 2, 3)
+        self.log_base_dense = logsumexp(
+            log_T_kernel + self.log_prior_theta[None, None, :, None], axis=2)
+
+        # Log observation tensor
+        self.log_B_flat = safe_log(self.observation_tensor_flat)
+
+    def test_sparse_log_base_matches_dense(self):
+        """log_base from sparse T_idx matches logsumexp over dense T."""
+        from inference.active_inference import compute_log_base_sparse
+
+        log_base_sparse = compute_log_base_sparse(
+            self.T_idx, self.log_prior_theta, self.n_states)
+
+        assert log_base_sparse.shape == self.log_base_dense.shape
+        assert np.allclose(log_base_sparse, self.log_base_dense, atol=1e-5), (
+            f"Sparse log_base doesn't match dense. "
+            f"Max diff = {np.abs(np.array(log_base_sparse - self.log_base_dense)).max()}"
+        )
+
+    def test_obs_channel_single_step(self):
+        """One precompute_obs_channels step matches inline Step 7 logic."""
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.active_inference import precompute_obs_channels
+        from inference.messages import safe_log_div
+
+        F, C, S, n_static = self.log_B_flat.shape
+
+        # Run one step via precompute function
+        log_obs_to_x_precomp = precompute_obs_channels(
+            self.log_B_flat, self.log_prior_theta, n_iterations=1, damping=1.0)
+
+        # Run one step manually (inline Step 7 logic, no time dimension)
+        log_obs_ch = jnp.full((F, C, S, n_static), -jnp.log(C))
+        log_marg_obs_ch = jnp.full((F, C, S), -jnp.log(C))
+
+        log_obs_kernels = (self.log_B_flat + log_obs_ch
+                           + safe_log_div(log_obs_ch, log_marg_obs_ch[:, :, :, None]))
+        raw_ch = log_obs_kernels - logsumexp(log_obs_kernels, axis=1, keepdims=True)
+        kp = log_obs_kernels + self.log_prior_theta[None, None, None, :]
+        tm = logsumexp(kp, axis=3)
+        raw_marg = tm - logsumexp(tm, axis=1, keepdims=True)
+
+        # damping=1.0 → raw channels directly (after normalization)
+        log_obs_ch_1 = raw_ch - logsumexp(raw_ch, axis=1, keepdims=True)
+        log_marg_ch_1 = raw_marg - logsumexp(raw_marg, axis=1, keepdims=True)
+
+        # Compute obs->x from manually updated channels
+        log_obs_kernels_2 = (self.log_B_flat + log_obs_ch_1
+                             + safe_log_div(log_obs_ch_1, log_marg_ch_1[:, :, :, None]))
+        terms = log_obs_kernels_2 + self.log_prior_theta[None, None, None, :]
+        log_per_k = logsumexp(terms, axis=(1, 3))
+        log_obs_to_x_manual = log_per_k.sum(axis=0)
+        log_obs_to_x_manual = log_obs_to_x_manual - logsumexp(log_obs_to_x_manual)
+
+        assert np.allclose(log_obs_to_x_precomp, log_obs_to_x_manual, atol=1e-5), (
+            f"Precomputed obs->x doesn't match manual. "
+            f"Max diff = {np.abs(np.array(log_obs_to_x_precomp - log_obs_to_x_manual)).max()}"
+        )
+
+    def test_precompute_pref_to_x(self):
+        """precompute_pref_to_x matches compute_pref_to_x_msgs with prior as cavity."""
+        import jax.numpy as jnp
+        from inference.active_inference import precompute_pref_to_x
+        from inference.region_extended_loopy_bp import compute_pref_to_x_msgs
+        from inference.messages import safe_log
+
+        # Create a non-trivial preference: peaked at state 0
+        goal_2d = jnp.ones((self.n_states, self.n_static))
+        goal_2d = goal_2d.at[0, :].set(10.0)
+        goal_2d = goal_2d / goal_2d.sum(axis=0, keepdims=True)
+        log_C = safe_log(goal_2d)
+
+        # Precomputed (no time dimension)
+        log_pref_precomp = precompute_pref_to_x(log_C, self.log_prior_theta)
+
+        # Via compute_pref_to_x_msgs (with time dimension of 1)
+        log_prior_obs = jnp.broadcast_to(self.log_prior_theta[None, :], (1, self.n_static))
+        log_pref_loop = compute_pref_to_x_msgs(log_C, log_prior_obs)  # (1, S)
+
+        assert np.allclose(log_pref_precomp, log_pref_loop[0], atol=1e-5), (
+            f"Precomputed pref->x doesn't match loop version. "
+            f"Max diff = {np.abs(np.array(log_pref_precomp - log_pref_loop[0])).max()}"
+        )
+
+    def test_sparse_log_base_moved_to_messages(self):
+        """compute_log_base_sparse from messages.py matches the old location."""
+        from inference.messages import compute_log_base_sparse
+
+        log_base_sparse = compute_log_base_sparse(
+            self.T_idx, self.log_prior_theta, self.n_states)
+
+        assert log_base_sparse.shape == self.log_base_dense.shape
+        assert np.allclose(log_base_sparse, self.log_base_dense, atol=1e-5)
+
+    def test_obs_to_x_from_precomputed_channels(self):
+        """obs->x from N-step precomp matches N-step inline convergence."""
+        import jax.numpy as jnp
+        from jax.scipy.special import logsumexp
+        from inference.active_inference import precompute_obs_channels
+        from inference.messages import safe_log_div
+        from inference.region_extended_loopy_bp import (
+            compute_obs_to_x_msgs,
+            damp_log_channel,
+        )
+
+        F, C, S, n_static = self.log_B_flat.shape
+        n_iters = 5
+        damping = 0.7
+
+        # Precomputed path
+        log_obs_to_x_precomp = precompute_obs_channels(
+            self.log_B_flat, self.log_prior_theta, n_iterations=n_iters, damping=damping)
+
+        # Inline path: manually iterate the same obs channel logic with time dim
+        T_plus_1 = 1  # single timestep is enough since they're all identical
+        log_obs_ch = jnp.full((T_plus_1, F, C, S, n_static), -jnp.log(C))
+        log_marg_ch = jnp.full((T_plus_1, F, C, S), -jnp.log(C))
+        log_prior_obs = jnp.broadcast_to(self.log_prior_theta[None, :], (T_plus_1, n_static))
+
+        for _ in range(n_iters):
+            log_obs_kernels = (self.log_B_flat[None] + log_obs_ch
+                               + safe_log_div(log_obs_ch,
+                                              log_marg_ch[:, :, :, :, None]))
+            raw_ch = log_obs_kernels - logsumexp(log_obs_kernels, axis=2, keepdims=True)
+            kp = log_obs_kernels + log_prior_obs[:, None, None, None, :]
+            tm = logsumexp(kp, axis=4)
+            raw_marg = tm - logsumexp(tm, axis=2, keepdims=True)
+            log_obs_ch = damp_log_channel(log_obs_ch, raw_ch, damping, cond_axis=2)
+            log_marg_ch = damp_log_channel(log_marg_ch, raw_marg, damping, cond_axis=2)
+
+        # Extract obs->x via compute_obs_to_x_msgs
+        log_obs_kernels = (self.log_B_flat[None] + log_obs_ch
+                           + safe_log_div(log_obs_ch,
+                                          log_marg_ch[:, :, :, :, None]))
+        log_obs_to_x_inline = compute_obs_to_x_msgs(log_obs_kernels, log_prior_obs)  # (1, S)
+
+        assert np.allclose(log_obs_to_x_precomp, log_obs_to_x_inline[0], atol=1e-5), (
+            f"Precomputed obs->x (N steps) doesn't match inline. "
+            f"Max diff = {np.abs(np.array(log_obs_to_x_precomp - log_obs_to_x_inline[0])).max()}"
+        )
+
+
+class TestSparseTransitionOps:
+    """Tests that sparse transition operations match their dense equivalents exactly."""
+
+    def setup_method(self):
+        import jax
+        import jax.numpy as jnp
+        from environments.minigrid import (
+            generate_transition_tensor,
+            generate_observation_tensor,
+            get_valid_static_configs,
+            N_ORIENTATIONS,
+            N_DOOR_KEY_STATES,
+        )
+        from inference.messages import safe_log
+
+        self.n = 3
+        n_loc = self.n * self.n
+        self.n_states = n_loc * N_ORIENTATIONS * N_DOOR_KEY_STATES
+        self.valid_configs = get_valid_static_configs(self.n)
+        self.n_static = len(self.valid_configs)
+        self.n_actions = 7
+        self.horizon = 4
+
+        # Dense tensors
+        self.transition_tensor = jnp.array(
+            generate_transition_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+
+        # Sparse index
+        self.T_idx = jnp.argmax(self.transition_tensor, axis=0).transpose(0, 2, 1).astype(jnp.int32)
+
+        # Log tensors
+        self.log_T = safe_log(self.transition_tensor)
+        self.log_T_kernel = self.log_T.transpose(1, 0, 2, 3)  # (x_old, x_new, θ, u)
+
+        # Random but valid log-space messages for testing
+        key = jax.random.PRNGKey(42)
+        keys = jax.random.split(key, 8)
+        T = self.horizon
+        S = self.n_states
+        A = self.n_actions
+        th = self.n_static
+
+        self.log_cavity = jax.nn.log_softmax(
+            jax.random.normal(keys[0], (T, th)), axis=1)
+        self.log_fwd = jax.nn.log_softmax(
+            jax.random.normal(keys[1], (T + 1, S)), axis=1)
+        self.log_bwd = jax.nn.log_softmax(
+            jax.random.normal(keys[2], (T + 1, S)), axis=1)
+        self.log_obs_to_x = jax.nn.log_softmax(
+            jax.random.normal(keys[3], (T + 1, S)), axis=1)
+        self.log_action = jax.nn.log_softmax(
+            jax.random.normal(keys[4], (A,)))
+        self.log_action_per_t = jax.nn.log_softmax(
+            jax.random.normal(keys[5], (T, A)), axis=1)
+        self.log_r_ux = jax.nn.log_softmax(
+            jax.random.normal(keys[6], (T, S, A)), axis=2)
+        self.log_dyn_channels = jax.nn.log_softmax(
+            jax.random.normal(keys[7], (T, S, S, A)), axis=2)
+
+    def test_sparse_reduced_matches_compute_log_reduced(self):
+        """sparse_reduced matches compute_log_reduced with raw T kernel."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_reduced
+        from inference.region_extended_loopy_bp import compute_log_reduced
+
+        log_kernels = jnp.broadcast_to(
+            self.log_T_kernel[None],
+            (self.horizon, self.n_states, self.n_states, self.n_static, self.n_actions))
+        dense_result = compute_log_reduced(log_kernels, self.log_cavity)
+
+        sparse_result = sparse_reduced(self.T_idx, self.log_cavity, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape, (
+            f"Shape mismatch: {sparse_result.shape} vs {dense_result.shape}")
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_reduced_weighted_matches_dense(self):
+        """sparse_reduced_weighted matches compute_log_reduced with VBP-style weight."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_reduced_weighted
+        from inference.region_extended_loopy_bp import compute_log_reduced
+
+        log_kernels = (self.log_T_kernel[None]
+                       + self.log_r_ux[:, :, None, None, :])
+        dense_result = compute_log_reduced(log_kernels, self.log_cavity)
+
+        sparse_result = sparse_reduced_weighted(
+            self.T_idx, self.log_cavity, self.log_r_ux, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_dyn_to_theta_matches_dense(self):
+        """sparse_dyn_to_theta matches compute_dyn_to_theta_msgs (with obs)."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_dyn_to_theta
+        from inference.region_extended_loopy_bp import compute_dyn_to_theta_msgs
+
+        log_kernels = jnp.broadcast_to(
+            self.log_T_kernel[None],
+            (self.horizon, self.n_states, self.n_states, self.n_static, self.n_actions))
+
+        dense_result = compute_dyn_to_theta_msgs(
+            log_kernels, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action, self.horizon)
+
+        sparse_result = sparse_dyn_to_theta(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_dyn_to_theta_no_obs_matches_loopy(self):
+        """sparse_dyn_to_theta with no obs matches loopy_bp's version."""
+        from inference.messages import sparse_dyn_to_theta
+        from inference.loopy_bp import (
+            compute_dyn_to_theta_msgs as loopy_dyn_to_theta,
+        )
+
+        dense_result = loopy_dyn_to_theta(
+            self.log_T, self.log_fwd, self.log_bwd,
+            self.log_action, self.horizon)
+
+        sparse_result = sparse_dyn_to_theta(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            None, self.log_action, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_dyn_to_theta_per_t_action_matches_nuijten(self):
+        """sparse_dyn_to_theta with per-timestep action matches nuijten variant."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_dyn_to_theta
+        from inference.nuijten_mp import compute_dyn_to_theta_msgs_nuijten
+
+        log_T_tiled = jnp.broadcast_to(
+            self.log_T_kernel[None],
+            (self.horizon, self.n_states, self.n_states, self.n_static, self.n_actions))
+
+        dense_result = compute_dyn_to_theta_msgs_nuijten(
+            log_T_tiled, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action_per_t, self.horizon)
+
+        sparse_result = sparse_dyn_to_theta(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action_per_t, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_dyn_to_theta_weighted_matches_dense(self):
+        """sparse_dyn_to_theta_weighted matches dense with VBP kernel weight."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_dyn_to_theta_weighted
+        from inference.region_extended_loopy_bp import compute_dyn_to_theta_msgs
+
+        log_kernels = (self.log_T_kernel[None]
+                       + self.log_r_ux[:, :, None, None, :])
+
+        dense_result = compute_dyn_to_theta_msgs(
+            log_kernels, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action, self.horizon)
+
+        sparse_result = sparse_dyn_to_theta_weighted(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_action, self.log_r_ux, self.n_states)
+
+        assert sparse_result.shape == dense_result.shape
+        assert np.allclose(sparse_result, dense_result, atol=1e-5), (
+            f"Max diff = {np.abs(np.array(sparse_result - dense_result)).max()}")
+
+    def test_sparse_dyn_channels_matches_dense(self):
+        """sparse_dyn_channels_and_pair matches dense region-based computation."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_dyn_channels_and_pair
+        from inference.region_extended_loopy_bp import (
+            compute_dyn_region_beliefs,
+            compute_dyn_channels_and_pair_marginal,
+        )
+
+        log_kernels = jnp.broadcast_to(
+            self.log_T_kernel[None],
+            (self.horizon, self.n_states, self.n_states, self.n_static, self.n_actions))
+
+        log_regions = compute_dyn_region_beliefs(
+            log_kernels, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action)
+        dense_channels, dense_pair = compute_dyn_channels_and_pair_marginal(log_regions)
+
+        sparse_channels, sparse_pair = sparse_dyn_channels_and_pair(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action,
+            None, self.n_states)
+
+        assert sparse_channels.shape == dense_channels.shape
+        assert sparse_pair.shape == dense_pair.shape
+        assert np.allclose(sparse_channels, dense_channels, atol=1e-5), (
+            f"Channels max diff = {np.abs(np.array(sparse_channels - dense_channels)).max()}")
+        assert np.allclose(sparse_pair, dense_pair, atol=1e-5), (
+            f"Pair max diff = {np.abs(np.array(sparse_pair - dense_pair)).max()}")
+
+    def test_sparse_pair_marginal_matches_dense(self):
+        """sparse_pair_marginal matches dense pair marginal from region beliefs."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_pair_marginal
+        from inference.region_extended_loopy_bp import compute_dyn_region_beliefs
+        from inference.vbp_channel import compute_pair_marginal
+
+        # Dense VBP kernels
+        log_kernels = (self.log_T_kernel[None]
+                       + self.log_r_ux[:, :, None, None, :])
+
+        log_regions = compute_dyn_region_beliefs(
+            log_kernels, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action)
+        dense_pair = compute_pair_marginal(log_regions)
+
+        sparse_pair = sparse_pair_marginal(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action,
+            self.log_r_ux, self.n_states)
+
+        assert sparse_pair.shape == dense_pair.shape
+        assert np.allclose(sparse_pair, dense_pair, atol=1e-5), (
+            f"Pair max diff = {np.abs(np.array(sparse_pair - dense_pair)).max()}")
+
+    def test_sparse_efe_matches_dense(self):
+        """sparse_efe_action_prior matches dense region-based EFE computation."""
+        import jax.numpy as jnp
+        from inference.messages import sparse_efe_action_prior
+        from inference.nuijten_mp import (
+            compute_dyn_region_beliefs_nuijten,
+            compute_efe_action_prior,
+        )
+
+        log_T_tiled = jnp.broadcast_to(
+            self.log_T_kernel[None],
+            (self.horizon, self.n_states, self.n_states, self.n_static, self.n_actions))
+        action_mask = jnp.ones(self.n_actions)
+
+        dense_regions = compute_dyn_region_beliefs_nuijten(
+            log_T_tiled, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action_per_t)
+        dense_efe = compute_efe_action_prior(dense_regions, action_mask)
+
+        sparse_efe = sparse_efe_action_prior(
+            self.T_idx, self.log_fwd, self.log_bwd,
+            self.log_obs_to_x, self.log_cavity, self.log_action_per_t,
+            self.n_states, action_mask)
+
+        assert sparse_efe.shape == dense_efe.shape
+        assert np.allclose(sparse_efe, dense_efe, atol=1e-5), (
+            f"EFE max diff = {np.abs(np.array(sparse_efe - dense_efe)).max()}")
+
+    def test_loopy_bp_sparse_matches_dense(self):
+        """Loopy BP with sparse T_idx produces same action dist as dense."""
+        import jax.numpy as jnp
+        from inference.loopy_bp import loopy_bp_planning
+
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+
+        dense_result = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
+            horizon=self.horizon, n_iterations=5, T_idx=None)
+
+        sparse_result = loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, goal,
+            horizon=self.horizon, n_iterations=5, T_idx=self.T_idx)
+
+        assert np.allclose(dense_result, sparse_result, atol=1e-5), (
+            f"Loopy BP: max diff = {np.abs(np.array(dense_result - sparse_result)).max()}")
+
+    def test_vbp_channel_sparse_matches_dense(self):
+        """VBP channel with sparse T_idx produces same action dist as dense."""
+        import jax.numpy as jnp
+        from environments.minigrid import generate_observation_tensor
+        from inference.vbp_channel import vbp_channel_planning
+
+        obs_raw = jnp.array(
+            generate_observation_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        obs_tensor = obs_raw.reshape(
+            obs_raw.shape[0] * obs_raw.shape[1], *obs_raw.shape[2:])
+
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+
+        dense_action, _ = vbp_channel_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, damping=0.5, T_idx=None)
+
+        sparse_action, _ = vbp_channel_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, damping=0.5, T_idx=self.T_idx)
+
+        assert np.allclose(dense_action, sparse_action, atol=1e-5), (
+            f"VBP channel: max diff = {np.abs(np.array(dense_action - sparse_action)).max()}")
+
+    def test_dyn_channel_sparse_matches_dense(self):
+        """Dyn-channel with sparse T_idx produces same action dist as dense."""
+        import jax.numpy as jnp
+        from environments.minigrid import generate_observation_tensor
+        from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
+
+        obs_raw = jnp.array(
+            generate_observation_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        obs_tensor = obs_raw.reshape(
+            obs_raw.shape[0] * obs_raw.shape[1], *obs_raw.shape[2:])
+
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+
+        dense_action, _ = dyn_channel_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, damping=0.5, T_idx=None)
+
+        sparse_action, _ = dyn_channel_loopy_bp_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, damping=0.5, T_idx=self.T_idx)
+
+        assert np.allclose(dense_action, sparse_action, atol=1e-5), (
+            f"Dyn-channel: max diff = {np.abs(np.array(dense_action - sparse_action)).max()}")
+
+    def test_nuijten_sparse_matches_dense(self):
+        """Nuijten MP with sparse T_idx produces same action dist as dense."""
+        import jax.numpy as jnp
+        from environments.minigrid import generate_observation_tensor
+        from inference.nuijten_mp import nuijten_mp_planning
+
+        obs_raw = jnp.array(
+            generate_observation_tensor(self.n, self.valid_configs), dtype=jnp.float32)
+        obs_tensor = obs_raw.reshape(
+            obs_raw.shape[0] * obs_raw.shape[1], *obs_raw.shape[2:])
+
+        goal = jnp.zeros(self.n_states)
+        goal = goal.at[0].set(1.0)
+        q_current = jnp.ones(self.n_states) / self.n_states
+        q_static = jnp.ones(self.n_static) / self.n_static
+
+        dense_action, _, _ = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, T_idx=None)
+
+        sparse_action, _, _ = nuijten_mp_planning(
+            q_current, q_static, self.transition_tensor, obs_tensor, goal,
+            horizon=self.horizon, n_iterations=5, T_idx=self.T_idx)
+
+        assert np.allclose(dense_action, sparse_action, atol=1e-5), (
+            f"Nuijten: max diff = {np.abs(np.array(dense_action - sparse_action)).max()}")

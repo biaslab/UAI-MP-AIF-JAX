@@ -18,8 +18,11 @@ from jax import lax
 from jax.scipy.special import logsumexp
 from functools import partial
 
-from .messages import LOG_ZERO, safe_log
-from .messages import safe_log_div
+from .messages import (
+    LOG_ZERO, safe_log, safe_log_div,
+    sparse_reduced_dyn_channel, sparse_dyn_to_theta_dyn_channel,
+    sparse_dyn_channels_and_pair_dyn_channel,
+)
 from .region_extended_loopy_bp import (
     compute_log_reduced,
     forward_pass,
@@ -47,6 +50,7 @@ def dyn_channel_loopy_bp_planning(
     n_iterations,         # int (static)
     damping=1.0,          # float - channel update damping (1.0 = no damping)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
+    T_idx=None,           # (S, A, θ) int32 sparse transition index
 ) -> tuple:
     """
     Plan actions via dyn+action channel loopy BP with observation factors.
@@ -71,9 +75,12 @@ def dyn_channel_loopy_bp_planning(
         action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
+    use_sparse = T_idx is not None
+
     # Log once at top
-    log_T = safe_log(transition_tensor)                   # (x_new, x_old, theta, u)
-    log_T_kernel = log_T.transpose(1, 0, 2, 3)           # (x_old, x_new, theta, u)
+    if not use_sparse:
+        log_T = safe_log(transition_tensor)               # (x_new, x_old, theta, u)
+        log_T_kernel = log_T.transpose(1, 0, 2, 3)       # (x_old, x_new, theta, u)
     log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
@@ -112,14 +119,15 @@ def dyn_channel_loopy_bp_planning(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
             )
 
-            # Step 2: Dyn kernels: T * r(u|x) / r(x'|x,u)
-            log_dyn_kernels = (
-                safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-                + log_r_ux[:, :, None, None, :]
-            )
-
-            # Step 3: Reduced tensors
-            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+            # Steps 2-3: Reduced tensors (kernel = T * r(u|x) / r(x'|x,u))
+            if use_sparse:
+                log_reduced_per_t = sparse_reduced_dyn_channel(
+                    T_idx, log_cavity_dyn, log_dyn_channels, log_r_ux, n_states)
+            else:
+                log_dyn_kernels = (
+                    safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+                    + log_r_ux[:, :, None, None, :])
+                log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
 
             # Step 4: obs->x and pref->x messages
             log_obs_to_x = compute_obs_to_x_msgs(log_B_tiled, log_cavity_obs)
@@ -137,11 +145,15 @@ def dyn_channel_loopy_bp_planning(
                 log_local_to_x, horizon
             )
 
-            # Step 7: dyn->theta messages (uses combined local_to_x)
-            new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_action_prior, horizon
-            )
+            # Step 7: dyn->theta messages
+            if use_sparse:
+                new_log_dyn_to_theta = sparse_dyn_to_theta_dyn_channel(
+                    T_idx, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                    log_action_prior, log_dyn_channels, log_r_ux, n_states)
+            else:
+                new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
+                    log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                    log_action_prior, horizon)
 
             # Step 8: obs->theta messages (include pref_to_x in x belief)
             new_log_obs_to_theta = compute_obs_to_theta_msgs(
@@ -155,11 +167,16 @@ def dyn_channel_loopy_bp_planning(
             )
 
             # Step 10: Dyn region beliefs -> dyn channels + action channels -> damped update
-            log_dyn_regions = compute_dyn_region_beliefs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_cavity_dyn, log_action_prior
-            )
-            raw_log_dyn_channels, log_pair = compute_dyn_channels_and_pair_marginal(log_dyn_regions)
+            if use_sparse:
+                raw_log_dyn_channels, log_pair = sparse_dyn_channels_and_pair_dyn_channel(
+                    T_idx, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                    log_cavity_dyn, log_action_prior, log_dyn_channels, log_r_ux,
+                    n_states)
+            else:
+                log_dyn_regions = compute_dyn_region_beliefs(
+                    log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                    log_cavity_dyn, log_action_prior)
+                raw_log_dyn_channels, log_pair = compute_dyn_channels_and_pair_marginal(log_dyn_regions)
             raw_log_r_ux = log_pair - logsumexp(log_pair, axis=2, keepdims=True)
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)
@@ -184,14 +201,15 @@ def dyn_channel_loopy_bp_planning(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
             )
 
-            # Step 2: Dyn kernels: T * r(u|x) / r(x'|x,u)
-            log_dyn_kernels = (
-                safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
-                + log_r_ux[:, :, None, None, :]
-            )
-
-            # Step 3: Reduced tensors
-            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
+            # Steps 2-3: Reduced tensors
+            if use_sparse:
+                log_reduced_per_t = sparse_reduced_dyn_channel(
+                    T_idx, log_cavity_dyn, log_dyn_channels, log_r_ux, n_states)
+            else:
+                log_dyn_kernels = (
+                    safe_log_div(log_T_kernel[None], log_dyn_channels[:, :, :, None, :])
+                    + log_r_ux[:, :, None, None, :])
+                log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_cavity_dyn)
 
             # Step 4: obs->x messages (raw B, no kernels)
             log_obs_to_x = compute_obs_to_x_msgs(log_B_tiled, log_cavity_obs)
@@ -207,11 +225,15 @@ def dyn_channel_loopy_bp_planning(
                 log_obs_to_x, horizon
             )
 
-            # Step 7: dyn->theta messages (uses dyn kernels)
-            new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_action_prior, horizon
-            )
+            # Step 7: dyn->theta messages
+            if use_sparse:
+                new_log_dyn_to_theta = sparse_dyn_to_theta_dyn_channel(
+                    T_idx, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                    log_action_prior, log_dyn_channels, log_r_ux, n_states)
+            else:
+                new_log_dyn_to_theta = compute_dyn_to_theta_msgs(
+                    log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                    log_action_prior, horizon)
 
             # Step 8: obs->theta messages (raw B)
             new_log_obs_to_theta = compute_obs_to_theta_msgs(
@@ -219,11 +241,16 @@ def dyn_channel_loopy_bp_planning(
             )
 
             # Step 9: Dyn region beliefs -> dyn channels + action channels -> damped update
-            log_dyn_regions = compute_dyn_region_beliefs(
-                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_cavity_dyn, log_action_prior
-            )
-            raw_log_dyn_channels, log_pair = compute_dyn_channels_and_pair_marginal(log_dyn_regions)
+            if use_sparse:
+                raw_log_dyn_channels, log_pair = sparse_dyn_channels_and_pair_dyn_channel(
+                    T_idx, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                    log_cavity_dyn, log_action_prior, log_dyn_channels, log_r_ux,
+                    n_states)
+            else:
+                log_dyn_regions = compute_dyn_region_beliefs(
+                    log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                    log_cavity_dyn, log_action_prior)
+                raw_log_dyn_channels, log_pair = compute_dyn_channels_and_pair_marginal(log_dyn_regions)
             raw_log_r_ux = log_pair - logsumexp(log_pair, axis=2, keepdims=True)
             new_log_dyn_channels = damp_log_channel(
                 log_dyn_channels, raw_log_dyn_channels, damping, cond_axis=2)

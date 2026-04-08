@@ -13,7 +13,12 @@ from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
 from inference.nuijten_mp import nuijten_mp_planning
 from inference.vbp_channel import vbp_channel_planning
 from inference.precise_info_seeking import precise_info_seeking_planning
-from inference.active_inference import active_inference_planning
+from inference.active_inference import (
+    active_inference_planning,
+    precompute_obs_channels,
+    precompute_pref_to_x,
+)
+from inference.messages import safe_log, compute_log_base_sparse
 from utils.tensors import create_onehot, get_dimensions, flatten_state_index
 
 
@@ -210,6 +215,8 @@ class LoopyBPAgent:
 
     last_action: int
 
+    T_idx: jnp.ndarray | None = None  # (S, A, θ) int32 sparse transition index
+
     @classmethod
     def create(
         cls,
@@ -221,6 +228,7 @@ class LoopyBPAgent:
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
+        T_idx: jnp.ndarray | None = None,
     ) -> "LoopyBPAgent":
         """Create a new loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -254,6 +262,7 @@ class LoopyBPAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
+            T_idx=T_idx,
         )
 
     def reset(self) -> "LoopyBPAgent":
@@ -288,6 +297,7 @@ class LoopyBPAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
+            T_idx=self.T_idx,
         )
 
     def step(
@@ -321,6 +331,7 @@ class LoopyBPAgent:
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
+            T_idx=self.T_idx,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -338,6 +349,7 @@ class LoopyBPAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
+            T_idx=self.T_idx,
         )
 
         return action, new_agent
@@ -533,6 +545,8 @@ class DynChannelLoopyBPAgent:
 
     damping: float
 
+    T_idx: jnp.ndarray | None = None  # (S, A, θ) int32 sparse transition index
+
     @classmethod
     def create(
         cls,
@@ -545,6 +559,7 @@ class DynChannelLoopyBPAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        T_idx: jnp.ndarray | None = None,
     ) -> "DynChannelLoopyBPAgent":
         """Create a new dyn-channel loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -579,6 +594,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            T_idx=T_idx,
         )
 
     def reset(self) -> "DynChannelLoopyBPAgent":
@@ -614,6 +630,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
     def step(
@@ -649,6 +666,7 @@ class DynChannelLoopyBPAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -667,6 +685,7 @@ class DynChannelLoopyBPAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
         return action, new_agent
@@ -698,6 +717,8 @@ class VBPChannelAgent:
 
     damping: float
 
+    T_idx: jnp.ndarray | None = None  # (S, A, θ) int32 sparse transition index
+
     @classmethod
     def create(
         cls,
@@ -710,6 +731,7 @@ class VBPChannelAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        T_idx: jnp.ndarray | None = None,
     ) -> "VBPChannelAgent":
         """Create a new VBP channel agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -744,6 +766,7 @@ class VBPChannelAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            T_idx=T_idx,
         )
 
     def reset(self) -> "VBPChannelAgent":
@@ -779,6 +802,7 @@ class VBPChannelAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
     def step(
@@ -814,6 +838,7 @@ class VBPChannelAgent:
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -832,6 +857,7 @@ class VBPChannelAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
         return action, new_agent
@@ -1009,6 +1035,10 @@ class ActiveInferenceAgent:
     Agent using Active Inference planning: VBP action channels + dyn channels + obs channels.
     Combines VBP-style action channel, region-extended dynamics channel, and
     observation channel reparameterization.
+
+    When T_idx is provided (sparse transition index), uses memory-optimized planning
+    that avoids materializing the dense (S, S, θ, A) tensor and precomputes obs channels
+    outside the planning loop, eliminating all θ dependence from the carry.
     """
 
     grid_size: int
@@ -1030,6 +1060,8 @@ class ActiveInferenceAgent:
 
     damping: float
 
+    T_idx: jnp.ndarray | None = None  # (S, A, θ) int32 sparse transition index
+
     @classmethod
     def create(
         cls,
@@ -1042,6 +1074,7 @@ class ActiveInferenceAgent:
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
         damping: float = 1.0,
+        T_idx: jnp.ndarray | None = None,
     ) -> "ActiveInferenceAgent":
         """Create a new Active Inference agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -1076,6 +1109,7 @@ class ActiveInferenceAgent:
             n_planning_iterations=n_planning_iterations,
             last_action=0,
             damping=damping,
+            T_idx=T_idx,
         )
 
     def reset(self) -> "ActiveInferenceAgent":
@@ -1111,6 +1145,7 @@ class ActiveInferenceAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
     def step(
@@ -1137,16 +1172,49 @@ class ActiveInferenceAgent:
         )
 
         horizon = min(time_remaining, self.planning_horizon)
-        action_dist, _, _ = active_inference_planning(
-            q_current_state=q_current,
-            q_static_state=q_static,
-            transition_tensor=self.transition_tensor,
-            observation_tensor=_flatten_obs_tensor(self.observation_tensors),
-            goal=self.goal,
-            horizon=horizon,
-            n_iterations=self.n_planning_iterations,
-            damping=self.damping,
-        )
+
+        if self.T_idx is not None:
+            # Optimized path: sparse log_base + precomputed obs
+            log_prior_theta = safe_log(q_static)
+            log_base = compute_log_base_sparse(
+                self.T_idx, log_prior_theta, self.dims["n_states"])
+            obs_flat = _flatten_obs_tensor(self.observation_tensors)
+            log_B_flat = safe_log(obs_flat)
+            log_obs_to_x = precompute_obs_channels(
+                log_B_flat, log_prior_theta,
+                n_iterations=self.n_planning_iterations, damping=self.damping)
+            has_pref = self.goal.ndim == 2
+            if has_pref:
+                log_C = safe_log(self.goal)
+                log_pref_to_x = precompute_pref_to_x(log_C, log_prior_theta)
+                log_local_to_x = log_obs_to_x + log_pref_to_x
+            else:
+                log_local_to_x = log_obs_to_x
+
+            action_dist, _, _ = active_inference_planning(
+                q_current_state=q_current,
+                q_static_state=q_static,
+                transition_tensor=None,
+                observation_tensor=None,
+                goal=self.goal,
+                horizon=horizon,
+                n_iterations=self.n_planning_iterations,
+                damping=self.damping,
+                log_base=log_base,
+                log_local_to_x=log_local_to_x,
+            )
+        else:
+            # Dense path (original)
+            action_dist, _, _ = active_inference_planning(
+                q_current_state=q_current,
+                q_static_state=q_static,
+                transition_tensor=self.transition_tensor,
+                observation_tensor=_flatten_obs_tensor(self.observation_tensors),
+                goal=self.goal,
+                horizon=horizon,
+                n_iterations=self.n_planning_iterations,
+                damping=self.damping,
+            )
 
         action = int(jnp.argmax(action_dist))
 
@@ -1164,6 +1232,7 @@ class ActiveInferenceAgent:
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
             damping=self.damping,
+            T_idx=self.T_idx,
         )
 
         return action, new_agent
@@ -1192,6 +1261,8 @@ class NuijtenMPAgent:
 
     last_action: int
 
+    T_idx: jnp.ndarray | None = None  # (S, A, θ) int32 sparse transition index
+
     @classmethod
     def create(
         cls,
@@ -1203,6 +1274,7 @@ class NuijtenMPAgent:
         planning_horizon: int = 10,
         n_inference_iterations: int = 10,
         n_planning_iterations: int = 10,
+        T_idx: jnp.ndarray | None = None,
     ) -> "NuijtenMPAgent":
         """Create a new Nuijten MP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
@@ -1236,6 +1308,7 @@ class NuijtenMPAgent:
             n_inference_iterations=n_inference_iterations,
             n_planning_iterations=n_planning_iterations,
             last_action=0,
+            T_idx=T_idx,
         )
 
     def reset(self) -> "NuijtenMPAgent":
@@ -1270,6 +1343,7 @@ class NuijtenMPAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=0,
+            T_idx=self.T_idx,
         )
 
     def step(
@@ -1304,6 +1378,7 @@ class NuijtenMPAgent:
             goal=self.goal,
             horizon=horizon,
             n_iterations=self.n_planning_iterations,
+            T_idx=self.T_idx,
         )
 
         action = int(jnp.argmax(action_dist))
@@ -1321,6 +1396,7 @@ class NuijtenMPAgent:
             n_inference_iterations=self.n_inference_iterations,
             n_planning_iterations=self.n_planning_iterations,
             last_action=action,
+            T_idx=self.T_idx,
         )
 
         return action, new_agent

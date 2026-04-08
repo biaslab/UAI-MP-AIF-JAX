@@ -505,22 +505,25 @@ def create_agent(args, transition_tensor, observation_tensor, orientation_tensor
         n_inference_iterations=args.inference_iterations,
         n_planning_iterations=args.planning_iterations,
     )
+    import jax.numpy as jnp
+    T_idx = jnp.argmax(transition_tensor, axis=0).transpose(0, 2, 1).astype(jnp.int32)
+
     if method == "loopy-vbp":
         return LoopyVBPAgent.create(**common)
     elif method == "loopy":
-        return LoopyBPAgent.create(**common)
+        return LoopyBPAgent.create(T_idx=T_idx, **common)
     elif method == "region-extended":
         return RegionExtendedAgent.create(damping=args.damping, **common)
     elif method == "dyn-channel":
-        return DynChannelLoopyBPAgent.create(damping=args.damping, **common)
+        return DynChannelLoopyBPAgent.create(damping=args.damping, T_idx=T_idx, **common)
     elif method == "nuijten":
-        return NuijtenMPAgent.create(**common)
+        return NuijtenMPAgent.create(T_idx=T_idx, **common)
     elif method == "vbp-channel":
-        return VBPChannelAgent.create(damping=args.damping, **common)
+        return VBPChannelAgent.create(damping=args.damping, T_idx=T_idx, **common)
     elif method == "precise-info-seeking":
         return PreciseInfoSeekingAgent.create(damping=args.damping, **common)
     elif method == "active-inference":
-        return ActiveInferenceAgent.create(damping=args.damping, **common)
+        return ActiveInferenceAgent.create(damping=args.damping, T_idx=T_idx, **common)
     else:
         raise ValueError(f"Unknown planning method: {method}")
 

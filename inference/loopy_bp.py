@@ -24,7 +24,7 @@ from jax import lax
 from jax.scipy.special import logsumexp
 from functools import partial
 
-from .messages import LOG_ZERO, safe_log
+from .messages import LOG_ZERO, safe_log, sparse_reduced, sparse_dyn_to_theta
 
 
 def compute_reduced_per_t(log_T, log_cavity_theta):
@@ -174,6 +174,7 @@ def loopy_bp_planning(
     horizon,            # int (static)
     n_iterations,       # int (static)
     action_prior=None,  # (n_actions,) prior over actions. If None, uniform.
+    T_idx=None,         # (S, A, θ) int32 sparse transition index. If provided, uses sparse ops.
 ) -> jnp.ndarray:
     """
     Plan actions via loopy BP with θ as a variable in the factor graph.
@@ -198,7 +199,6 @@ def loopy_bp_planning(
     n_actions = transition_tensor.shape[3]
 
     # Log once at the top
-    log_T = safe_log(transition_tensor)
     log_prior_theta = safe_log(q_static_state)
     log_q0 = safe_log(q_current_state)
 
@@ -206,21 +206,26 @@ def loopy_bp_planning(
         action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
+    use_sparse = T_idx is not None
+    if not use_sparse:
+        log_T = safe_log(transition_tensor)
+
     # Initialize: cavity = prior
     log_cavity_theta = jnp.tile(log_prior_theta, (horizon, 1))
     q_u_init = jnp.zeros((horizon, n_actions))
 
     if goal.ndim == 2:
         # 2D goal: per-config preference C(x, θ)
-        # Each iteration: compute full θ belief from prior + dyn_to_theta messages,
-        # marginalize C with it, and inject as per-step preference.
         log_C = safe_log(goal)
         log_dyn_to_theta_init = jnp.zeros((horizon, n_static))
 
         def body_fn(_, carry):
             log_cavity_theta, _, log_dyn_to_theta_prev = carry
 
-            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+            if use_sparse:
+                log_reduced_per_t = sparse_reduced(T_idx, log_cavity_theta, n_states)
+            else:
+                log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
 
             # Full theta belief from previous iteration's messages
             log_q_theta = log_prior_theta + log_dyn_to_theta_prev.sum(axis=0)
@@ -275,13 +280,19 @@ def loopy_bp_planning(
             )
 
             # dyn_to_theta: include preference in x beliefs
-            log_fwd_t = (log_fwd[:-1] + log_pref[None, :])[:, None, :, None, None]
-            log_bwd_t1 = (log_bwd[1:] + log_pref[None, :])[:, :, None, None, None]
-            terms = (log_T[None]
-                     + log_fwd_t
-                     + log_bwd_t1
-                     + log_action_prior[None, None, None, None, :])
-            new_dyn_to_theta = logsumexp(terms, axis=(1, 2, 4))
+            log_pref_to_x = jnp.broadcast_to(log_pref[None], (horizon + 1, n_states))
+            if use_sparse:
+                new_dyn_to_theta = sparse_dyn_to_theta(
+                    T_idx, log_fwd, log_bwd, log_pref_to_x,
+                    log_action_prior, n_states)
+            else:
+                log_fwd_t = (log_fwd[:-1] + log_pref[None, :])[:, None, :, None, None]
+                log_bwd_t1 = (log_bwd[1:] + log_pref[None, :])[:, :, None, None, None]
+                terms = (log_T[None]
+                         + log_fwd_t
+                         + log_bwd_t1
+                         + log_action_prior[None, None, None, None, :])
+                new_dyn_to_theta = logsumexp(terms, axis=(1, 2, 4))
 
             new_log_cavity = compute_theta_cavities(log_prior_theta, new_dyn_to_theta)
 
@@ -298,14 +309,24 @@ def loopy_bp_planning(
         def body_fn(_, carry):
             log_cavity_theta, _ = carry
 
-            log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+            if use_sparse:
+                log_reduced_per_t = sparse_reduced(T_idx, log_cavity_theta, n_states)
+            else:
+                log_reduced_per_t = compute_reduced_per_t(log_T, log_cavity_theta)
+
             log_fwd = forward_pass(log_reduced_per_t, log_q0, log_action_prior, horizon)
             log_bwd, q_u = backward_pass(
                 log_reduced_per_t, log_fwd, log_goal, log_action_prior, horizon
             )
-            log_dyn_to_theta = compute_dyn_to_theta_msgs(
-                log_T, log_fwd, log_bwd, log_action_prior, horizon
-            )
+
+            if use_sparse:
+                log_dyn_to_theta = sparse_dyn_to_theta(
+                    T_idx, log_fwd, log_bwd, None,
+                    log_action_prior, n_states)
+            else:
+                log_dyn_to_theta = compute_dyn_to_theta_msgs(
+                    log_T, log_fwd, log_bwd, log_action_prior, horizon)
+
             new_log_cavity = compute_theta_cavities(log_prior_theta, log_dyn_to_theta)
 
             return new_log_cavity, q_u

@@ -253,7 +253,7 @@ stages:
         --seed ${minigrid.seed}
         --receding-horizon
         --output data/results/minigrid/${key}.json
-        --record first,last
+        --record ${minigrid.record}
       deps:
         - run_minigrid.py
         - agents/flat_tensor_agent.py

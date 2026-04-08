@@ -15,21 +15,13 @@ frozen_lake:
   seed: 0
 
 frozen_lake_methods:
-  loopy-vbp:
-    planning_iterations: 400
-    damping: 1.0
-
   loopy:
     planning_iterations: 400
     damping: 1.0
 
-  region-extended:
+  dyn-channel:
     planning_iterations: 400
-    damping: 0.5
-
-  # dyn-channel:
-  #   planning_iterations: 400
-  #   damping: 0.55
+    damping: 0.55
 
   nuijten:
     planning_iterations: 400
@@ -38,10 +30,6 @@ frozen_lake_methods:
   vbp-channel:
     planning_iterations: 400
     damping: 0.75
-
-  # precise-info-seeking:
-  #   planning_iterations: 400
-  #   damping: 0.5
 
   active-inference:
     planning_iterations: 400
@@ -65,21 +53,13 @@ wumpus_world:
   seed: 0
 
 wumpus_world_methods:
-  loopy-vbp:
-    planning_iterations: 400
-    damping: 1.0
-
   loopy:
     planning_iterations: 400
     damping: 1.0
 
-  region-extended:
+  dyn-channel:
     planning_iterations: 400
     damping: 0.6
-
-  # dyn-channel:
-  #   planning_iterations: 400
-  #   damping: 0.6
 
   nuijten:
     planning_iterations: 400
@@ -88,10 +68,6 @@ wumpus_world_methods:
   vbp-channel:
     planning_iterations: 400
     damping: 0.6
-
-  # precise-info-seeking:
-  #   planning_iterations: 400
-  #   damping: 0.6
 
   active-inference:
     planning_iterations: 400
@@ -117,21 +93,13 @@ rocksample:
   seed: 0
 
 rocksample_methods:
-  loopy-vbp:
-    planning_iterations: 50
-    damping: 1.0
-
   loopy:
     planning_iterations: 50
     damping: 1.0
 
-  region-extended:
+  dyn-channel:
     planning_iterations: 200
     damping: 0.6
-
-  # dyn-channel:
-  #   planning_iterations: 200
-  #   damping: 0.6
 
   nuijten:
     planning_iterations: 200
@@ -140,10 +108,6 @@ rocksample_methods:
   vbp-channel:
     planning_iterations: 200
     damping: 0.6
-
-  # precise-info-seeking:
-  #   planning_iterations: 200
-  #   damping: 0.6
 
   active-inference:
     planning_iterations: 200
@@ -158,36 +122,22 @@ minigrid:
   max_steps: 25
   planning_horizon: 15
   inference_iterations: 10
+  receding_horizon: true
+  record: "first,last"
   seed: 0
 
 minigrid_methods:
-  loopy-vbp:
-    planning_iterations: 200
-    damping: 1.0
-
   loopy:
     planning_iterations: 200
     damping: 1.0
 
-  region-extended:
+  dyn-channel:
     planning_iterations: 200
     damping: 0.25
-
-  # dyn-channel:
-  #   planning_iterations: 200
-  #   damping: 0.25
-
-  nuijten:
-    planning_iterations: 200
-    damping: 1.0
 
   vbp-channel:
     planning_iterations: 200
     damping: 0.75
-
-  # precise-info-seeking:
-  #   planning_iterations: 200
-  #   damping: 0.4
 
   active-inference:
     planning_iterations: 200
@@ -199,8 +149,6 @@ convergence_sweep:
   damping: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
   seeds: [0,1,2,3,4]
   methods: [
-    "region-extended",
-    "nuijten",
     "vbp-channel",
     "active-inference",
   ]
@@ -247,7 +195,7 @@ convergence_sweep:
     terminal_goal_only: true
 
   minigrid:
-    grid_size: 3
+    grid_size: 10
     planning_horizon: 15
     fov_size: 3
     obs_alpha: 0.0

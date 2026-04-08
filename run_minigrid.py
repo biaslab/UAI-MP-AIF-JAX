@@ -145,6 +145,10 @@ def main():
     print(f"Goal: position ({goal_x}, {goal_y}) with door open")
     print()
 
+    # Derive sparse transition index for memory-optimized planning
+    # T_idx[x_old, action, theta] = x_new (deterministic transitions)
+    T_idx = jnp.argmax(transition_tensor, axis=0).transpose(0, 2, 1).astype(jnp.int32)
+
     print("Creating agent...")
     if args.planning_method == "loopy-vbp":
         agent = LoopyVBPAgent.create(
@@ -167,6 +171,7 @@ def main():
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            T_idx=T_idx,
         )
     elif args.planning_method == "region-extended":
         agent = RegionExtendedAgent.create(
@@ -191,6 +196,7 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
+            T_idx=T_idx,
         )
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
@@ -202,6 +208,7 @@ def main():
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            T_idx=T_idx,
         )
     elif args.planning_method == "vbp-channel":
         agent = VBPChannelAgent.create(
@@ -214,6 +221,7 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
+            T_idx=T_idx,
         )
     elif args.planning_method == "precise-info-seeking":
         agent = PreciseInfoSeekingAgent.create(
@@ -238,6 +246,7 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
+            T_idx=T_idx,
         )
     else:
         raise ValueError(f"Unknown planning method: {args.planning_method}")

@@ -138,6 +138,8 @@ def run_inference_tests():
         TestVBPChannel,
         TestPreciseInfoSeeking,
         TestActiveInference,
+        TestActiveInferenceOptimizations,
+        TestSparseTransitionOps,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
         TestPerformanceRefactorEquivalence,
@@ -244,6 +246,34 @@ def run_inference_tests():
     t.test_obs_channels_shape()
     t.test_dyn_channels_conditional()
     print("  Active Inference: PASSED")
+
+    print("Running active inference optimization tests...")
+    t = TestActiveInferenceOptimizations()
+    t.setup_method()
+    t.test_sparse_log_base_moved_to_messages()
+    t.test_sparse_log_base_matches_dense()
+    t.test_obs_channel_single_step()
+    t.test_precompute_pref_to_x()
+    t.test_obs_to_x_from_precomputed_channels()
+    print("  Active Inference Optimizations: PASSED")
+
+    print("Running sparse transition ops tests...")
+    t = TestSparseTransitionOps()
+    t.setup_method()
+    t.test_sparse_reduced_matches_compute_log_reduced()
+    t.test_sparse_reduced_weighted_matches_dense()
+    t.test_sparse_dyn_to_theta_matches_dense()
+    t.test_sparse_dyn_to_theta_no_obs_matches_loopy()
+    t.test_sparse_dyn_to_theta_per_t_action_matches_nuijten()
+    t.test_sparse_dyn_to_theta_weighted_matches_dense()
+    t.test_sparse_dyn_channels_matches_dense()
+    t.test_sparse_pair_marginal_matches_dense()
+    t.test_sparse_efe_matches_dense()
+    t.test_loopy_bp_sparse_matches_dense()
+    t.test_vbp_channel_sparse_matches_dense()
+    t.test_dyn_channel_sparse_matches_dense()
+    t.test_nuijten_sparse_matches_dense()
+    print("  Sparse Transition Ops: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()
