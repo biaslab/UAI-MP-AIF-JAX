@@ -115,12 +115,12 @@ rocksample_methods:
 
 
 minigrid:
-  grid_size: 8
+  grid_size: 5
   fov_size: 3
   obs_alpha: 0.0
   episodes: 200
-  max_steps: 60
-  planning_horizon: 35
+  max_steps: 40
+  planning_horizon: 20
   inference_iterations: 10
   receding_horizon: true
   record: "first,last"

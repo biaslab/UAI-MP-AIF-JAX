@@ -46,6 +46,7 @@ python run_minigrid.py \
     --seed "$(read_param "['minigrid']['seed']")" \
     $([ "$RECEDING" = "True" ] && echo "--receding-horizon") \
     --output "data/results/minigrid/${METHOD}.json" \
-    --record "$RECORD"
+    --record "$RECORD" \
+    --video-dir "data/videos/minigrid/${METHOD}"
 
 echo "MiniGrid method=${METHOD} completed at $(date)"
