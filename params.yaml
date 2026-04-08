@@ -86,7 +86,7 @@ rocksample:
   good_reward: 2.0
   bad_penalty: 3.0
   exit_reward: 1.0
-  goal_temperature: 0.5
+  goal_temperature: 1.0
   scan_cost: 0.5
   sample_cost: 1.0
   terminal_goal_only: true
