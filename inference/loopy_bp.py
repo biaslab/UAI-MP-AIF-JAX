@@ -196,7 +196,8 @@ def loopy_bp_planning(
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
-    n_actions = transition_tensor.shape[3]
+    use_sparse = T_idx is not None
+    n_actions = T_idx.shape[1] if use_sparse else transition_tensor.shape[3]
 
     # Log once at the top
     log_prior_theta = safe_log(q_static_state)
@@ -206,7 +207,6 @@ def loopy_bp_planning(
         action_prior = jnp.ones(n_actions) / n_actions
     log_action_prior = safe_log(action_prior)
 
-    use_sparse = T_idx is not None
     if not use_sparse:
         log_T = safe_log(transition_tensor)
 

@@ -232,7 +232,7 @@ class LoopyBPAgent:
     ) -> "LoopyBPAgent":
         """Create a new loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
-        dims["n_static"] = transition_tensor.shape[2]
+        dims["n_static"] = T_idx.shape[2] if T_idx is not None else transition_tensor.shape[2]
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
         state_probs = jnp.zeros(dims["n_states"])
@@ -576,7 +576,7 @@ class DynChannelLoopyBPAgent:
     ) -> "DynChannelLoopyBPAgent":
         """Create a new dyn-channel loopy BP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
-        dims["n_static"] = transition_tensor.shape[2]
+        dims["n_static"] = T_idx.shape[2] if T_idx is not None else transition_tensor.shape[2]
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
         state_probs = jnp.zeros(dims["n_states"])
@@ -761,7 +761,7 @@ class VBPChannelAgent:
     ) -> "VBPChannelAgent":
         """Create a new VBP channel agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
-        dims["n_static"] = transition_tensor.shape[2]
+        dims["n_static"] = T_idx.shape[2] if T_idx is not None else transition_tensor.shape[2]
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
         state_probs = jnp.zeros(dims["n_states"])
@@ -1117,7 +1117,7 @@ class ActiveInferenceAgent:
     ) -> "ActiveInferenceAgent":
         """Create a new Active Inference agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
-        dims["n_static"] = transition_tensor.shape[2]
+        dims["n_static"] = T_idx.shape[2] if T_idx is not None else transition_tensor.shape[2]
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
         state_probs = jnp.zeros(dims["n_states"])
@@ -1330,7 +1330,7 @@ class NuijtenMPAgent:
     ) -> "NuijtenMPAgent":
         """Create a new Nuijten MP agent with uniform initial beliefs."""
         dims = get_dimensions(grid_size)
-        dims["n_static"] = transition_tensor.shape[2]
+        dims["n_static"] = T_idx.shape[2] if T_idx is not None else transition_tensor.shape[2]
 
         n_valid_locations = dims["n_locations"] - 2 * grid_size
         state_probs = jnp.zeros(dims["n_states"])

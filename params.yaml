@@ -141,7 +141,7 @@ minigrid_methods:
 
   active-inference:
     planning_iterations: 200
-    damping: 0.4
+    damping: 0.9
 
 
 convergence_sweep:
@@ -149,6 +149,8 @@ convergence_sweep:
   damping: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
   seeds: [0,1,2,3,4]
   methods: [
+    "loopy",
+    "dyn-channel",
     "vbp-channel",
     "active-inference",
   ]

@@ -164,7 +164,7 @@ def main():
     elif args.planning_method == "loopy":
         agent = LoopyBPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
@@ -188,7 +188,7 @@ def main():
     elif args.planning_method == "dyn-channel":
         agent = DynChannelLoopyBPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
@@ -201,7 +201,7 @@ def main():
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
@@ -213,7 +213,7 @@ def main():
     elif args.planning_method == "vbp-channel":
         agent = VBPChannelAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
@@ -238,7 +238,7 @@ def main():
     elif args.planning_method == "active-inference":
         agent = ActiveInferenceAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,

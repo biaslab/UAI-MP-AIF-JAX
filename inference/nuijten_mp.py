@@ -336,7 +336,8 @@ def nuijten_mp_planning(
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
-    n_actions = transition_tensor.shape[3]
+    use_sparse = T_idx is not None
+    n_actions = T_idx.shape[1] if use_sparse else transition_tensor.shape[3]
     n_fov = observation_tensor.shape[0]
     n_obs_types = observation_tensor.shape[1]
     has_pref = goal.ndim == 2
@@ -344,8 +345,6 @@ def nuijten_mp_planning(
     if action_prior is None:
         action_prior = jnp.ones(n_actions) / n_actions
     action_mask = (action_prior > 0).astype(jnp.float32)
-
-    use_sparse = T_idx is not None
 
     # Log once at top
     if not use_sparse:
