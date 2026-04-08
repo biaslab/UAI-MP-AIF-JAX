@@ -14,6 +14,126 @@ from .messages import (
 )
 
 
+# =============================================================================
+# Sparse state inference (uses T_idx instead of dense transition tensor)
+# =============================================================================
+
+
+@partial(jax.jit, static_argnums=(8,))
+def state_inference_step_sparse(
+    q_old_state: jnp.ndarray,
+    q_static_state: jnp.ndarray,
+    T_idx: jnp.ndarray,
+    obs_tensors: jnp.ndarray,
+    ori_tensor: jnp.ndarray,
+    vision_obs: jnp.ndarray,
+    ori_obs: jnp.ndarray,
+    action_onehot: jnp.ndarray,
+    n_iterations: int = 10,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Sparse variant of state_inference_step using T_idx instead of dense tensor.
+
+    Mathematically equivalent to the dense version for deterministic transitions.
+
+    Args:
+        q_old_state: (n_states,) prior belief over previous state
+        q_static_state: (n_static,) belief over static configuration
+        T_idx: (n_states, n_actions, n_static) int32 deterministic next-state indices
+        obs_tensors: (fov_w, fov_h, n_types, n_states, n_static) observation model
+        ori_tensor: (n_orientations, n_states) orientation observation model
+        vision_obs: (fov_w, fov_h, n_types) one-hot observations per FOV cell
+        ori_obs: (n_orientations,) one-hot orientation observation
+        action_onehot: (n_actions,) one-hot previous action
+        n_iterations: number of loopy BP iterations (static for JIT)
+
+    Returns:
+        q_current_state: (n_states,) posterior over current state
+        q_static_state: (n_static,) updated belief over static state
+    """
+
+    def body_fn(_, carry):
+        q_current, q_static = carry
+        return _single_iteration_sparse(
+            q_old_state,
+            q_current,
+            q_static,
+            q_static_state,
+            T_idx,
+            obs_tensors,
+            ori_tensor,
+            vision_obs,
+            ori_obs,
+            action_onehot,
+        )
+
+    init = (q_old_state, q_static_state)
+    q_current, q_static = lax.fori_loop(0, n_iterations, body_fn, init)
+
+    return q_current, q_static
+
+
+def _single_iteration_sparse(
+    q_old_state: jnp.ndarray,
+    q_current: jnp.ndarray,
+    q_static: jnp.ndarray,
+    q_static_prior: jnp.ndarray,
+    T_idx: jnp.ndarray,
+    obs_tensors: jnp.ndarray,
+    ori_tensor: jnp.ndarray,
+    vision_obs: jnp.ndarray,
+    ori_obs: jnp.ndarray,
+    action_onehot: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Single iteration of loopy BP using sparse T_idx. Vectorized for GPU."""
+    n_states = q_old_state.shape[0]
+    n_static = q_static.shape[0]
+
+    # --- Forward message: predict x_new from x_old ---
+    # Dense equivalent: einsum("ijkl,j,k,l->i", T, q_old, q_static, action)
+    a = jnp.argmax(action_onehot)
+    t_idx_a = T_idx[:, a, :]  # (S, θ)
+    weights = q_old_state[:, None] * q_static[None, :]  # (S, θ)
+    msg_trans = jnp.zeros(n_states).at[t_idx_a.ravel()].add(weights.ravel())
+    msg_trans = msg_trans / (msg_trans.sum() + EPSILON)
+
+    # --- Observation messages (identical to dense version) ---
+    n_fov = obs_tensors.shape[0] * obs_tensors.shape[1]
+    n_obs_types = obs_tensors.shape[2]
+    obs_flat = obs_tensors.reshape(n_fov, n_obs_types, n_states, n_static)
+    vision_flat = vision_obs.reshape(n_fov, n_obs_types)
+    log_msgs_vision = jax.vmap(
+        lambda t, v: jnp.log(backward_message_3d(t, v, q_static) + EPSILON)
+    )(obs_flat, vision_flat)
+    log_msg_vision = log_msgs_vision.sum(axis=0)
+
+    msg_ori = backward_message_2d(ori_tensor, ori_obs)
+
+    # --- Combine into q_current ---
+    log_q_current = (
+        jnp.log(msg_trans + EPSILON)
+        + log_msg_vision
+        + jnp.log(msg_ori + EPSILON)
+    )
+    q_current_new = nn.softmax(log_q_current)
+
+    # --- Static observation messages (identical to dense version) ---
+    log_msgs_static = jax.vmap(
+        lambda t, v: jnp.log(backward_message_to_other_3d(t, v, q_current_new) + EPSILON)
+    )(obs_flat, vision_flat)
+    log_msg_static = log_msgs_static.sum(axis=0)
+
+    # --- Static backward message from transition factor ---
+    # Dense equivalent: einsum("ijkl,i,j,l->k", T, q_current, q_old, action)
+    q_next = q_current_new[t_idx_a]  # (S, θ) — gather
+    msg_trans_static = jnp.einsum("jk,j->k", q_next, q_old_state)  # (θ,)
+    log_msg_static = log_msg_static + jnp.log(msg_trans_static + EPSILON)
+
+    q_static_new = nn.softmax(log_msg_static + jnp.log(q_static_prior + EPSILON))
+
+    return q_current_new, q_static_new
+
+
 @partial(jax.jit, static_argnums=(8,))
 def state_inference_step(
     q_old_state: jnp.ndarray,

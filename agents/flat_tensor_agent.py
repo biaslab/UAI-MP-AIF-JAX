@@ -5,7 +5,7 @@ from typing import Any
 
 import jax.numpy as jnp
 
-from inference.state_inference import state_inference_step
+from inference.state_inference import state_inference_step, state_inference_step_sparse
 from inference.loopy_vbp import loopy_vbp_planning
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
@@ -311,17 +311,30 @@ class LoopyBPAgent:
         """
         action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
 
-        q_current, q_static = state_inference_step(
-            q_old_state=self.q_state,
-            q_static_state=self.q_static,
-            transition_tensor=self.transition_tensor,
-            obs_tensors=self.observation_tensors,
-            ori_tensor=self.orientation_tensor,
-            vision_obs=vision_obs,
-            ori_obs=orientation_obs,
-            action_onehot=action_onehot,
-            n_iterations=self.n_inference_iterations,
-        )
+        if self.T_idx is not None:
+            q_current, q_static = state_inference_step_sparse(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                T_idx=self.T_idx,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
+        else:
+            q_current, q_static = state_inference_step(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                transition_tensor=self.transition_tensor,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
 
         horizon = min(time_remaining, self.planning_horizon)
         action_dist = loopy_bp_planning(
@@ -644,17 +657,30 @@ class DynChannelLoopyBPAgent:
         """
         action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
 
-        q_current, q_static = state_inference_step(
-            q_old_state=self.q_state,
-            q_static_state=self.q_static,
-            transition_tensor=self.transition_tensor,
-            obs_tensors=self.observation_tensors,
-            ori_tensor=self.orientation_tensor,
-            vision_obs=vision_obs,
-            ori_obs=orientation_obs,
-            action_onehot=action_onehot,
-            n_iterations=self.n_inference_iterations,
-        )
+        if self.T_idx is not None:
+            q_current, q_static = state_inference_step_sparse(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                T_idx=self.T_idx,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
+        else:
+            q_current, q_static = state_inference_step(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                transition_tensor=self.transition_tensor,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
 
         horizon = min(time_remaining, self.planning_horizon)
         action_dist, _ = dyn_channel_loopy_bp_planning(
@@ -816,17 +842,30 @@ class VBPChannelAgent:
         """
         action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
 
-        q_current, q_static = state_inference_step(
-            q_old_state=self.q_state,
-            q_static_state=self.q_static,
-            transition_tensor=self.transition_tensor,
-            obs_tensors=self.observation_tensors,
-            ori_tensor=self.orientation_tensor,
-            vision_obs=vision_obs,
-            ori_obs=orientation_obs,
-            action_onehot=action_onehot,
-            n_iterations=self.n_inference_iterations,
-        )
+        if self.T_idx is not None:
+            q_current, q_static = state_inference_step_sparse(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                T_idx=self.T_idx,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
+        else:
+            q_current, q_static = state_inference_step(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                transition_tensor=self.transition_tensor,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
 
         horizon = min(time_remaining, self.planning_horizon)
         action_dist, _ = vbp_channel_planning(
@@ -1159,17 +1198,30 @@ class ActiveInferenceAgent:
         """
         action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
 
-        q_current, q_static = state_inference_step(
-            q_old_state=self.q_state,
-            q_static_state=self.q_static,
-            transition_tensor=self.transition_tensor,
-            obs_tensors=self.observation_tensors,
-            ori_tensor=self.orientation_tensor,
-            vision_obs=vision_obs,
-            ori_obs=orientation_obs,
-            action_onehot=action_onehot,
-            n_iterations=self.n_inference_iterations,
-        )
+        if self.T_idx is not None:
+            q_current, q_static = state_inference_step_sparse(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                T_idx=self.T_idx,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
+        else:
+            q_current, q_static = state_inference_step(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                transition_tensor=self.transition_tensor,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
 
         horizon = min(time_remaining, self.planning_horizon)
 
@@ -1357,17 +1409,30 @@ class NuijtenMPAgent:
         """
         action_onehot = create_onehot(self.last_action, self.dims["n_actions"])
 
-        q_current, q_static = state_inference_step(
-            q_old_state=self.q_state,
-            q_static_state=self.q_static,
-            transition_tensor=self.transition_tensor,
-            obs_tensors=self.observation_tensors,
-            ori_tensor=self.orientation_tensor,
-            vision_obs=vision_obs,
-            ori_obs=orientation_obs,
-            action_onehot=action_onehot,
-            n_iterations=self.n_inference_iterations,
-        )
+        if self.T_idx is not None:
+            q_current, q_static = state_inference_step_sparse(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                T_idx=self.T_idx,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
+        else:
+            q_current, q_static = state_inference_step(
+                q_old_state=self.q_state,
+                q_static_state=self.q_static,
+                transition_tensor=self.transition_tensor,
+                obs_tensors=self.observation_tensors,
+                ori_tensor=self.orientation_tensor,
+                vision_obs=vision_obs,
+                ori_obs=orientation_obs,
+                action_onehot=action_onehot,
+                n_iterations=self.n_inference_iterations,
+            )
 
         horizon = min(time_remaining, self.planning_horizon)
         action_dist, _, _ = nuijten_mp_planning(
