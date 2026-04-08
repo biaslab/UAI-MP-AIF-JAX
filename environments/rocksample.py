@@ -350,9 +350,16 @@ def generate_observation_tensor(
                         B[ch, 1, x, theta] = p_fp_s
                         B[ch, 0, x, theta] = p_tp_s
                 else:
-                    # Unscanned: uninformative (50/50)
-                    B[ch, 1, x, theta] = 0.5
-                    B[ch, 0, x, theta] = 0.5
+                    # Distance-dependent accuracy
+                    d = euclidean_distance(pos, rock_pos, grid_size)
+                    p_correct = 0.5 + 0.5 * (2.0 ** (-d / half_eff_dist))
+                    p_correct = np.clip(p_correct, 0.01, 0.99)
+                    if rock_good:
+                        B[ch, 1, x, theta] = p_correct
+                        B[ch, 0, x, theta] = 1.0 - p_correct
+                    else:
+                        B[ch, 1, x, theta] = 1.0 - p_correct
+                        B[ch, 0, x, theta] = p_correct
 
     return B
 

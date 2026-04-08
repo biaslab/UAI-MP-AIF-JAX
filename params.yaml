@@ -21,7 +21,7 @@ frozen_lake_methods:
 
   dyn-channel:
     planning_iterations: 400
-    damping: 0.55
+    damping: 0.25
 
   nuijten:
     planning_iterations: 400
@@ -33,7 +33,7 @@ frozen_lake_methods:
 
   active-inference:
     planning_iterations: 400
-    damping: 0.4
+    damping: 0.75
 
 
 wumpus_world:
@@ -59,7 +59,7 @@ wumpus_world_methods:
 
   dyn-channel:
     planning_iterations: 400
-    damping: 0.6
+    damping: 0.25
 
   nuijten:
     planning_iterations: 400
@@ -71,13 +71,13 @@ wumpus_world_methods:
 
   active-inference:
     planning_iterations: 400
-    damping: 0.4
+    damping: 0.6
 
 
 rocksample:
   grid_size: 5
   n_rocks: 2
-  half_eff_dist: 2.0
+  half_eff_dist: 0.5
   pos_noise: 0.3
   slip_prob: 0.0
   episodes: 1000
@@ -99,7 +99,7 @@ rocksample_methods:
 
   dyn-channel:
     planning_iterations: 200
-    damping: 0.6
+    damping: 0.25
 
   nuijten:
     planning_iterations: 200
@@ -107,11 +107,11 @@ rocksample_methods:
 
   vbp-channel:
     planning_iterations: 200
-    damping: 0.6
+    damping: 0.25
 
   active-inference:
     planning_iterations: 200
-    damping: 0.4
+    damping: 0.25
 
 
 minigrid:
@@ -185,7 +185,7 @@ convergence_sweep:
     grid_size: 5
     n_rocks: 2
     planning_horizon: 15
-    half_eff_dist: 2.0
+    half_eff_dist: 0.5
     pos_noise: 0.3
     slip_prob: 0.0
     good_reward: 2.0
