@@ -123,8 +123,8 @@ def main():
     print("Generating tensors (this may take a moment)...")
     t0 = time.time()
 
-    transition_tensor = jnp.array(generate_transition_tensor(grid_size, valid_configs), dtype=jnp.float32)
-    print(f"  Transition tensor: {transition_tensor.shape}")
+    transition_np = generate_transition_tensor(grid_size, valid_configs)
+    print(f"  Transition tensor: {transition_np.shape}")
 
     obs_np = generate_observation_tensor(grid_size, valid_configs, fov_size=args.fov_size)
     if args.obs_alpha > 0.0:
@@ -134,7 +134,7 @@ def main():
     print(f"  Observation tensor: {observation_tensor.shape}")
     print(f"  Orientation tensor: {orientation_tensor.shape}")
 
-    trans_mb = transition_tensor.nbytes / 1024 / 1024
+    trans_mb = transition_np.nbytes / 1024 / 1024
     print(f"  Transition tensor memory: {trans_mb:.1f} MB")
     print(f"  Generated in {time.time() - t0:.2f}s")
     print()
@@ -145,9 +145,17 @@ def main():
     print(f"Goal: position ({goal_x}, {goal_y}) with door open")
     print()
 
-    # Derive sparse transition index for memory-optimized planning
+    # Derive sparse transition index (stays on GPU, only 49 MB)
     # T_idx[x_old, action, theta] = x_new (deterministic transitions)
-    T_idx = jnp.argmax(transition_tensor, axis=0).transpose(0, 2, 1).astype(jnp.int32)
+    T_idx = jnp.array(np.argmax(transition_np, axis=0).transpose(0, 2, 1), dtype=jnp.int32)
+
+    # Only convert dense tensor to JAX for methods that need it (no sparse path)
+    sparse_methods = {"loopy", "dyn-channel", "nuijten", "vbp-channel", "active-inference"}
+    if args.planning_method in sparse_methods:
+        transition_tensor = None
+    else:
+        transition_tensor = jnp.array(transition_np, dtype=jnp.float32)
+    del transition_np
 
     print("Creating agent...")
     if args.planning_method == "loopy-vbp":
