@@ -111,16 +111,16 @@ rocksample_methods:
 
   active-inference:
     planning_iterations: 200
-    damping: 0.6
+    damping: 0.4
 
 
 minigrid:
-  grid_size: 4
+  grid_size: 10
   fov_size: 3
   obs_alpha: 0.0
   episodes: 100
-  max_steps: 25
-  planning_horizon: 15
+  max_steps: 60
+  planning_horizon: 35
   inference_iterations: 10
   receding_horizon: true
   record: "first,last"
@@ -195,7 +195,7 @@ convergence_sweep:
     terminal_goal_only: true
 
   minigrid:
-    grid_size: 10
+    grid_size: 3
     planning_horizon: 15
     fov_size: 3
     obs_alpha: 0.0
