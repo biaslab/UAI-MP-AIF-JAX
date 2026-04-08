@@ -6,7 +6,7 @@ frozen_lake:
   base_noise: 0.4
   noise_range: 0.1
   slip_prob: 0.1
-  episodes: 200
+  episodes: 1000
   max_steps: 15 
   planning_horizon: 15
   hole_penalty: 2.0
@@ -43,7 +43,7 @@ wumpus_world:
   obs_noise: 0.2
   pos_noise: 0.4
   slip_prob: 0.01
-  episodes: 200
+  episodes: 1000
   max_steps: 10
   planning_horizon: 7
   scan_cost: 0.7
@@ -80,7 +80,7 @@ rocksample:
   half_eff_dist: 2.0
   pos_noise: 0.3
   slip_prob: 0.0
-  episodes: 200
+  episodes: 1000
   max_steps: 15
   planning_horizon: 15
   good_reward: 2.0
@@ -115,10 +115,10 @@ rocksample_methods:
 
 
 minigrid:
-  grid_size: 10
+  grid_size: 8
   fov_size: 3
   obs_alpha: 0.0
-  episodes: 100
+  episodes: 200
   max_steps: 60
   planning_horizon: 35
   inference_iterations: 10

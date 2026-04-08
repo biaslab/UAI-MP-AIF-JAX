@@ -32,7 +32,7 @@ python -c "import jax; print(f'JAX devices: {jax.devices()}')"
 
 case "${STAGE_TYPE:?STAGE_TYPE not set}" in
     sweep)
-        ENV="${ENVIRONMENT:?ENVIRONMENT not set}"
+        ENV="${CONV_ENV:?CONV_ENV not set}"
         N_ITERATIONS=$(read_param "['convergence_sweep']['n_iterations']")
 
         case "$ENV" in

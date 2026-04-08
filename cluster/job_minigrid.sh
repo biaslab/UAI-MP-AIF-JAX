@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=18
-#SBATCH --mem=64G
+#SBATCH --mem=80G
 #SBATCH --time=01:00:00
 #SBATCH --output=logs/minigrid_%x_%j.out
 #SBATCH --error=logs/minigrid_%x_%j.err

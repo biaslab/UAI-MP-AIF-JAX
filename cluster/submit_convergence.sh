@@ -32,7 +32,7 @@ for env in frozen-lake wumpus-world rocksample minigrid; do
         echo "  ${env}: skipped (${OUTPUT} exists)"
         continue
     fi
-    JID=$(submit_stage "conv-${env}" "STAGE_TYPE=sweep,ENVIRONMENT=${env}")
+    JID=$(submit_stage "conv-${env}" "STAGE_TYPE=sweep,CONV_ENV=${env}")
     DEP_JOBS="${DEP_JOBS:+${DEP_JOBS}:}${JID}"
     echo "  ${env}: ${JID}"
 done
