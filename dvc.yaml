@@ -185,6 +185,8 @@ stages:
         --seed ${wumpus_world.seed}
         --output data/results/wumpus_world/${key}.json
         --receding-horizon
+        --record-trajectories ${wumpus_world.record_trajectories}
+        --trajectory-dir data/trajectories/wumpus_world/${key}
       deps:
         - run_wumpus_world.py
         - agents/wumpus_agent.py
@@ -195,6 +197,9 @@ stages:
         - wumpus_world_methods.${key}
       metrics:
         - data/results/wumpus_world/${key}.json:
+            cache: false
+      outs:
+        - data/trajectories/wumpus_world/${key}:
             cache: false
 
   rocksample:

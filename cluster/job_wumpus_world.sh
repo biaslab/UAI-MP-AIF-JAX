@@ -49,6 +49,8 @@ python run_wumpus_world.py \
     --goal-temperature "$(read_param "['wumpus_world']['goal_temperature']")" \
     --seed "$(read_param "['wumpus_world']['seed']")" \
     --receding-horizon \
-    --output "data/results/wumpus_world/${METHOD}.json"
+    --output "data/results/wumpus_world/${METHOD}.json" \
+    --record-trajectories "$(read_param "['wumpus_world']['record_trajectories']")" \
+    --trajectory-dir "data/trajectories/wumpus_world/${METHOD}"
 
 echo "Wumpus World method=${METHOD} completed at $(date)"

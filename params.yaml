@@ -51,6 +51,7 @@ wumpus_world:
   wumpus_penalty: 1.0
   goal_temperature: 1.0
   seed: 0
+  record_trajectories: 5
 
 wumpus_world_methods:
   loopy:
