@@ -40,13 +40,11 @@ def main():
     parser.add_argument("--n-configs", type=int, default=15)
     parser.add_argument("--hole-fraction", type=float, default=0.2)
     parser.add_argument("--min-hamming", type=int, default=4)
-    parser.add_argument("--base-noise", type=float, default=0.4)
-    parser.add_argument("--noise-range", type=float, default=0.1)
+    parser.add_argument("--obs-noise", type=float, default=0.15)
     parser.add_argument("--slip-prob", type=float, default=0.1)
     parser.add_argument("--planning-horizon", type=int, default=15)
     parser.add_argument("--hole-penalty", type=float, default=2.0)
     parser.add_argument("--goal-temperature", type=float, default=1.0)
-    parser.add_argument("--scan-cost", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--start-pos", type=int, default=0)
     # Convergence settings
@@ -60,14 +58,13 @@ def main():
 
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos  # doubled for scan mode
+    n_states = n_pos
 
     print(f"JAX devices: {jax.devices()}")
     print(f"Frozen Lake {grid_size}x{grid_size}  region-extended")
     print(f"  Configs: {args.n_configs}  hole_fraction={args.hole_fraction}  "
           f"min_hamming={args.min_hamming}")
-    print(f"  base_noise={args.base_noise}  noise_range={args.noise_range}  "
-          f"slip_prob={args.slip_prob}")
+    print(f"  obs_noise={args.obs_noise}  slip_prob={args.slip_prob}")
     print(f"  Horizon: {args.planning_horizon}  Iterations: {args.n_iterations}")
     print(f"  hole_penalty={args.hole_penalty}  goal_temp={args.goal_temperature}")
     print(f"  Damping values: {args.damping}")
@@ -83,8 +80,7 @@ def main():
         generate_transition_tensor(grid_size, holes, slip_prob=args.slip_prob),
         dtype=jnp.float32)
     B = jnp.array(
-        generate_observation_tensor(grid_size, holes, base_noise=args.base_noise,
-                                    noise_range=args.noise_range),
+        generate_observation_tensor(grid_size, holes, obs_noise=args.obs_noise),
         dtype=jnp.float32)
     goal = jnp.array(
         generate_goal(grid_size, holes, hole_penalty=args.hole_penalty,
@@ -94,15 +90,11 @@ def main():
     print(f"  Done in {time.time() - t0:.2f}s")
     print()
 
-    # Directional channels only (last 4 of B)
+    # Neighbor-sensor channels only (last 4 of B)
     B_dir = B[n_states:]
 
-    # Action prior with scan cost
-    n_actions = 4
-    action_prior = np.array(
-        [1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
-    action_prior = action_prior / action_prior.sum()
-    action_prior = jnp.array(action_prior)
+    # Uniform prior over the 4 movement actions
+    action_prior = None
 
     # Initial beliefs
     q_current = jnp.zeros(n_states, dtype=jnp.float32).at[args.start_pos].set(1.0)

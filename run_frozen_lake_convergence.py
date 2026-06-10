@@ -73,8 +73,7 @@ def main():
     parser.add_argument("--n-configs", type=int, default=50)
     parser.add_argument("--hole-fraction", type=float, default=0.2)
     parser.add_argument("--min-hamming", type=int, default=4)
-    parser.add_argument("--base-noise", type=float, default=0.05)
-    parser.add_argument("--noise-range", type=float, default=0.15)
+    parser.add_argument("--obs-noise", type=float, default=0.15)
     parser.add_argument("--slip-prob", type=float, default=0.0)
     parser.add_argument("--planning-horizon", type=int, default=15)
     parser.add_argument("--n-iterations", type=int, default=25)
@@ -94,7 +93,7 @@ def main():
 
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos  # doubled for scan mode
+    n_states = n_pos
 
     print(f"JAX devices: {jax.devices()}")
     print(f"Frozen Lake {grid_size}x{grid_size}  method={args.method}")
@@ -115,8 +114,7 @@ def main():
         generate_transition_tensor(grid_size, holes, slip_prob=args.slip_prob),
         dtype=jnp.float32)
     B = jnp.array(
-        generate_observation_tensor(grid_size, holes, base_noise=args.base_noise,
-                                    noise_range=args.noise_range),
+        generate_observation_tensor(grid_size, holes, obs_noise=args.obs_noise),
         dtype=jnp.float32)
     goal = jnp.array(
         generate_goal(grid_size, holes, hole_penalty=args.hole_penalty,
@@ -126,9 +124,9 @@ def main():
     print(f"  Done in {time.time() - t0:.2f}s")
     print()
 
-    # Directional channels only (last 4 of B)
+    # Neighbor-sensor channels only (last 4 of B)
     B_dir = B[n_states:]
-    print(f"  Directional obs tensor: {B_dir.shape}")
+    print(f"  Neighbor-sensor obs tensor: {B_dir.shape}")
 
     # Initial beliefs
     q_current = jnp.zeros(n_states, dtype=jnp.float32).at[args.start_pos].set(1.0)

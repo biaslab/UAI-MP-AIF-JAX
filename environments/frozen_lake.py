@@ -1,27 +1,26 @@
-"""Frozen Lake environment with hidden holes and SCAN action.
+"""Frozen Lake environment with hidden holes and a local adjacency sensor.
 
-Grid world where the agent must reach a goal position while avoiding hidden holes.
-The agent observes the entire grid at every timestep: one binary channel per cell
-reporting "hole or safe". When unscanned, observation noise increases with Manhattan
-distance from the agent to the observed cell. After SCAN, all cells are observed
-near-deterministically.
+Grid world where the agent must reach a goal position while avoiding hidden
+holes. The agent observes its own position (near-deterministically) plus a
+noisy "breeze"-style sensor: one binary channel per movement direction
+reporting whether the neighboring cell in that direction contains a hole.
 Static state θ represents sampled hole configurations.
 
-State space (doubled for scan mode):
-    x: state_index(pos, scanned, n_pos) where pos = row * grid_size + col
-    mode 0 = unscanned (noisy observations), mode 1 = scanned (near-deterministic)
-    Total states: 2 * n_pos
+State space:
+    x = pos = row * grid_size + col
+    Total states: n_pos
 
 Actions:
-    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP, 4: SCAN
+    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP
 
 Observations:
     Two modalities:
-    1. Position (2*n_pos channels): deterministic, θ-independent.
-    2. Grid cell (n_pos channels): one per cell, binary "hole/safe".
-       Unscanned: noise grows with distance from agent to cell.
-       Scanned: near-deterministic.
-    Observation tensor shape: (2*n_pos + n_pos, 2, 2*n_pos, n_static)
+    1. Position (n_pos channels): near-deterministic, θ-independent.
+    2. Neighbor sensor (4 channels, order LEFT/DOWN/RIGHT/UP): channel d
+       fires if the adjacent cell in direction d is a hole. Out-of-grid
+       neighbors count as safe. Noisy: p_tp = 1 - obs_noise,
+       p_fp = obs_noise * 0.1.
+    Observation tensor shape: (n_pos + 4, 2, n_pos, n_static)
 """
 
 import numpy as np
@@ -33,8 +32,7 @@ LEFT = 0
 DOWN = 1
 RIGHT = 2
 UP = 3
-SCAN = 4
-N_ACTIONS = 5
+N_ACTIONS = 4
 N_MOVEMENT_ACTIONS = 4
 
 # Movement deltas: (delta_row, delta_col)
@@ -45,20 +43,9 @@ MOVEMENT = {
     UP: (-1, 0),
 }
 
+N_SENSOR_CHANNELS = 4  # one per movement direction
 
 N_OBS_TYPES = 2
-
-
-def state_index(pos: int, scanned: int, n_pos: int) -> int:
-    """Compute flat state index: x = pos + scanned * n_pos."""
-    return pos + scanned * n_pos
-
-
-def unpack_state(x: int, n_pos: int) -> tuple[int, int]:
-    """Unpack flat state index into (pos, scanned)."""
-    scanned = x // n_pos
-    pos = x % n_pos
-    return pos, scanned
 
 
 def pos_to_rc(pos: int, grid_size: int) -> tuple[int, int]:
@@ -71,14 +58,23 @@ def rc_to_pos(row: int, col: int, grid_size: int) -> int:
     return row * grid_size + col
 
 
+def neighbor_in_direction(pos: int, direction: int, grid_size: int) -> int | None:
+    """Neighbor of `pos` in movement direction `direction`, or None if off-grid."""
+    row, col = pos_to_rc(pos, grid_size)
+    dr, dc = MOVEMENT[direction]
+    nr, nc = row + dr, col + dc
+    if 0 <= nr < grid_size and 0 <= nc < grid_size:
+        return rc_to_pos(nr, nc, grid_size)
+    return None
+
+
 def get_neighbors(pos: int, grid_size: int) -> list[int]:
     """Get valid orthogonal neighbors of a position."""
-    row, col = pos_to_rc(pos, grid_size)
     neighbors = []
-    for dr, dc in MOVEMENT.values():
-        nr, nc = row + dr, col + dc
-        if 0 <= nr < grid_size and 0 <= nc < grid_size:
-            neighbors.append(rc_to_pos(nr, nc, grid_size))
+    for d in range(N_MOVEMENT_ACTIONS):
+        nb = neighbor_in_direction(pos, d, grid_size)
+        if nb is not None:
+            neighbors.append(nb)
     return neighbors
 
 
@@ -132,7 +128,7 @@ def sample_configs(
                      0 = no constraint (pure random).
 
     Returns:
-        holes: (n_configs, n_states) binary array.
+        holes: (n_configs, n_pos) binary array.
                holes[θ, pos] = 1 if pos is a hole in config θ.
     """
     n_states = grid_size * grid_size
@@ -202,10 +198,6 @@ def generate_transition_tensor(
 ) -> np.ndarray:
     """Generate transition tensor T(x_new, x_old, θ, action).
 
-    State space is doubled: x = pos + scanned * n_pos.
-    Movement actions (0-3) preserve scan mode. SCAN action (4) transitions
-    from unscanned to scanned (deterministic, no slip).
-
     Args:
         grid_size: Grid size
         holes: (n_configs, n_pos) hole configurations
@@ -213,10 +205,10 @@ def generate_transition_tensor(
         goal_pos: Goal position (absorbing). Defaults to last cell.
 
     Returns:
-        T: (2*n_pos, 2*n_pos, n_static, 5) transition tensor
+        T: (n_pos, n_pos, n_static, 4) transition tensor
     """
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos  # doubled for scan mode
+    n_states = n_pos
     n_static = holes.shape[0]
 
     if goal_pos is None:
@@ -225,15 +217,12 @@ def generate_transition_tensor(
     T = np.zeros((n_states, n_states, n_static, N_ACTIONS), dtype=np.float32)
 
     for theta in range(n_static):
-        for x_old in range(n_states):
-            pos_old, scanned_old = unpack_state(x_old, n_pos)
-
-            # Absorbing states: holes and goal (in both modes)
+        for pos_old in range(n_states):
+            # Absorbing states: holes and goal
             if holes[theta, pos_old] == 1.0 or pos_old == goal_pos:
-                T[x_old, x_old, theta, :] = 1.0
+                T[pos_old, pos_old, theta, :] = 1.0
                 continue
 
-            # Movement actions (0-3): preserve scan mode, apply slip
             for intended_action in range(N_MOVEMENT_ACTIONS):
                 for actual_action in range(N_MOVEMENT_ACTIONS):
                     if actual_action == intended_action:
@@ -244,22 +233,10 @@ def generate_transition_tensor(
                     if prob == 0.0:
                         continue
 
-                    row, col = pos_to_rc(pos_old, grid_size)
-                    dr, dc = MOVEMENT[actual_action]
-                    new_row, new_col = row + dr, col + dc
+                    nb = neighbor_in_direction(pos_old, actual_action, grid_size)
+                    pos_new = nb if nb is not None else pos_old  # wall collision
 
-                    if 0 <= new_row < grid_size and 0 <= new_col < grid_size:
-                        pos_new = rc_to_pos(new_row, new_col, grid_size)
-                    else:
-                        pos_new = pos_old  # wall collision
-
-                    x_new = state_index(pos_new, scanned_old, n_pos)
-                    T[x_new, x_old, theta, intended_action] += prob
-
-            # SCAN action (4): deterministic, no slip
-            # unscanned -> scanned (same position), scanned -> stays scanned
-            x_new_scan = state_index(pos_old, 1, n_pos)
-            T[x_new_scan, x_old, theta, SCAN] = 1.0
+                    T[pos_new, pos_old, theta, intended_action] += prob
 
     return T
 
@@ -267,41 +244,39 @@ def generate_transition_tensor(
 def generate_observation_tensor(
     grid_size: int,
     holes: np.ndarray,
-    base_noise: float = 0.05,
-    noise_range: float = 0.15,
+    obs_noise: float = 0.15,
 ) -> np.ndarray:
     """Generate observation tensor B(channel, obs_type, x, θ).
 
-    State space is doubled (2*n_pos) for scan mode.
-
     Two modalities:
-    1. Position channels (0..2*n_pos-1): deterministic, θ-independent.
-       Channel c fires iff agent is at state c.
-    2. Grid cell channels (2*n_pos..3*n_pos-1): one per cell, binary
-       "hole/safe" sensor. Fires if there is a hole at cell c.
-       Unscanned mode: noise grows with Manhattan distance from agent to cell.
-       Scanned mode: near-deterministic (p_tp=0.999, p_fp=0.001).
+    1. Position channels (0..n_pos-1): near-deterministic, θ-independent.
+       Channel c fires iff agent is at position c.
+    2. Neighbor sensor channels (n_pos..n_pos+3, order LEFT/DOWN/RIGHT/UP):
+       channel d fires if the neighbor of the agent's position in direction d
+       is a hole in config θ. Out-of-grid neighbors count as safe.
+       p_tp = 1 - obs_noise, p_fp = obs_noise * 0.1.
 
     Args:
         grid_size: Grid size
         holes: (n_configs, n_pos) hole configurations
-        base_noise: Minimum noise level (agent at same cell) for unscanned mode
-        noise_range: Additional noise at maximum Manhattan distance
+        obs_noise: Sensor noise level
 
     Returns:
-        B: (2*n_pos + n_pos, 2, 2*n_pos, n_static) observation tensor.
+        B: (n_pos + 4, 2, n_pos, n_static) observation tensor.
     """
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos
+    n_states = n_pos
     n_configs = holes.shape[0]
-    max_dist = 2 * (grid_size - 1)  # max Manhattan distance on grid
 
-    n_channels = n_states + n_pos  # position channels + grid cell channels
+    p_tp = 1.0 - obs_noise
+    p_fp = obs_noise * 0.1
+
+    n_channels = n_pos + N_SENSOR_CHANNELS
     B = np.zeros((n_channels, N_OBS_TYPES, n_states, n_configs), dtype=np.float32)
 
-    # --- Position channels (deterministic, θ-independent) ---
+    # --- Position channels (near-deterministic, θ-independent) ---
     for x in range(n_states):
-        for c in range(n_states):
+        for c in range(n_pos):
             if c == x:
                 B[c, 1, x, :] = 0.999
                 B[c, 0, x, :] = 0.001
@@ -309,38 +284,17 @@ def generate_observation_tensor(
                 B[c, 1, x, :] = 0.001
                 B[c, 0, x, :] = 0.999
 
-    # --- Grid cell channels (stochastic, θ-dependent) ---
-    # Channel (n_states + cell) fires if there is a hole at `cell`.
-    # Noise depends on Manhattan distance from agent position to observed cell.
+    # --- Neighbor sensor channels (stochastic, θ-dependent) ---
     for theta in range(n_configs):
         for pos in range(n_pos):
-            row_a, col_a = divmod(pos, grid_size)
+            for d in range(N_SENSOR_CHANNELS):
+                nb = neighbor_in_direction(pos, d, grid_size)
+                hole_adjacent = nb is not None and holes[theta, nb] == 1.0
 
-            for cell in range(n_pos):
-                row_c, col_c = divmod(cell, grid_size)
-                dist = abs(row_a - row_c) + abs(col_a - col_c)
-                noise = base_noise + noise_range * dist / max_dist if max_dist > 0 else base_noise
-
-                has_hole = holes[theta, cell] == 1.0
-                ch = n_states + cell
-
-                # Unscanned mode: noisy
-                x_unscanned = state_index(pos, 0, n_pos)
-                if has_hole:
-                    p = np.clip(1.0 - noise, 0.01, 0.99)
-                else:
-                    p = np.clip(noise, 0.01, 0.99)
-                B[ch, 1, x_unscanned, theta] = p
-                B[ch, 0, x_unscanned, theta] = 1.0 - p
-
-                # Scanned mode: near-deterministic
-                x_scanned = state_index(pos, 1, n_pos)
-                if has_hole:
-                    B[ch, 1, x_scanned, theta] = 0.999
-                    B[ch, 0, x_scanned, theta] = 0.001
-                else:
-                    B[ch, 1, x_scanned, theta] = 0.001
-                    B[ch, 0, x_scanned, theta] = 0.999
+                ch = n_pos + d
+                p = p_tp if hole_adjacent else p_fp
+                B[ch, 1, pos, theta] = p
+                B[ch, 0, pos, theta] = 1.0 - p
 
     return B
 
@@ -355,9 +309,8 @@ def generate_goal(
 ) -> np.ndarray:
     """Generate per-config preference factor C(x, θ) via softmax over rewards.
 
-    State space is doubled (2*n_pos). Goal and hole penalties apply in both
-    scan modes. Each config θ gets its own reward vector based on which
-    positions are holes in that config.
+    Each config θ gets its own reward vector based on which positions are
+    holes in that config.
 
     Args:
         grid_size: Grid size
@@ -368,10 +321,10 @@ def generate_goal(
         temperature: Softmax temperature (lower = more peaked)
 
     Returns:
-        goal: (2*n_pos, n_configs) per-config softmax preference
+        goal: (n_pos, n_configs) per-config softmax preference
     """
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos
+    n_states = n_pos
     n_static = holes.shape[0]
     if goal_pos is None:
         goal_pos = n_pos - 1
@@ -379,13 +332,10 @@ def generate_goal(
     rewards = np.zeros((n_states, n_static), dtype=np.float64)
 
     for theta in range(n_static):
-        for mode in range(2):
-            # Goal reward in both modes
-            rewards[state_index(goal_pos, mode, n_pos), theta] = goal_reward
-            # Hole penalty: full penalty for actual holes in this config
-            for pos in range(n_pos):
-                if holes[theta, pos] == 1.0:
-                    rewards[state_index(pos, mode, n_pos), theta] -= hole_penalty
+        rewards[goal_pos, theta] = goal_reward
+        for pos in range(n_pos):
+            if holes[theta, pos] == 1.0:
+                rewards[pos, theta] -= hole_penalty
 
     scaled = rewards / temperature
     scaled -= scaled.max(axis=0, keepdims=True)  # numerical stability per config
@@ -401,23 +351,20 @@ def generate_goal(
 
 @dataclass
 class FrozenLakeStepResult:
-    obs: np.ndarray  # (3*n_pos,) position one-hot + grid cell sensors
+    obs: np.ndarray  # (n_pos + 4,) position one-hot + neighbor sensors
     reward: float
     terminated: bool
     truncated: bool
 
 
 class FrozenLakeEnv:
-    """Simple Frozen Lake simulator with SCAN action.
-
-    State includes scan mode: agent starts unscanned, SCAN action switches
-    to scanned mode with near-deterministic observations.
+    """Simple Frozen Lake simulator with a local adjacency sensor.
 
     Args:
         grid_size: Grid size
         holes: (n_configs, n_pos) pre-sampled hole configurations
-        obs_tensor: (3*n_pos, 2, 2*n_pos, n_configs) observation tensor
-        slip_prob: Movement noise (only affects movement actions, not SCAN)
+        obs_tensor: (n_pos + 4, 2, n_pos, n_configs) observation tensor
+        slip_prob: Movement noise
         max_steps: Maximum steps per episode
         goal_pos: Goal position (defaults to last cell)
     """
@@ -433,7 +380,7 @@ class FrozenLakeEnv:
     ):
         self.grid_size = grid_size
         self.n_pos = grid_size * grid_size
-        self.n_obs_channels = obs_tensor.shape[0] if obs_tensor is not None else (3 * self.n_pos)
+        self.n_obs_channels = obs_tensor.shape[0] if obs_tensor is not None else (self.n_pos + N_SENSOR_CHANNELS)
         self.holes = holes
         self.obs_tensor = obs_tensor
         self.slip_prob = slip_prob
@@ -443,7 +390,6 @@ class FrozenLakeEnv:
 
         self._rng = np.random.default_rng(0)
         self._position = self.start_pos
-        self._scanned = 0  # 0 = unscanned, 1 = scanned
         self._config_idx = 0
         self._steps = 0
 
@@ -458,8 +404,8 @@ class FrozenLakeEnv:
 
     @property
     def _state_idx(self) -> int:
-        """Current flat state index (pos + scanned * n_pos)."""
-        return state_index(self._position, self._scanned, self.n_pos)
+        """Current flat state index (= position)."""
+        return self._position
 
     def reset(self, seed: int | None = None, config_idx: int | None = None) -> FrozenLakeStepResult:
         """Reset environment.
@@ -477,7 +423,6 @@ class FrozenLakeEnv:
             self._config_idx = int(self._rng.integers(0, self.holes.shape[0]))
 
         self._position = self.start_pos
-        self._scanned = 0
         self._steps = 0
 
         return FrozenLakeStepResult(
@@ -490,22 +435,14 @@ class FrozenLakeEnv:
     def step(self, action: int) -> FrozenLakeStepResult:
         self._steps += 1
 
-        if action == SCAN:
-            # SCAN: switch to scanned mode, no movement, no slip
-            self._scanned = 1
-        else:
-            # Movement action: apply slip (only among movement actions 0-3)
-            if self.slip_prob > 0 and self._rng.random() < self.slip_prob:
-                other_actions = [a for a in range(N_MOVEMENT_ACTIONS) if a != action]
-                action = int(self._rng.choice(other_actions))
+        # Apply slip (only among movement actions 0-3)
+        if self.slip_prob > 0 and self._rng.random() < self.slip_prob:
+            other_actions = [a for a in range(N_MOVEMENT_ACTIONS) if a != action]
+            action = int(self._rng.choice(other_actions))
 
-            # Move
-            row, col = pos_to_rc(self._position, self.grid_size)
-            dr, dc = MOVEMENT[action]
-            new_row, new_col = row + dr, col + dc
-
-            if 0 <= new_row < self.grid_size and 0 <= new_col < self.grid_size:
-                self._position = rc_to_pos(new_row, new_col, self.grid_size)
+        nb = neighbor_in_direction(self._position, action, self.grid_size)
+        if nb is not None:
+            self._position = nb
 
         # Termination
         on_hole = self.holes[self._config_idx, self._position] == 1.0
@@ -531,22 +468,20 @@ class FrozenLakeEnv:
                 p_fire = self.obs_tensor[c, 1, x, self._config_idx]
                 obs[c] = float(self._rng.random() < p_fire)
         else:
-            # Fallback: deterministic position + grid cell observation
-            n_states = 2 * self.n_pos
-            obs = np.zeros(n_states + self.n_pos, dtype=np.float32)
+            # Fallback: deterministic position + neighbor sensors
+            obs = np.zeros(self.n_pos + N_SENSOR_CHANNELS, dtype=np.float32)
             obs[x] = 1.0  # position one-hot
             config = self.holes[self._config_idx] if self.holes is not None else None
             if config is not None:
-                for cell in range(self.n_pos):
-                    obs[n_states + cell] = float(config[cell] == 1.0)
+                for d in range(N_SENSOR_CHANNELS):
+                    nb = neighbor_in_direction(x, d, self.grid_size)
+                    obs[self.n_pos + d] = float(nb is not None and config[nb] == 1.0)
         return obs
 
     def render_ascii(self) -> str:
         """Render current state as ASCII grid."""
         lines = []
         config = self.holes[self._config_idx]
-        mode_str = "SCANNED" if self._scanned else "UNSCANNED"
-        lines.append(f"[{mode_str}]")
         for r in range(self.grid_size):
             row_chars = []
             for c in range(self.grid_size):
