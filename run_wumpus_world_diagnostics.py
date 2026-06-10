@@ -23,7 +23,7 @@ from environments.wumpus_world import (
 )
 from agents.wumpus_agent import create_agent
 
-ACTION_NAMES = ["left", "down", "right", "up", "scan"]
+ACTION_NAMES = ["left", "down", "right", "up", "sense"]
 FEATURE_OBS_NAMES = ["breeze", "stench", "glitter"]
 
 
@@ -199,11 +199,11 @@ def run_diagnostic_episode(agent, env, args, pits, wumpus_arr, gold):
         print()
 
         # --- POSITION BELIEF ---
-        # Marginalize over scan mode: sum unscanned + scanned halves
+        # Marginalize over the sense bit: sum idle + sensed halves
         print("  [POSITION BELIEF]")
         q_full = agent.q_current_state
         q_pos = q_full[:n_states] + q_full[n_states:]  # (n_pos,)
-        scan_mass = float(q_full[n_states:].sum())
+        sense_mass = float(q_full[n_states:].sum())
         print_position_grid(q_pos, grid_size)
 
         map_pos = int(jnp.argmax(q_pos))
@@ -211,7 +211,7 @@ def run_diagnostic_episode(agent, env, args, pits, wumpus_arr, gold):
         map_p = float(q_pos[map_pos])
         correct = (map_pos == env._position)
         print(f"    MAP position: ({map_r},{map_c}) p={map_p:.4f} {'CORRECT' if correct else 'WRONG'}")
-        print(f"    P(scanned): {scan_mass:.4f}")
+        print(f"    P(sensed): {sense_mass:.4f}")
         print(f"    Position entropy: {entropy(q_pos):.2f} bits (max={max_entropy_pos:.2f})")
         print()
 
@@ -287,7 +287,7 @@ def main():
                                  "dyn-channel", "nuijten", "vbp-channel",
                                  "precise-info-seeking", "active-inference"])
     parser.add_argument("--damping", type=float, default=1.0)
-    parser.add_argument("--scan-cost", type=float, default=0.1)
+    parser.add_argument("--sense-cost", type=float, default=0.1)
     parser.add_argument("--receding-horizon", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -345,7 +345,7 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
-    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.sense_cost], dtype=np.float32)
     action_prior = action_prior / action_prior.sum()
 
     agent = create_agent(

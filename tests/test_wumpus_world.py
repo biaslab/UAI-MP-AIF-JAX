@@ -21,7 +21,7 @@ class TestWumpusWorldTensors:
 
         self.grid_size = 4
         self.n_pos = self.grid_size * self.grid_size
-        self.n_states = 2 * self.n_pos  # doubled for scan mode
+        self.n_states = 2 * self.n_pos  # doubled for the transient sense bit
         self.n_configs = 10
         self.n_actions = N_ACTIONS
         self.start_pos = 0
@@ -74,8 +74,8 @@ class TestWumpusWorldTensors:
         for theta in range(self.n_configs):
             for pos in range(self.n_pos):
                 if self.pits[theta, pos] == 1.0:
-                    for scanned in range(2):
-                        x = state_index(pos, scanned, self.n_pos)
+                    for sensed in range(2):
+                        x = state_index(pos, sensed, self.n_pos)
                         for a in range(self.n_actions):
                             assert np.isclose(self.T[x, x, theta, a], 1.0)
 
@@ -84,10 +84,39 @@ class TestWumpusWorldTensors:
         for theta in range(self.n_configs):
             for pos in range(self.n_pos):
                 if self.wumpus[theta, pos] == 1.0:
-                    for scanned in range(2):
-                        x = state_index(pos, scanned, self.n_pos)
+                    for sensed in range(2):
+                        x = state_index(pos, sensed, self.n_pos)
                         for a in range(self.n_actions):
                             assert np.isclose(self.T[x, x, theta, a], 1.0)
+
+    def test_movement_resets_sense_bit(self):
+        """Movement from any non-absorbing state must land in sensed=0."""
+        from environments.wumpus_world import state_index, N_MOVEMENT_ACTIONS
+
+        theta = 0
+        for pos in range(self.n_pos):
+            if self.pits[theta, pos] == 1.0 or self.wumpus[theta, pos] == 1.0:
+                continue
+            x_sensed = state_index(pos, 1, self.n_pos)
+            for a in range(N_MOVEMENT_ACTIONS):
+                # No probability mass may land in the sensed half
+                sensed_mass = self.T[self.n_pos:, x_sensed, theta, a].sum()
+                assert np.isclose(sensed_mass, 0.0), (
+                    f"Movement from pos={pos} should reset the sense bit"
+                )
+
+    def test_sense_sets_bit(self):
+        """SENSE keeps the position and sets the sensed bit deterministically."""
+        from environments.wumpus_world import state_index, SENSE
+
+        theta = 0
+        for pos in range(self.n_pos):
+            if self.pits[theta, pos] == 1.0 or self.wumpus[theta, pos] == 1.0:
+                continue
+            for sensed in range(2):
+                x_old = state_index(pos, sensed, self.n_pos)
+                x_new = state_index(pos, 1, self.n_pos)
+                assert np.isclose(self.T[x_new, x_old, theta, SENSE], 1.0)
 
     def test_observation_shape(self):
         n_pos = self.grid_size * self.grid_size
@@ -113,70 +142,78 @@ class TestWumpusWorldTensors:
                         has_non_onehot = True
         assert has_non_onehot, "Observation tensor should not be fully deterministic (one-hot)"
 
+    def test_features_uninformative_when_idle(self):
+        """In sensed=0 states, feature channels must be 0.5/0.5 (zero info)."""
+        from environments.wumpus_world import state_index, BREEZE, STENCH, GLITTER
+
+        for theta in range(self.n_configs):
+            for pos in range(self.n_pos):
+                x = state_index(pos, 0, self.n_pos)
+                for ch in (BREEZE, STENCH, GLITTER):
+                    assert np.isclose(self.B[ch, 0, x, theta], 0.5)
+                    assert np.isclose(self.B[ch, 1, x, theta], 0.5)
+
     def test_breeze_correctness(self):
-        """Breeze probability should be high when adjacent to a pit, low otherwise."""
+        """When sensed, breeze fires with high prob iff adjacent to a pit."""
         from environments.wumpus_world import get_neighbors, state_index, BREEZE
 
         for theta in range(self.n_configs):
             for pos in range(self.n_pos):
                 neighbors = get_neighbors(pos, self.grid_size)
                 has_pit_neighbor = any(self.pits[theta, n] == 1.0 for n in neighbors)
-                for scanned in range(2):
-                    x = state_index(pos, scanned, self.n_pos)
-                    if has_pit_neighbor:
-                        assert self.B[BREEZE, 1, x, theta] > 0.5, (
-                            f"P(breeze=1) should be high near pit at pos={pos}, θ={theta}"
-                        )
-                    else:
-                        assert self.B[BREEZE, 0, x, theta] > 0.5, (
-                            f"P(breeze=0) should be high away from pit at pos={pos}, θ={theta}"
-                        )
+                x = state_index(pos, 1, self.n_pos)
+                if has_pit_neighbor:
+                    assert self.B[BREEZE, 1, x, theta] > 0.5, (
+                        f"P(breeze=1) should be high near pit at pos={pos}, θ={theta}"
+                    )
+                else:
+                    assert self.B[BREEZE, 0, x, theta] > 0.5, (
+                        f"P(breeze=0) should be high away from pit at pos={pos}, θ={theta}"
+                    )
 
     def test_stench_correctness(self):
-        """Stench probability should be high when adjacent to wumpus, low otherwise."""
+        """When sensed, stench fires with high prob iff adjacent to the wumpus."""
         from environments.wumpus_world import get_neighbors, state_index, STENCH
 
         for theta in range(self.n_configs):
             for pos in range(self.n_pos):
                 neighbors = get_neighbors(pos, self.grid_size)
                 has_wumpus_neighbor = any(self.wumpus[theta, n] == 1.0 for n in neighbors)
-                for scanned in range(2):
-                    x = state_index(pos, scanned, self.n_pos)
-                    if has_wumpus_neighbor:
-                        assert self.B[STENCH, 1, x, theta] > 0.5, (
-                            f"P(stench=1) should be high near wumpus at pos={pos}, θ={theta}"
-                        )
-                    else:
-                        assert self.B[STENCH, 0, x, theta] > 0.5, (
-                            f"P(stench=0) should be high away from wumpus at pos={pos}, θ={theta}"
-                        )
+                x = state_index(pos, 1, self.n_pos)
+                if has_wumpus_neighbor:
+                    assert self.B[STENCH, 1, x, theta] > 0.5, (
+                        f"P(stench=1) should be high near wumpus at pos={pos}, θ={theta}"
+                    )
+                else:
+                    assert self.B[STENCH, 0, x, theta] > 0.5, (
+                        f"P(stench=0) should be high away from wumpus at pos={pos}, θ={theta}"
+                    )
 
     def test_glitter_correctness(self):
-        """Glitter probability should be high on gold cell, low otherwise."""
+        """When sensed, glitter fires with high prob iff on the gold cell."""
         from environments.wumpus_world import state_index, GLITTER
 
         for theta in range(self.n_configs):
             for pos in range(self.n_pos):
-                for scanned in range(2):
-                    x = state_index(pos, scanned, self.n_pos)
-                    if self.gold[theta, pos] == 1.0:
-                        assert self.B[GLITTER, 1, x, theta] > 0.5, (
-                            f"P(glitter=1) should be high on gold at pos={pos}, θ={theta}"
-                        )
-                    else:
-                        assert self.B[GLITTER, 0, x, theta] > 0.5, (
-                            f"P(glitter=0) should be high off gold at pos={pos}, θ={theta}"
-                        )
+                x = state_index(pos, 1, self.n_pos)
+                if self.gold[theta, pos] == 1.0:
+                    assert self.B[GLITTER, 1, x, theta] > 0.5, (
+                        f"P(glitter=1) should be high on gold at pos={pos}, θ={theta}"
+                    )
+                else:
+                    assert self.B[GLITTER, 0, x, theta] > 0.5, (
+                        f"P(glitter=0) should be high off gold at pos={pos}, θ={theta}"
+                    )
 
     def test_position_channel_correctness(self):
-        """Position channel c should fire with high prob at position c, low elsewhere."""
+        """Position channel c should fire at position c in BOTH sense modes."""
         from environments.wumpus_world import state_index, N_FEATURE_CHANNELS
 
         for target_pos in range(self.n_pos):
             ch = N_FEATURE_CHANNELS + target_pos
             for pos in range(self.n_pos):
-                for scanned in range(2):
-                    x = state_index(pos, scanned, self.n_pos)
+                for sensed in range(2):
+                    x = state_index(pos, sensed, self.n_pos)
                     # θ-independent: check first config
                     if pos == target_pos:
                         assert self.B[ch, 1, x, 0] > 0.5, (
@@ -189,6 +226,14 @@ class TestWumpusWorldTensors:
             # θ-independent: all configs should be identical
             for theta in range(1, self.n_configs):
                 assert np.allclose(self.B[ch, :, :, 0], self.B[ch, :, :, theta])
+
+    def test_position_channels_mode_independent(self):
+        """Position channels must have the same accuracy in both sense modes."""
+        from environments.wumpus_world import N_FEATURE_CHANNELS
+
+        B_idle = self.B[N_FEATURE_CHANNELS:, :, :self.n_pos, :]
+        B_sensed = self.B[N_FEATURE_CHANNELS:, :, self.n_pos:, :]
+        assert np.allclose(B_idle, B_sensed)
 
     def test_goal_shape(self):
         assert self.goal.shape == (self.n_states, self.n_configs)
@@ -239,6 +284,18 @@ class TestWumpusWorldEnv:
         result = self.env.reset(seed=0)
         for val in result.obs:
             assert val == 0.0 or val == 1.0
+
+    def test_sense_bit_transient(self):
+        """SENSE sets the bit; any movement resets it."""
+        from environments.wumpus_world import SENSE, RIGHT
+
+        self.env.reset(seed=0, config_idx=0)
+        assert self.env._sensed == 0
+        self.env.step(SENSE)
+        assert self.env._sensed == 1
+        assert self.env._position == 0  # SENSE does not move
+        self.env.step(RIGHT)
+        assert self.env._sensed == 0
 
     def test_ascii_render(self):
         self.env.reset(seed=0, config_idx=0)

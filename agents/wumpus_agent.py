@@ -108,8 +108,10 @@ class _WumpusAgentBase:
     def reset(self):
         n_states = self.goal.shape[0]
         n_static = self.q_static_state.shape[0]
+        # Agent always starts at position 0 with the sense bit clear (state 0)
+        q_start = jnp.zeros(n_states, dtype=jnp.float32).at[0].set(1.0)
         return replace(self,
-            q_current_state=jnp.ones(n_states) / n_states,
+            q_current_state=q_start,
             q_static_state=jnp.ones(n_static) / n_static,
             last_action=-1,
         )
