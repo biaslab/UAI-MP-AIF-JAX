@@ -1,43 +1,53 @@
-"""RockSample[n,k] environment with distance-dependent observations.
+"""Canonical RockSample[n,k] environment with per-rock SENSE actions.
 
 Grid world where the agent must collect good rocks and exit the east edge.
-Rocks have unknown quality (good/bad) inferred from distance-dependent noisy
-observations. The agent can SCAN the nearest unscanned rock for clarity,
-SAMPLE rocks to collect them, and move in four directions.
+Rocks have unknown quality (good/bad). The agent can SENSE individual rocks
+(noisy, distance-dependent readings), SAMPLE the rock at its current position
+(which reveals its quality), and move in four directions.
 
-Static state θ represents sampled rock quality configurations.
+Observations are event-gated: rock channel r only emits an informative
+reading when the last action was SENSE_r (or a SAMPLE that revealed rock r);
+otherwise the channel emits a NO_INFO outcome. This removes the old "magic
+scan" oracle — information must be gathered one noisy reading at a time.
+
+Static state θ represents rock quality configurations (quality-only,
+exhaustive: n_static = 2^k).
 
 State space:
-    x: state_index(pos, collected_mask, scanned_mask, n_pos, n_collect, n_scan)
+    x: state_index(pos, mask, event, n_pos, n_mask, n_events)
     pos = row * grid_size + col (row-major)
-    collected_mask = 0..2^k-1 (bitmask of collected rocks)
-    scanned_mask = 0..2^k-1 (bitmask of which rocks have been scanned)
-    Total states: n_pos × 2^k × 2^k
+    mask = 0..2^k-1 (bitmask of sampled/collected rocks)
+    event = 0 (OTHER) | 1+r (SENSE_r) | k+1 (SAMPLE) — last action's role;
+            movement and no-op SAMPLEs reset it to OTHER
+    Total states: n_pos × 2^k × (k+2)
 
-Actions:
-    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP, 4: SCAN, 5: SAMPLE
+Actions (k+5):
+    0: LEFT, 1: DOWN, 2: RIGHT, 3: UP, 4..3+k: SENSE_r, 4+k: SAMPLE
 
 Observations:
-    Two modalities:
-    1. Position channels (0..n_pos-1): θ-independent, fixed noise (pos_noise).
-    2. Rock quality channels (n_pos..n_pos+k-1): θ-dependent.
-       Unscanned: accuracy = 0.5 + 0.5 * 2^(-d / half_eff_dist).
-       Scanned: near-deterministic.
-    Observation tensor shape: (n_pos + k, 2, n_states, n_configs)
+    Two modalities, three outcomes per channel (0, 1, NO_INFO=2):
+    1. Position channels (0..n_pos-1): θ-independent, fixed noise
+       (outcome 2 never emitted).
+    2. Rock quality channels (n_pos..n_pos+k-1): θ-dependent, event-gated.
+       SENSE_r: accuracy α(d) = 0.5 + 0.5 * 2^(-d / half_eff_dist) with
+       d = Chebyshev distance from agent to rock r.
+       SAMPLE-reveal (at rock r's cell, bit r set): near-deterministic.
+       Otherwise: NO_INFO with probability 1.
+    Observation tensor shape: (n_pos + k, 3, n_states, n_configs)
 """
 
 import numpy as np
 from dataclasses import dataclass
 
-# Actions
+# Movement actions; SENSE_r = 4 + r for r in 0..k-1; SAMPLE = 4 + k
 LEFT = 0
 DOWN = 1
 RIGHT = 2
 UP = 3
-SCAN = 4
-SAMPLE = 5
-N_ACTIONS = 6
 N_MOVEMENT_ACTIONS = 4
+
+# Event encoding: EVENT_SENSE_r = 1 + r for r in 0..k-1
+EVENT_OTHER = 0
 
 # Movement deltas: (delta_row, delta_col)
 MOVEMENT = {
@@ -47,25 +57,59 @@ MOVEMENT = {
     UP: (-1, 0),
 }
 
-N_OBS_TYPES = 2
+# Rock channel outcomes
+ROCK_BIT_0 = 0
+ROCK_BIT_1 = 1
+ROCK_NO_INFO = 2
+N_OBS_TYPES = 3
 
 
-def state_index(pos: int, collected_mask: int, scanned_mask: int,
-                n_pos: int, n_collect: int, n_scan: int) -> int:
+def n_actions_for(n_rocks: int) -> int:
+    """Number of actions: 4 moves + k per-rock senses + 1 sample."""
+    return N_MOVEMENT_ACTIONS + n_rocks + 1
+
+
+def sense_action(rock: int) -> int:
+    """Action index of SENSE_rock."""
+    return N_MOVEMENT_ACTIONS + rock
+
+
+def sample_action(n_rocks: int) -> int:
+    """Action index of SAMPLE."""
+    return N_MOVEMENT_ACTIONS + n_rocks
+
+
+def n_events_for(n_rocks: int) -> int:
+    """Number of event values: OTHER + k senses + SAMPLE."""
+    return n_rocks + 2
+
+
+def event_sense(rock: int) -> int:
+    """Event value for SENSE_rock."""
+    return 1 + rock
+
+
+def event_sample(n_rocks: int) -> int:
+    """Event value for SAMPLE."""
+    return n_rocks + 1
+
+
+def state_index(pos: int, mask: int, event: int,
+                n_pos: int, n_mask: int, n_events: int) -> int:
     """Compute flat state index.
 
-    x = pos + collected_mask * n_pos + scanned_mask * n_pos * n_collect
+    x = pos + mask * n_pos + event * n_pos * n_mask
     """
-    return pos + collected_mask * n_pos + scanned_mask * n_pos * n_collect
+    return pos + mask * n_pos + event * n_pos * n_mask
 
 
-def unpack_state(x: int, n_pos: int, n_collect: int, n_scan: int) -> tuple[int, int, int]:
-    """Unpack flat state index into (pos, collected_mask, scanned_mask)."""
-    scanned_mask = x // (n_pos * n_collect)
-    remainder = x % (n_pos * n_collect)
-    collected_mask = remainder // n_pos
+def unpack_state(x: int, n_pos: int, n_mask: int, n_events: int) -> tuple[int, int, int]:
+    """Unpack flat state index into (pos, mask, event)."""
+    event = x // (n_pos * n_mask)
+    remainder = x % (n_pos * n_mask)
+    mask = remainder // n_pos
     pos = remainder % n_pos
-    return pos, collected_mask, scanned_mask
+    return pos, mask, event
 
 
 def pos_to_rc(pos: int, grid_size: int) -> tuple[int, int]:
@@ -78,46 +122,22 @@ def rc_to_pos(row: int, col: int, grid_size: int) -> int:
     return row * grid_size + col
 
 
-def euclidean_distance(pos_a: int, pos_b: int, grid_size: int) -> float:
-    """Euclidean distance between two grid positions."""
+def chebyshev_distance(pos_a: int, pos_b: int, grid_size: int) -> int:
+    """Chebyshev distance between two grid positions (canonical RockSample)."""
     ra, ca = pos_to_rc(pos_a, grid_size)
     rb, cb = pos_to_rc(pos_b, grid_size)
-    return ((ra - rb) ** 2 + (ca - cb) ** 2) ** 0.5
+    return max(abs(ra - rb), abs(ca - cb))
+
+
+def sense_accuracy(distance: float, half_eff_dist: float) -> float:
+    """Distance-dependent sensor accuracy α(d) = 0.5 + 0.5 * 2^(-d/d0)."""
+    return 0.5 + 0.5 * (2.0 ** (-distance / half_eff_dist))
 
 
 def is_exit(pos: int, grid_size: int) -> bool:
     """Check if position is in the exit column (rightmost)."""
     _, col = pos_to_rc(pos, grid_size)
     return col == grid_size - 1
-
-
-def nearest_unscanned_rock(
-    pos: int,
-    scanned_mask: int,
-    rock_positions: np.ndarray,
-    grid_size: int,
-) -> int:
-    """Find the nearest unscanned rock by Euclidean distance.
-
-    Args:
-        pos: Current grid position
-        scanned_mask: Bitmask of already-scanned rocks
-        rock_positions: (k,) array of rock positions
-        grid_size: Grid size
-
-    Returns:
-        Index j of nearest unscanned rock, or -1 if all scanned.
-    """
-    best_j = -1
-    best_dist = float('inf')
-    for j, rp in enumerate(rock_positions):
-        if scanned_mask & (1 << j):
-            continue  # already scanned
-        d = euclidean_distance(pos, int(rp), grid_size)
-        if d < best_dist:
-            best_dist = d
-            best_j = j
-    return best_j
 
 
 def sample_rock_positions(
@@ -195,19 +215,27 @@ def generate_transition_tensor(
     θ-independent (same dynamics regardless of rock quality) but tiled across
     all 2^k configs for framework compatibility.
 
+    Semantics:
+        Movement: slips among the 4 moves only; resets event to OTHER.
+        SENSE_r: deterministic, keeps position/mask, sets event to 1+r.
+        SAMPLE at uncollected rock r's cell: sets mask bit r, event SAMPLE.
+        SAMPLE elsewhere / on a collected rock: no-op, resets event to OTHER.
+        Exit column: absorbing for all actions (event preserved).
+
     Args:
         grid_size: Grid size
         rock_positions: (k,) rock positions
         n_rocks: Number of rocks
         slip_prob: Movement slip probability
     Returns:
-        T: (n_states, n_states, 2^k, 6) transition tensor
+        T: (n_states, n_states, 2^k, k+5) transition tensor
     """
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_configs = n_collect  # exhaustive: one config per quality assignment
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_configs = n_mask  # exhaustive: one config per quality assignment
+    n_states = n_pos * n_mask * n_events
+    n_actions = n_actions_for(n_rocks)
 
     # Build rock position lookup: pos -> rock index
     rock_at_pos = {}
@@ -220,17 +248,17 @@ def generate_transition_tensor(
         exit_positions.add(rc_to_pos(r, grid_size - 1, grid_size))
 
     # Build for θ=0 then tile
-    T_single = np.zeros((n_states, n_states, 1, N_ACTIONS), dtype=np.float32)
+    T_single = np.zeros((n_states, n_states, 1, n_actions), dtype=np.float32)
 
     for x_old in range(n_states):
-        pos_old, coll_old, scanned_old = unpack_state(x_old, n_pos, n_collect, n_scan)
+        pos_old, mask_old, _ = unpack_state(x_old, n_pos, n_mask, n_events)
 
         # Exit positions are absorbing
         if pos_old in exit_positions:
             T_single[x_old, x_old, 0, :] = 1.0
             continue
 
-        # Movement actions (0-3)
+        # Movement actions (0-3): reset event to OTHER
         for intended in range(N_MOVEMENT_ACTIONS):
             for actual in range(N_MOVEMENT_ACTIONS):
                 if actual == intended:
@@ -249,33 +277,28 @@ def generate_transition_tensor(
                 else:
                     pos_new = pos_old  # wall collision
 
-                x_new = state_index(pos_new, coll_old, scanned_old, n_pos, n_collect, n_scan)
+                x_new = state_index(pos_new, mask_old, EVENT_OTHER,
+                                    n_pos, n_mask, n_events)
                 T_single[x_new, x_old, 0, intended] += prob
 
-        # SCAN (4): find nearest unscanned rock, set its bit
-        j = nearest_unscanned_rock(pos_old, scanned_old, rock_positions, grid_size)
-        if j >= 0:
-            scanned_new = scanned_old | (1 << j)
-            x_scan = state_index(pos_old, coll_old, scanned_new, n_pos, n_collect, n_scan)
-        else:
-            # All rocks already scanned: self-loop
-            x_scan = x_old
-        T_single[x_scan, x_old, 0, SCAN] = 1.0
+        # SENSE_r actions: deterministic, set event to 1+r
+        for r in range(n_rocks):
+            x_new = state_index(pos_old, mask_old, event_sense(r),
+                                n_pos, n_mask, n_events)
+            T_single[x_new, x_old, 0, sense_action(r)] = 1.0
 
-        # SAMPLE (5): if at rock j and rock j not collected, set bit j
-        if pos_old in rock_at_pos:
+        # SAMPLE: at uncollected rock -> set mask bit + SAMPLE event;
+        # otherwise no-op with event reset to OTHER
+        a_sample = sample_action(n_rocks)
+        if pos_old in rock_at_pos and not (mask_old & (1 << rock_at_pos[pos_old])):
             j = rock_at_pos[pos_old]
-            if not (coll_old & (1 << j)):
-                # Collect rock j
-                coll_new = coll_old | (1 << j)
-                x_new = state_index(pos_old, coll_new, scanned_old, n_pos, n_collect, n_scan)
-                T_single[x_new, x_old, 0, SAMPLE] = 1.0
-            else:
-                # Already collected: self-loop
-                T_single[x_old, x_old, 0, SAMPLE] = 1.0
+            mask_new = mask_old | (1 << j)
+            x_new = state_index(pos_old, mask_new, event_sample(n_rocks),
+                                n_pos, n_mask, n_events)
         else:
-            # Not at a rock: self-loop
-            T_single[x_old, x_old, 0, SAMPLE] = 1.0
+            x_new = state_index(pos_old, mask_old, EVENT_OTHER,
+                                n_pos, n_mask, n_events)
+        T_single[x_new, x_old, 0, a_sample] = 1.0
 
     # Tile across θ
     T = np.tile(T_single, (1, 1, n_configs, 1))
@@ -292,74 +315,76 @@ def generate_observation_tensor(
 ) -> np.ndarray:
     """Generate observation tensor B(channel, obs_type, x, θ).
 
-    Two modalities:
-    1. Position channels (0..n_pos-1): θ-independent.
-       Always use fixed noise (pos_noise).
-    2. Rock quality channels (n_pos..n_pos+k-1): θ-dependent.
-       P(correct | d) = 0.5 + 0.5 * 2^(-d / half_eff_dist)
-       Scanned (bit j set in scanned_mask): near-deterministic.
+    Two modalities with three outcomes (0, 1, NO_INFO=2):
+    1. Position channels (0..n_pos-1): θ-independent, fixed noise.
+       Outcome 2 has probability 0.
+    2. Rock quality channels (n_pos..n_pos+k-1): θ-dependent, event-gated.
+       event == SENSE_r: emits rock r's quality bit with accuracy
+           α(d) = 0.5 + 0.5 * 2^(-d / half_eff_dist), d = Chebyshev distance.
+       event == SAMPLE at rock r's cell with bit r set: near-deterministic
+           reveal of rock r's quality.
+       otherwise: NO_INFO with probability 1.
 
     Args:
         grid_size: Grid size
         rock_positions: (k,) rock positions
         qualities: (n_configs, k) binary rock quality
         n_rocks: Number of rocks
-        half_eff_dist: Distance at which observation accuracy halves toward 0.5
+        half_eff_dist: Distance d0 at which accuracy halves toward 0.5
         pos_noise: Position channel noise
 
     Returns:
-        B: (n_pos + k, 2, n_states, n_configs)
+        B: (n_pos + k, 3, n_states, n_configs)
     """
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_states = n_pos * n_mask * n_events
     n_configs = qualities.shape[0]
     n_channels = n_pos + n_rocks
 
     p_tp_pos = np.clip(1.0 - pos_noise, 0.01, 0.99)
     p_fp_pos = np.clip(pos_noise * 0.1, 0.01, 0.99)
-    p_tp_s = 0.999
-    p_fp_s = 0.001
+    p_reveal = 0.999
 
     B = np.zeros((n_channels, N_OBS_TYPES, n_states, n_configs), dtype=np.float32)
 
-    # --- Position channels (θ-independent, always fixed noise) ---
+    # --- Position channels (θ-independent, fixed noise, never NO_INFO) ---
     for target_pos in range(n_pos):
         ch = target_pos
         for x in range(n_states):
-            pos, _, _ = unpack_state(x, n_pos, n_collect, n_scan)
+            pos, _, _ = unpack_state(x, n_pos, n_mask, n_events)
             p = p_tp_pos if pos == target_pos else p_fp_pos
             B[ch, 1, x, :] = p
             B[ch, 0, x, :] = 1.0 - p
 
-    # --- Rock quality channels (θ-dependent) ---
+    # --- Rock quality channels (θ-dependent, event-gated) ---
     for j in range(n_rocks):
         ch = n_pos + j
         rock_pos = int(rock_positions[j])
-        for theta in range(n_configs):
-            rock_good = qualities[theta, j] == 1.0
-            for x in range(n_states):
-                pos, _, scanned_mask = unpack_state(x, n_pos, n_collect, n_scan)
-                if scanned_mask & (1 << j):
-                    # This rock has been scanned: near-deterministic
-                    if rock_good:
-                        B[ch, 1, x, theta] = p_tp_s
-                        B[ch, 0, x, theta] = p_fp_s
-                    else:
-                        B[ch, 1, x, theta] = p_fp_s
-                        B[ch, 0, x, theta] = p_tp_s
-                else:
-                    # Distance-dependent accuracy
-                    d = euclidean_distance(pos, rock_pos, grid_size)
-                    p_correct = 0.5 + 0.5 * (2.0 ** (-d / half_eff_dist))
-                    p_correct = np.clip(p_correct, 0.01, 0.99)
-                    if rock_good:
-                        B[ch, 1, x, theta] = p_correct
-                        B[ch, 0, x, theta] = 1.0 - p_correct
-                    else:
-                        B[ch, 1, x, theta] = 1.0 - p_correct
-                        B[ch, 0, x, theta] = p_correct
+        ev_sense_j = event_sense(j)
+        ev_sample = event_sample(n_rocks)
+
+        for x in range(n_states):
+            pos, mask, event = unpack_state(x, n_pos, n_mask, n_events)
+
+            if event == ev_sense_j:
+                # Noisy distance-dependent reading of rock j
+                d = chebyshev_distance(pos, rock_pos, grid_size)
+                alpha = np.clip(sense_accuracy(d, half_eff_dist), 0.01, 0.99)
+                for theta in range(n_configs):
+                    q = int(qualities[theta, j])
+                    B[ch, q, x, theta] = alpha
+                    B[ch, 1 - q, x, theta] = 1.0 - alpha
+            elif event == ev_sample and pos == rock_pos and (mask & (1 << j)):
+                # Sampling rock j just revealed its quality
+                for theta in range(n_configs):
+                    q = int(qualities[theta, j])
+                    B[ch, q, x, theta] = p_reveal
+                    B[ch, 1 - q, x, theta] = 1.0 - p_reveal
+            else:
+                # No information about rock j this step
+                B[ch, ROCK_NO_INFO, x, :] = 1.0
 
     return B
 
@@ -369,56 +394,62 @@ def generate_goal(
     rock_positions: np.ndarray,
     qualities: np.ndarray,
     n_rocks: int,
-    exit_reward: float = 10.0,
-    good_reward: float = 10.0,
-    bad_penalty: float = 10.0,
+    good_logit: float = 2.0,
+    bad_logit: float = 4.0,
+    exit_logit: float = 2.0,
     temperature: float = 1.0,
 ) -> np.ndarray:
-    """Generate per-config preference factor C(x, θ) via softmax over rewards.
+    """Generate per-config preference factor C(x, θ) via softmax over logits.
 
-    Reward encodes: reaching exit with good rocks collected is desirable,
-    having collected bad rocks is undesirable. scanned_mask is ignored
-    (scanning is purely informational).
+    logits(x, θ) = good_logit * n_good(mask, θ)
+                 - bad_logit * n_bad(mask, θ)
+                 + exit_logit * [pos is exit]
+
+    The asymmetry bad_logit > good_logit is the canonical guard against
+    sampling-for-information: under a uniform quality belief the expected
+    logit of sampling is negative, so SAMPLE only pays off once the agent
+    actually believes a rock is good. The goal is flat over the event
+    component (sensing is valued epistemically, never via preference).
 
     Args:
         grid_size: Grid size
         rock_positions: (k,) rock positions
         qualities: (n_configs, k) binary rock quality
         n_rocks: Number of rocks
-        exit_reward: Reward for being at exit
-        good_reward: Reward per collected good rock
-        bad_penalty: Penalty per collected bad rock
+        good_logit: Logit per collected good rock
+        bad_logit: Logit penalty per collected bad rock
+        exit_logit: Logit for being at the exit column
         temperature: Softmax temperature
 
     Returns:
         goal: (n_states, n_configs) per-config softmax preference
     """
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_states = n_pos * n_mask * n_events
     n_configs = qualities.shape[0]
 
-    rewards = np.zeros((n_states, n_configs), dtype=np.float64)
+    logits = np.zeros((n_states, n_configs), dtype=np.float64)
 
     for theta in range(n_configs):
         for x in range(n_states):
-            pos, coll, _ = unpack_state(x, n_pos, n_collect, n_scan)
+            pos, mask, _ = unpack_state(x, n_pos, n_mask, n_events)
 
-            r = 0.0
+            v = 0.0
             if is_exit(pos, grid_size):
-                r += exit_reward
+                v += exit_logit
 
             for j in range(n_rocks):
-                if coll & (1 << j):
+                if mask & (1 << j):
                     if qualities[theta, j] == 1.0:
-                        r += good_reward
+                        v += good_logit
                     else:
-                        r -= bad_penalty
+                        v -= bad_logit
 
-            rewards[x, theta] = r
+            logits[x, theta] = v
 
-    scaled = rewards / temperature
+    scaled = logits / temperature
     scaled -= scaled.max(axis=0, keepdims=True)
     goal = np.exp(scaled)
     goal /= goal.sum(axis=0, keepdims=True)
@@ -432,21 +463,21 @@ def generate_goal(
 
 @dataclass
 class RockSampleStepResult:
-    obs: np.ndarray  # (n_pos + k,) binary observations
+    obs: np.ndarray  # (n_pos + k,) per-channel outcome indices (0, 1, or 2)
     reward: float
     terminated: bool
     truncated: bool
 
 
 class RockSampleEnv:
-    """Simple RockSample simulator.
+    """Simple canonical RockSample simulator.
 
     Args:
         grid_size: Grid size
         rock_positions: (k,) rock positions
         qualities: (n_configs, k) rock quality configs
         n_rocks: Number of rocks
-        obs_tensor: (n_pos + k, 2, n_states, n_configs) observation tensor
+        obs_tensor: (n_pos + k, 3, n_states, n_configs) observation tensor
         slip_prob: Movement noise
         max_steps: Maximum steps per episode
         good_reward: Reward for sampling a good rock
@@ -470,8 +501,8 @@ class RockSampleEnv:
         self.grid_size = grid_size
         self.n_pos = grid_size * grid_size
         self.n_rocks = n_rocks
-        self.n_collect = 2 ** n_rocks
-        self.n_scan = 2 ** n_rocks
+        self.n_mask = 2 ** n_rocks
+        self.n_events = n_events_for(n_rocks)
         self.rock_positions = rock_positions
         self.qualities = qualities
         self.obs_tensor = obs_tensor
@@ -493,8 +524,8 @@ class RockSampleEnv:
 
         self._rng = np.random.default_rng(0)
         self._position = self.start_pos
-        self._collected = 0  # bitmask
-        self._scanned_mask = 0  # bitmask of scanned rocks
+        self._mask = 0  # bitmask of sampled rocks
+        self._event = EVENT_OTHER
         self._config_idx = 0
         self._steps = 0
 
@@ -509,8 +540,8 @@ class RockSampleEnv:
     @property
     def _state_idx(self) -> int:
         return state_index(
-            self._position, self._collected, self._scanned_mask,
-            self.n_pos, self.n_collect, self.n_scan,
+            self._position, self._mask, self._event,
+            self.n_pos, self.n_mask, self.n_events,
         )
 
     def reset(self, seed: int | None = None, config_idx: int | None = None) -> RockSampleStepResult:
@@ -523,8 +554,8 @@ class RockSampleEnv:
             self._config_idx = int(self._rng.integers(0, self.qualities.shape[0]))
 
         self._position = self.start_pos
-        self._collected = 0
-        self._scanned_mask = 0
+        self._mask = 0
+        self._event = EVENT_OTHER
         self._steps = 0
 
         return RockSampleStepResult(
@@ -539,25 +570,26 @@ class RockSampleEnv:
         reward = 0.0
         terminated = False
 
-        if action == SCAN:
-            j = nearest_unscanned_rock(
-                self._position, self._scanned_mask,
-                self.rock_positions, self.grid_size,
-            )
-            if j >= 0:
-                self._scanned_mask |= (1 << j)
-            # else: all scanned, no-op
-        elif action == SAMPLE:
-            if self._position in self._rock_at_pos:
+        a_sample = sample_action(self.n_rocks)
+
+        if N_MOVEMENT_ACTIONS <= action < a_sample:
+            # SENSE_r: no movement, set event
+            r = action - N_MOVEMENT_ACTIONS
+            self._event = event_sense(r)
+        elif action == a_sample:
+            if (self._position in self._rock_at_pos
+                    and not (self._mask & (1 << self._rock_at_pos[self._position]))):
                 j = self._rock_at_pos[self._position]
-                if not (self._collected & (1 << j)):
-                    # Collect rock
-                    self._collected |= (1 << j)
-                    rock_good = self.qualities[self._config_idx, j] == 1.0
-                    reward = self.good_reward if rock_good else -self.bad_penalty
-            # else: no rock or already collected, self-loop with 0 reward
+                self._mask |= (1 << j)
+                self._event = event_sample(self.n_rocks)
+                rock_good = self.qualities[self._config_idx, j] == 1.0
+                reward = self.good_reward if rock_good else -self.bad_penalty
+            else:
+                # No rock or already collected: no-op
+                self._event = EVENT_OTHER
         else:
-            # Movement
+            # Movement: resets event
+            self._event = EVENT_OTHER
             if self.slip_prob > 0 and self._rng.random() < self.slip_prob:
                 other = [a for a in range(N_MOVEMENT_ACTIONS) if a != action]
                 action = int(self._rng.choice(other))
@@ -584,33 +616,47 @@ class RockSampleEnv:
         )
 
     def _get_obs(self) -> np.ndarray:
-        """Sample binary observations from observation model."""
+        """Sample per-channel categorical outcomes from the observation model."""
         x = self._state_idx
         if self.obs_tensor is not None:
             n_channels = self.obs_tensor.shape[0]
+            n_obs = self.obs_tensor.shape[1]
             obs = np.zeros(n_channels, dtype=np.float32)
             for c in range(n_channels):
-                p_fire = self.obs_tensor[c, 1, x, self._config_idx]
-                obs[c] = float(self._rng.random() < p_fire)
+                p = np.asarray(self.obs_tensor[c, :, x, self._config_idx], dtype=np.float64)
+                p = p / p.sum()
+                obs[c] = float(self._rng.choice(n_obs, p=p))
             return obs
         else:
-            # Fallback: deterministic
+            # Fallback: deterministic position one-hot, rocks NO_INFO unless
+            # the last event reveals them
             n_channels = self.n_pos + self.n_rocks
-            obs = np.zeros(n_channels, dtype=np.float32)
+            obs = np.full(n_channels, float(ROCK_NO_INFO), dtype=np.float32)
+            obs[:self.n_pos] = 0.0
             obs[self._position] = 1.0
             for j in range(self.n_rocks):
-                obs[self.n_pos + j] = float(
-                    self.qualities[self._config_idx, j] == 1.0
-                )
+                if self._event == event_sense(j) or (
+                    self._event == event_sample(self.n_rocks)
+                    and self._position == int(self.rock_positions[j])
+                    and (self._mask & (1 << j))
+                ):
+                    obs[self.n_pos + j] = float(
+                        self.qualities[self._config_idx, j] == 1.0
+                    )
             return obs
 
     def render_ascii(self) -> str:
         """Render current state as ASCII grid."""
         lines = []
         theta = self._config_idx
-        scan_str = bin(self._scanned_mask)[2:].zfill(self.n_rocks)
-        coll_str = bin(self._collected)[2:].zfill(self.n_rocks)
-        lines.append(f"[scanned={scan_str}] collected={coll_str}")
+        mask_str = bin(self._mask)[2:].zfill(self.n_rocks)
+        if self._event == EVENT_OTHER:
+            event_str = "other"
+        elif self._event == event_sample(self.n_rocks):
+            event_str = "sample"
+        else:
+            event_str = f"sense_{self._event - 1}"
+        lines.append(f"[sampled={mask_str}] last_event={event_str}")
 
         rock_set = {int(rp): j for j, rp in enumerate(self.rock_positions)}
 
@@ -624,14 +670,12 @@ class RockSampleEnv:
                     row_chars.append("E")
                 elif pos in rock_set:
                     j = rock_set[pos]
-                    if self._collected & (1 << j):
+                    if self._mask & (1 << j):
                         row_chars.append("x")  # collected
                     elif self.qualities[theta, j] == 1.0:
-                        ch = "G*" if self._scanned_mask & (1 << j) else "G"
-                        row_chars.append(ch)
+                        row_chars.append("G")
                     else:
-                        ch = "B*" if self._scanned_mask & (1 << j) else "B"
-                        row_chars.append(ch)
+                        row_chars.append("B")
                 else:
                     row_chars.append(".")
             lines.append(" ".join(row_chars))

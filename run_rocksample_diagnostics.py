@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Single-episode diagnostic script for RockSample with full internal state output."""
+"""Single-episode diagnostic script for canonical RockSample with full internal state output."""
 
 import sys
 from pathlib import Path
@@ -23,14 +23,27 @@ from environments.rocksample import (
     rc_to_pos,
     state_index,
     unpack_state,
-    nearest_unscanned_rock,
-    euclidean_distance,
+    chebyshev_distance,
+    sense_accuracy,
     is_exit,
-    N_ACTIONS,
+    n_events_for,
+    event_sample,
+    EVENT_OTHER,
+    ROCK_NO_INFO,
 )
 from agents.rocksample_agent import create_agent
 
-ACTION_NAMES = ["left", "down", "right", "up", "scan", "sample"]
+
+def make_action_names(n_rocks: int) -> list[str]:
+    return ["left", "down", "right", "up"] + [f"sense_{r}" for r in range(n_rocks)] + ["sample"]
+
+
+def event_name(event: int, n_rocks: int) -> str:
+    if event == EVENT_OTHER:
+        return "other"
+    if event == event_sample(n_rocks):
+        return "sample"
+    return f"sense_{event - 1}"
 
 
 # ---------------------------------------------------------------------------
@@ -44,12 +57,12 @@ def entropy(p):
     return -float(jnp.sum(p * jnp.log2(p)))
 
 
-def print_position_grid(belief, grid_size, n_pos, n_collect, n_scan, label="Position belief"):
-    """Print a 2D grid of position probabilities (marginalised over collected & scanned)."""
+def print_position_grid(belief, grid_size, n_pos, n_mask, n_events, label="Position belief"):
+    """Print a 2D grid of position probabilities (marginalised over mask & event)."""
     pos_marginal = np.zeros(n_pos)
-    n_states = n_pos * n_collect * n_scan
+    n_states = n_pos * n_mask * n_events
     for x in range(n_states):
-        pos, _, _ = unpack_state(x, n_pos, n_collect, n_scan)
+        pos, _, _ = unpack_state(x, n_pos, n_mask, n_events)
         pos_marginal[pos] += float(belief[x])
 
     print(f"    {label} (row\\col):")
@@ -67,33 +80,38 @@ def print_position_grid(belief, grid_size, n_pos, n_collect, n_scan, label="Posi
         print(row)
 
 
-def print_action_distribution(action_dist):
+def print_action_distribution(action_dist, action_names):
     """Print actions with bars."""
     bar_width = 40
-    for i, name in enumerate(ACTION_NAMES):
+    for i, name in enumerate(action_names):
         if i >= len(action_dist):
             break
         p = float(action_dist[i])
         n_bars = int(p * bar_width)
         bar = "#" * n_bars
-        print(f"      {name:>6s}: {p:.4f}  {bar}")
+        print(f"      {name:>8s}: {p:.4f}  {bar}")
 
 
 def print_obs(obs, n_pos, n_rocks, rock_positions, grid_size):
-    """Print position + rock quality sensor readings."""
-    # Position modality: first n_pos channels
+    """Print position + 3-outcome rock quality sensor readings."""
+    # Position modality: first n_pos channels (binary)
     pos_obs = obs[:n_pos]
     observed_pos = int(jnp.argmax(pos_obs))
     r, c = pos_to_rc(observed_pos, grid_size)
     print(f"    Position sensors → best match: ({r},{c})")
 
-    # Rock quality channels
+    # Rock quality channels: outcome 0 (bad), 1 (good), 2 (no info)
     for j in range(n_rocks):
         rp = int(rock_positions[j])
         rr, rc_ = pos_to_rc(rp, grid_size)
-        val = float(obs[n_pos + j])
-        quality_str = "GOOD" if val > 0.5 else "BAD"
-        print(f"    Rock {j} at ({rr},{rc_}): sensor={val:.0f} ({quality_str})")
+        val = int(round(float(obs[n_pos + j])))
+        if val == ROCK_NO_INFO:
+            quality_str = "NO INFO"
+        elif val == 1:
+            quality_str = "reads GOOD"
+        else:
+            quality_str = "reads BAD"
+        print(f"    Rock {j} at ({rr},{rc_}): outcome={val} ({quality_str})")
 
 
 def print_rock_quality_beliefs(q_static, qualities, n_rocks):
@@ -111,35 +129,32 @@ def print_rock_quality_beliefs(q_static, qualities, n_rocks):
         print(f"      Rock {j}: P(good)={p_good:.4f}  [{bar}]")
 
 
-def print_scanned_collected_belief(belief, n_pos, n_collect, n_scan, n_rocks):
-    """Print marginal belief over scanned_mask and collected_mask."""
-    n_states = n_pos * n_collect * n_scan
-    scanned_marginal = np.zeros(n_scan)
-    collected_marginal = np.zeros(n_collect)
+def print_mask_event_belief(belief, n_pos, n_mask, n_events, n_rocks):
+    """Print marginal belief over sampled mask and last event."""
+    n_states = n_pos * n_mask * n_events
+    mask_marginal = np.zeros(n_mask)
+    event_marginal = np.zeros(n_events)
     for x in range(n_states):
-        _, coll, scanned = unpack_state(x, n_pos, n_collect, n_scan)
-        scanned_marginal[scanned] += float(belief[x])
-        collected_marginal[coll] += float(belief[x])
+        _, mask, event = unpack_state(x, n_pos, n_mask, n_events)
+        mask_marginal[mask] += float(belief[x])
+        event_marginal[event] += float(belief[x])
 
-    # Top scanned masks
-    top_scanned = np.argsort(-scanned_marginal)[:5]
-    print("    Top scanned_mask beliefs:")
-    for sm in top_scanned:
-        p = scanned_marginal[sm]
+    # Top sampled masks
+    top_masks = np.argsort(-mask_marginal)[:5]
+    print("    Top sampled_mask beliefs:")
+    for sm in top_masks:
+        p = mask_marginal[sm]
         if p < 0.001:
             break
         bits = bin(sm)[2:].zfill(n_rocks)
-        print(f"      scanned={bits}: {p:.4f}")
+        print(f"      sampled={bits}: {p:.4f}")
 
-    # Top collected masks
-    top_collected = np.argsort(-collected_marginal)[:5]
-    print("    Top collected_mask beliefs:")
-    for cm in top_collected:
-        p = collected_marginal[cm]
+    print("    Event beliefs:")
+    for ev in range(n_events):
+        p = event_marginal[ev]
         if p < 0.001:
-            break
-        bits = bin(cm)[2:].zfill(n_rocks)
-        print(f"      collected={bits}: {p:.4f}")
+            continue
+        print(f"      {event_name(ev, n_rocks)}: {p:.4f}")
 
 
 def print_static_summary(q_static, qualities, n_rocks, top_k=5):
@@ -162,9 +177,8 @@ def print_static_summary(q_static, qualities, n_rocks, top_k=5):
 def print_goal_diagnostic(goal, grid_size, rock_positions, qualities, n_rocks):
     """Print goal vector values for key positions."""
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
     n_static = goal.shape[1]
 
     goal_avg = np.array(goal).mean(axis=1)
@@ -172,45 +186,45 @@ def print_goal_diagnostic(goal, grid_size, rock_positions, qualities, n_rocks):
     print("  [GOAL VECTOR DIAGNOSTIC]")
 
     # Exit positions (rightmost column)
-    print("    Exit column goal values (averaged over θ, collected=0, scanned=0):")
+    print("    Exit column goal values (averaged over θ, mask=0, event=other):")
     for r in range(grid_size):
         pos = rc_to_pos(r, grid_size - 1, grid_size)
-        x = state_index(pos, 0, 0, n_pos, n_collect, n_scan)
+        x = state_index(pos, 0, EVENT_OTHER, n_pos, n_mask, n_events)
         val = float(goal_avg[x])
         print(f"      Exit ({r},{grid_size-1}): avg_goal={val:.6f}")
 
     # Exit with all good rocks collected
-    print("    Exit with all-good collected (θ=all_good, scanned=0):")
-    all_good_theta = n_collect - 1  # all bits set = all good
-    all_collected = n_collect - 1
+    print("    Exit with all-good collected (θ=all_good, event=other):")
+    all_good_theta = n_mask - 1  # all bits set = all good
+    all_collected = n_mask - 1
     for r in range(grid_size):
         pos = rc_to_pos(r, grid_size - 1, grid_size)
-        x = state_index(pos, all_collected, 0, n_pos, n_collect, n_scan)
+        x = state_index(pos, all_collected, EVENT_OTHER, n_pos, n_mask, n_events)
         val = float(goal[x, all_good_theta])
         print(f"      Exit ({r},{grid_size-1}) all_collected: goal={val:.6f}")
 
     # Rock positions (no collection)
-    print("    Rock positions (collected=0, scanned=0, avg over θ):")
+    print("    Rock positions (mask=0, event=other, avg over θ):")
     for j in range(n_rocks):
         rp = int(rock_positions[j])
         rr, rc_ = pos_to_rc(rp, grid_size)
-        x = state_index(rp, 0, 0, n_pos, n_collect, n_scan)
+        x = state_index(rp, 0, EVENT_OTHER, n_pos, n_mask, n_events)
         val = float(goal_avg[x])
         print(f"      Rock {j} ({rr},{rc_}): avg_goal={val:.6f}")
 
     print()
 
 
-def print_distance_table(agent_pos, rock_positions, grid_size, n_rocks, scanned_mask):
-    """Print distance to each rock and scan status."""
-    print("    Rock distances & status:")
+def print_distance_table(agent_pos, rock_positions, grid_size, n_rocks, mask, half_eff_dist):
+    """Print Chebyshev distance to each rock and SENSE accuracy from here."""
+    print("    Rock distances & sense accuracy:")
     for j in range(n_rocks):
         rp = int(rock_positions[j])
         rr, rc_ = pos_to_rc(rp, grid_size)
-        d = euclidean_distance(agent_pos, rp, grid_size)
-        scanned = "SCANNED" if scanned_mask & (1 << j) else "unscanned"
-        p_correct = 0.5 + 0.5 * (2.0 ** (-d / 2.0))  # default half_eff_dist
-        print(f"      Rock {j} at ({rr},{rc_}): dist={d:.2f}  P(correct)={p_correct:.3f}  {scanned}")
+        d = chebyshev_distance(agent_pos, rp, grid_size)
+        sampled = "SAMPLED" if mask & (1 << j) else "unsampled"
+        alpha = sense_accuracy(d, half_eff_dist)
+        print(f"      Rock {j} at ({rr},{rc_}): cheb_dist={d}  α(sense)={alpha:.3f}  {sampled}")
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +236,12 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
     n_rocks = args.n_rocks
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_states = n_pos * n_mask * n_events
     n_static = qualities.shape[0]
     max_steps = env.max_steps
+    action_names = make_action_names(n_rocks)
 
     max_entropy_x = jnp.log2(float(n_states))
     max_entropy_static = jnp.log2(float(n_static))
@@ -262,9 +277,9 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
 
         # --- TRUE STATE ---
         true_r, true_c = pos_to_rc(env._position, grid_size)
-        scan_str = bin(env._scanned_mask)[2:].zfill(n_rocks)
-        coll_str = bin(env._collected)[2:].zfill(n_rocks)
-        print(f"  [TRUE STATE] pos=({true_r},{true_c})  scanned={scan_str}  collected={coll_str}  config={theta}")
+        mask_str = bin(env._mask)[2:].zfill(n_rocks)
+        print(f"  [TRUE STATE] pos=({true_r},{true_c})  sampled={mask_str}  "
+              f"last_event={event_name(env._event, n_rocks)}  config={theta}")
         print(f"  True world:")
         for line in env.render_ascii().split("\n"):
             print(f"    {line}")
@@ -272,13 +287,8 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
 
         # --- DISTANCES ---
         print("  [ROCK DISTANCES]")
-        print_distance_table(env._position, rock_positions, grid_size, n_rocks, env._scanned_mask)
-        nearest_j = nearest_unscanned_rock(env._position, env._scanned_mask, rock_positions, grid_size)
-        if nearest_j >= 0:
-            nr, nc = pos_to_rc(int(rock_positions[nearest_j]), grid_size)
-            print(f"    SCAN would target: Rock {nearest_j} at ({nr},{nc})")
-        else:
-            print(f"    SCAN would target: none (all scanned)")
+        print_distance_table(env._position, rock_positions, grid_size, n_rocks,
+                             env._mask, args.half_eff_dist)
         print()
 
         # --- OBSERVATION ---
@@ -303,12 +313,12 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
         # --- POSITION BELIEF ---
         print("  [POSITION BELIEF]")
         q_pos = agent.q_current_state
-        print_position_grid(q_pos, grid_size, n_pos, n_collect, n_scan)
+        print_position_grid(q_pos, grid_size, n_pos, n_mask, n_events)
 
         # MAP over position marginal
         pos_marginal = np.zeros(n_pos)
         for x in range(n_states):
-            pos, _, _ = unpack_state(x, n_pos, n_collect, n_scan)
+            pos, _, _ = unpack_state(x, n_pos, n_mask, n_events)
             pos_marginal[pos] += float(q_pos[x])
         map_pos = int(np.argmax(pos_marginal))
         map_r, map_c = pos_to_rc(map_pos, grid_size)
@@ -318,9 +328,9 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
         print(f"    State entropy: {entropy(q_pos):.2f} bits (max={max_entropy_x:.2f})")
         print()
 
-        # --- SCANNED / COLLECTED BELIEF ---
-        print("  [SCANNED & COLLECTED BELIEF]")
-        print_scanned_collected_belief(q_pos, n_pos, n_collect, n_scan, n_rocks)
+        # --- MASK / EVENT BELIEF ---
+        print("  [SAMPLED MASK & EVENT BELIEF]")
+        print_mask_event_belief(q_pos, n_pos, n_mask, n_events, n_rocks)
         print()
 
         # --- STATIC BELIEF ---
@@ -344,7 +354,7 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
         horizon = min(time_remaining, agent.planning_horizon)
         action_dist = agent._plan(agent.q_current_state, agent.q_static_state, horizon)
         print(f"    Action distribution (horizon={horizon}):")
-        print_action_distribution(action_dist)
+        print_action_distribution(action_dist, action_names)
         print()
 
         # --- COMPARE BP ---
@@ -358,15 +368,15 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
             )
             bp_action = int(jnp.argmax(bp_action_dist))
             print(f"    BP action distribution:")
-            print_action_distribution(bp_action_dist)
-            print(f"    BP chosen action: {ACTION_NAMES[bp_action]}")
-            print(f"    Primary chosen action: {ACTION_NAMES[action]}")
+            print_action_distribution(bp_action_dist, action_names)
+            print(f"    BP chosen action: {action_names[bp_action]}")
+            print(f"    Primary chosen action: {action_names[action]}")
             if bp_action != action:
-                print(f"    >>> MISMATCH: BP says {ACTION_NAMES[bp_action]}, primary says {ACTION_NAMES[action]}")
+                print(f"    >>> MISMATCH: BP says {action_names[bp_action]}, primary says {action_names[action]}")
             print()
 
         # --- ACTION ---
-        print(f"  [ACTION] {ACTION_NAMES[action]}")
+        print(f"  [ACTION] {action_names[action]}")
         print()
 
         # --- EXECUTE ---
@@ -380,7 +390,7 @@ def run_diagnostic_episode(agent, env, args, rock_positions, qualities, compare_
                 print("  >>> REACHED EXIT!")
             else:
                 print("  >>> EXIT (no extra reward)")
-        if action == 5 and result.reward != 0:  # SAMPLE
+        if action == len(action_names) - 1 and result.reward != 0:  # SAMPLE
             if result.reward > 0:
                 print(f"  >>> SAMPLED GOOD ROCK! (+{result.reward:.1f})")
             else:
@@ -437,8 +447,11 @@ def main():
     parser.add_argument("--good-reward", type=float, default=10.0)
     parser.add_argument("--bad-penalty", type=float, default=10.0)
     parser.add_argument("--exit-reward", type=float, default=10.0)
+    parser.add_argument("--good-logit", type=float, default=2.0)
+    parser.add_argument("--bad-logit", type=float, default=4.0)
+    parser.add_argument("--exit-logit", type=float, default=2.0)
     parser.add_argument("--goal-temperature", type=float, default=1.0)
-    parser.add_argument("--scan-cost", type=float, default=0.5)
+    parser.add_argument("--sense-cost", type=float, default=0.5)
     parser.add_argument("--sample-cost", type=float, default=0.5)
     parser.add_argument("--receding-horizon", action="store_true")
     parser.add_argument("--terminal-goal-only", action="store_true",
@@ -452,22 +465,23 @@ def main():
     grid_size = args.grid_size
     n_rocks = args.n_rocks
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
-    n_configs = n_collect
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_states = n_pos * n_mask * n_events
+    n_configs = n_mask
 
     print(f"JAX devices: {jax.devices()}")
     print(f"JAX backend: {jax.default_backend()}")
     print()
-    print(f"RockSample[{grid_size},{n_rocks}]")
-    print(f"  States: {n_states} = {n_pos} pos x {n_collect} collected x {n_scan} scanned")
+    print(f"RockSample[{grid_size},{n_rocks}] (canonical)")
+    print(f"  States: {n_states} = {n_pos} pos x {n_mask} sampled x {n_events} events")
     print(f"  Configs (θ): {n_configs}")
     print(f"  Half-eff dist: {args.half_eff_dist}, pos noise: {args.pos_noise}")
     print(f"  Slip prob: {args.slip_prob}")
     print(f"  Rewards: good={args.good_reward}, bad_penalty={args.bad_penalty}, exit={args.exit_reward}")
+    print(f"  Goal logits: good={args.good_logit}, bad={args.bad_logit}, exit={args.exit_logit}")
     print(f"  Goal temperature: {args.goal_temperature}")
-    print(f"  Action costs: scan={args.scan_cost}, sample={args.sample_cost}")
+    print(f"  Action costs: sense={args.sense_cost}, sample={args.sample_cost}")
     print(f"  Method: {args.planning_method}")
     print(f"  Horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
     print(f"  Iterations: {args.planning_iterations}")
@@ -482,7 +496,7 @@ def main():
     t0 = time.time()
 
     start_pos = rc_to_pos(grid_size // 2, 0, grid_size)
-    start_state_idx = state_index(start_pos, 0, 0, n_pos, n_collect, n_scan)
+    start_state_idx = state_index(start_pos, 0, EVENT_OTHER, n_pos, n_mask, n_events)
 
     rock_positions = sample_rock_positions(grid_size, n_rocks, seed=args.seed)
     qualities = all_quality_configs(n_rocks)
@@ -493,8 +507,8 @@ def main():
     )
     goal = generate_goal(
         grid_size, rock_positions, qualities, n_rocks,
-        exit_reward=args.exit_reward, good_reward=args.good_reward,
-        bad_penalty=args.bad_penalty, temperature=args.goal_temperature,
+        good_logit=args.good_logit, bad_logit=args.bad_logit,
+        exit_logit=args.exit_logit, temperature=args.goal_temperature,
     )
 
     print(f"  Rock positions: {rock_positions.tolist()}")
@@ -520,9 +534,9 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
-    # Action prior: [1, 1, 1, 1, scan_cost, sample_cost] normalized
+    # Action prior: [1]*4 moves + [sense_cost]*k senses + [sample_cost], normalized
     action_prior = np.array(
-        [1.0, 1.0, 1.0, 1.0, args.scan_cost, args.sample_cost],
+        [1.0] * 4 + [args.sense_cost] * n_rocks + [args.sample_cost],
         dtype=np.float32,
     )
     action_prior = action_prior / action_prior.sum()

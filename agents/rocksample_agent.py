@@ -41,8 +41,8 @@ def _infer_state(
         q_current: (n_states,) prior belief over state
         q_static: (n_static,) belief over configurations
         transition_tensor: (n_states, n_states, n_static, n_actions)
-        observation_tensor: (n_channels, 2, n_states, n_static)
-        obs: (n_channels,) binary sensor readings
+        observation_tensor: (n_channels, n_obs, n_states, n_static)
+        obs: (n_channels,) per-channel categorical outcome indices
         action_onehot: (n_actions,) one-hot previous action
 
     Returns:
@@ -92,7 +92,7 @@ def _infer_state(
 @dataclass(frozen=True)
 class _RockSampleAgentBase:
     transition_tensor: jnp.ndarray   # (n_states, n_states, n_static, n_actions)
-    observation_tensor: jnp.ndarray  # (n_pos + k, 2, n_states, n_static)
+    observation_tensor: jnp.ndarray  # (n_pos + k, 3, n_states, n_static)
     goal: jnp.ndarray               # (n_states, n_static)
     rock_positions: jnp.ndarray     # (k,) rock positions
     qualities: jnp.ndarray          # (n_configs, k)

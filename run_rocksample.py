@@ -21,6 +21,8 @@ from environments.rocksample import (
     generate_goal,
     state_index,
     rc_to_pos,
+    n_events_for,
+    EVENT_OTHER,
     RockSampleEnv,
 )
 from agents.rocksample_agent import create_agent
@@ -69,7 +71,7 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False):
         rock_good = env.qualities[env.config_idx, j] == 1.0
         if rock_good:
             n_good_total += 1
-            if env._collected & (1 << j):
+            if env._mask & (1 << j):
                 n_good_collected += 1
 
     return {
@@ -100,11 +102,14 @@ def main():
                                  "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
-    parser.add_argument("--good-reward", type=float, default=10.0, help="Reward for collecting a good rock")
-    parser.add_argument("--bad-penalty", type=float, default=10.0, help="Penalty for collecting a bad rock")
-    parser.add_argument("--exit-reward", type=float, default=10.0, help="Reward for reaching exit")
+    parser.add_argument("--good-reward", type=float, default=10.0, help="Simulator reward for collecting a good rock")
+    parser.add_argument("--bad-penalty", type=float, default=10.0, help="Simulator penalty for collecting a bad rock")
+    parser.add_argument("--exit-reward", type=float, default=10.0, help="Simulator reward for reaching exit")
+    parser.add_argument("--good-logit", type=float, default=2.0, help="Goal logit per collected good rock")
+    parser.add_argument("--bad-logit", type=float, default=4.0, help="Goal logit penalty per collected bad rock")
+    parser.add_argument("--exit-logit", type=float, default=2.0, help="Goal logit for the exit column")
     parser.add_argument("--goal-temperature", type=float, default=1.0, help="Goal distribution temperature")
-    parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight")
+    parser.add_argument("--sense-cost", type=float, default=0.5, help="Per-rock SENSE action prior weight")
     parser.add_argument("--sample-cost", type=float, default=0.5, help="SAMPLE action prior weight")
     parser.add_argument("--receding-horizon", action="store_true", help="Use receding horizon")
     parser.add_argument("--terminal-goal-only", action="store_true",
@@ -125,18 +130,19 @@ def main():
     print(f"  Half-eff dist: {args.half_eff_dist}, pos noise: {args.pos_noise}")
     print(f"  Slip prob: {args.slip_prob}")
     print(f"  Rewards: good={args.good_reward}, bad_penalty={args.bad_penalty}, exit={args.exit_reward}")
+    print(f"  Goal logits: good={args.good_logit}, bad={args.bad_logit}, exit={args.exit_logit}")
     print(f"  Goal temperature: {args.goal_temperature}")
-    print(f"  Action costs: scan={args.scan_cost}, sample={args.sample_cost}")
+    print(f"  Action costs: sense={args.sense_cost}, sample={args.sample_cost}")
     print()
 
     print("Generating tensors...")
     t0 = time.time()
 
     n_pos = args.grid_size * args.grid_size
-    n_collect = 2 ** args.n_rocks
-    n_scan = 2 ** args.n_rocks
+    n_mask = 2 ** args.n_rocks
+    n_events = n_events_for(args.n_rocks)
     start_pos = rc_to_pos(args.grid_size // 2, 0, args.grid_size)
-    start_state_idx = state_index(start_pos, 0, 0, n_pos, n_collect, n_scan)
+    start_state_idx = state_index(start_pos, 0, EVENT_OTHER, n_pos, n_mask, n_events)
 
     rock_positions = sample_rock_positions(
         args.grid_size, args.n_rocks, seed=args.seed,
@@ -152,8 +158,8 @@ def main():
     )
     goal = generate_goal(
         args.grid_size, rock_positions, qualities, args.n_rocks,
-        exit_reward=args.exit_reward, good_reward=args.good_reward,
-        bad_penalty=args.bad_penalty, temperature=args.goal_temperature,
+        good_logit=args.good_logit, bad_logit=args.bad_logit,
+        exit_logit=args.exit_logit, temperature=args.goal_temperature,
     )
 
     print(f"  Rock positions: {rock_positions.tolist()}")
@@ -175,9 +181,9 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
-    # Action prior: [1, 1, 1, 1, scan_cost, sample_cost] normalized
+    # Action prior: [1]*4 moves + [sense_cost]*k senses + [sample_cost], normalized
     action_prior = np.array(
-        [1.0, 1.0, 1.0, 1.0, args.scan_cost, args.sample_cost],
+        [1.0] * 4 + [args.sense_cost] * args.n_rocks + [args.sample_cost],
         dtype=np.float32,
     )
     action_prior = action_prior / action_prior.sum()
@@ -271,8 +277,11 @@ def main():
                 "good_reward": args.good_reward,
                 "bad_penalty": args.bad_penalty,
                 "exit_reward": args.exit_reward,
+                "good_logit": args.good_logit,
+                "bad_logit": args.bad_logit,
+                "exit_logit": args.exit_logit,
                 "goal_temperature": args.goal_temperature,
-                "scan_cost": args.scan_cost,
+                "sense_cost": args.sense_cost,
                 "sample_cost": args.sample_cost,
                 "planning_method": args.planning_method,
                 "n_episodes": args.episodes,
