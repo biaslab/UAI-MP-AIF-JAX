@@ -3,7 +3,7 @@ name = "minigridmp-aif-jax"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "gymnasium>=1.2.3",
     "imageio>=2.37.2",
@@ -11,8 +11,13 @@ dependencies = [
     "jax>=0.6.2",
     "matplotlib>=3.10.8",
     "minigrid>=3.0.0",
+    "pytest>=9.0.2",
+    "pyyaml>=6.0",
     "tqdm>=4.67.3",
 ]
+
+[tool.setuptools.packages.find]
+include = ["agents*", "environments*", "inference*", "utils*"]
 
 [dependency-groups]
 dev = ["dvc>=3.56"]

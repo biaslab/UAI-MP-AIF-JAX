@@ -10,14 +10,14 @@ import jax.numpy as jnp
 from jax import nn
 from dataclasses import dataclass, replace
 
-from inference.planning import planning
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
-from inference.reduced_region_extended import reduced_region_extended_planning
 from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
-from inference.reduced_dyn_channel import reduced_dyn_channel_planning
-from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
+from inference.nuijten_mp import nuijten_mp_planning
 from inference.loopy_vbp import loopy_vbp_planning
+from inference.vbp_channel import vbp_channel_planning
+from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 
 EPSILON = 1e-12
 
@@ -191,25 +191,6 @@ def _create(cls, transition_tensor, observation_tensor, goal, holes,
 
 
 @dataclass(frozen=True)
-class FrozenLakeBPAgent(_FrozenLakeAgentBase):
-    """Standard BP (marginalizes θ once)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal, holes,
-               planning_horizon=5, planning_iterations=1, action_prior=None,
-               damping=1.0):
-        return _create(FrozenLakeBPAgent, transition_tensor, observation_tensor,
-                       goal, holes, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        return planning(
-            q_current, q_static, self.transition_tensor, self.goal,
-            horizon=horizon, action_prior=self.action_prior,
-        )
-
-
-@dataclass(frozen=True)
 class FrozenLakeLoopyBPAgent(_FrozenLakeAgentBase):
     """Loopy BP with θ as variable node."""
 
@@ -271,28 +252,6 @@ class FrozenLakeRegionExtendedAgent(_FrozenLakeAgentBase):
 
 
 @dataclass(frozen=True)
-class FrozenLakeReducedRegionExtendedAgent(_FrozenLakeAgentBase):
-    """Reduced region-extended (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal, holes,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
-        return _create(FrozenLakeReducedRegionExtendedAgent, transition_tensor,
-                       observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor,
-            self._directional_obs, self.goal,
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
 class FrozenLakeDynChannelAgent(_FrozenLakeAgentBase):
     """Dyn-channel loopy BP (obs raw B + dyn channels, θ inferred)."""
 
@@ -306,28 +265,6 @@ class FrozenLakeDynChannelAgent(_FrozenLakeAgentBase):
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor,
-            self._directional_obs, self.goal,
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
-class FrozenLakeReducedDynChannelAgent(_FrozenLakeAgentBase):
-    """Reduced dyn-channel (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal, holes,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
-        return _create(FrozenLakeReducedDynChannelAgent, transition_tensor,
-                       observation_tensor, goal, holes, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _ = reduced_dyn_channel_planning(
             q_current, q_static, self.transition_tensor,
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
@@ -359,23 +296,67 @@ class FrozenLakeNuijtenMPAgent(_FrozenLakeAgentBase):
 
 
 @dataclass(frozen=True)
-class FrozenLakeReducedNuijtenMPAgent(_FrozenLakeAgentBase):
-    """Reduced Nuijten MP (fixed θ)."""
+class FrozenLakeVBPChannelAgent(_FrozenLakeAgentBase):
+    """VBP channel (action channel reparameterization, θ inferred)."""
 
     @staticmethod
     def create(transition_tensor, observation_tensor, goal, holes,
                planning_horizon=5, planning_iterations=3, action_prior=None,
                damping=1.0):
-        return _create(FrozenLakeReducedNuijtenMPAgent, transition_tensor,
+        return _create(FrozenLakeVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, holes, planning_horizon,
                        planning_iterations, action_prior, damping=damping)
 
     def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_nuijten_mp_planning(
+        action_dist, _ = vbp_channel_planning(
             q_current, q_static, self.transition_tensor,
             self._directional_obs, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class FrozenLakePreciseInfoSeekingAgent(_FrozenLakeAgentBase):
+    """Precise info-seeking (VBP action channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal, holes,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0):
+        return _create(FrozenLakePreciseInfoSeekingAgent, transition_tensor,
+                       observation_tensor, goal, holes, planning_horizon,
+                       planning_iterations, action_prior, damping=damping)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = precise_info_seeking_planning(
+            q_current, q_static, self.transition_tensor,
+            self._directional_obs, self.goal,
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class FrozenLakeActiveInferenceAgent(_FrozenLakeAgentBase):
+    """Active Inference (VBP action channels + dyn channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal, holes,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0):
+        return _create(FrozenLakeActiveInferenceAgent, transition_tensor,
+                       observation_tensor, goal, holes, planning_horizon,
+                       planning_iterations, action_prior, damping=damping)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = active_inference_planning(
+            q_current, q_static, self.transition_tensor,
+            self._directional_obs, self.goal,
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
         )
         return action_dist
 
@@ -385,15 +366,14 @@ class FrozenLakeReducedNuijtenMPAgent(_FrozenLakeAgentBase):
 # ---------------------------------------------------------------------------
 
 AGENT_CLASSES = {
-    "bp": FrozenLakeBPAgent,
     "loopy_bp": FrozenLakeLoopyBPAgent,
     "loopy_vbp": FrozenLakeLoopyVBPAgent,
     "region_extended": FrozenLakeRegionExtendedAgent,
-    "reduced_region_extended": FrozenLakeReducedRegionExtendedAgent,
     "dyn_channel": FrozenLakeDynChannelAgent,
-    "reduced_dyn_channel": FrozenLakeReducedDynChannelAgent,
     "nuijten": FrozenLakeNuijtenMPAgent,
-    "reduced_nuijten": FrozenLakeReducedNuijtenMPAgent,
+    "vbp_channel": FrozenLakeVBPChannelAgent,
+    "precise_info_seeking": FrozenLakePreciseInfoSeekingAgent,
+    "active_inference": FrozenLakeActiveInferenceAgent,
 }
 
 

@@ -1,631 +1,673 @@
-"""Tests comparing our tensor generation against MiniGrid ground truth."""
+"""Validate get_fov() against MiniGrid's gen_obs_grid() as ground truth.
 
+For each test scenario, the model's get_fov() output is compared cell-by-cell
+against MiniGrid's gen_obs_grid()[:,:,0] (the object-type channel).
+"""
+
+import pytest
 import numpy as np
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import gymnasium as gym
 import minigrid
+from minigrid.wrappers import ViewSizeWrapper
 
 from environments.minigrid import (
-    get_fov,
-    generate_observation_tensor,
-    generate_orientation_observation_tensor,
-    generate_transition_tensor,
     CellType,
-    Orientation,
     ActionType,
-    state_to_coords,
-    coords_to_state,
-    flatten_state_index,
-    unflatten_state_index,
-    flatten_position_index,
-    unflatten_position_index,
-    key_position,
-    door_position,
-    N_ORIENTATIONS,
-    N_DOOR_KEY_STATES,
-    N_CELL_TYPES,
+    get_fov,
 )
+from environments.gym_wrapper import register_doorkey_env
 
 
-def mg_to_our_coords(mg_x, mg_y, grid_size):
-    """Convert MiniGrid coordinates to our coordinates (y-flipped)."""
-    our_x = mg_x - 1  # Subtract wall
-    our_y = grid_size - mg_y  # Flip y and subtract wall
-    return our_x, our_y
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 
 
-def our_to_mg_coords(our_x, our_y, grid_size):
-    """Convert our coordinates to MiniGrid coordinates."""
-    mg_x = our_x + 1  # Add wall
-    mg_y = grid_size - our_y  # Flip y and add wall
-    return mg_x, mg_y
+def extract_gym_state(env):
+    """Scan grid for key/door positions, agent state."""
+    uw = env.unwrapped
+    agent_pos = tuple(int(x) for x in uw.agent_pos)
+    agent_dir = int(uw.agent_dir)
+    carrying = uw.carrying
+
+    key_pos = None
+    door_pos = None
+    door_is_open = False
+    door_is_locked = True
+
+    for i in range(uw.width):
+        for j in range(uw.height):
+            cell = uw.grid.get(i, j)
+            if cell is not None:
+                if cell.type == "key":
+                    key_pos = (i, j)
+                elif cell.type == "door":
+                    door_pos = (i, j)
+                    door_is_open = cell.is_open
+                    door_is_locked = cell.is_locked
+
+    return {
+        "agent_pos": agent_pos,
+        "agent_dir": agent_dir,
+        "carrying": carrying,
+        "key_pos": key_pos,
+        "door_pos": door_pos,
+        "door_is_open": door_is_open,
+        "door_is_locked": door_is_locked,
+    }
 
 
-class TestFOVAgainstMiniGrid:
-    """Test that our get_fov matches MiniGrid's observation output."""
+def gym_to_model_coords(gym_pos, grid_size):
+    """Subtract 1 for outer wall offset: gym (1,1) -> model (0,0)."""
+    return (gym_pos[0] - 1, gym_pos[1] - 1)
 
-    def test_initial_observation_seed42(self):
-        """Test initial FOV matches MiniGrid for seed 42."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
 
-        mg_obs = obs["image"][:, :, 0]
-        agent_pos = env.unwrapped.agent_pos
-        agent_dir = env.unwrapped.agent_dir
+def model_door_key_state(carrying, door_open, door_locked):
+    """Map gym state to model dks: 0=key on ground, 1=carrying, 2=door open."""
+    if door_open:
+        return 2
+    elif carrying is not None and carrying.type == "key":
+        return 1
+    else:
+        return 0
 
-        # Find key and door
-        grid = env.unwrapped.grid
-        mg_key, mg_door = None, None
-        for i in range(5):
-            for j in range(5):
-                cell = grid.get(i, j)
-                if cell:
-                    if cell.type == "key":
-                        mg_key = (i, j)
-                    elif cell.type == "door":
-                        mg_door = (i, j)
 
-        # Convert to our coordinates
-        our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-        our_key = mg_to_our_coords(mg_key[0], mg_key[1], grid_size)
-        our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
+def get_gym_fov(env, fov_size):
+    """Call gen_obs_grid(), return cell-type channel."""
+    uw = env.unwrapped
+    grid, vis_mask = uw.gen_obs_grid(fov_size)
+    image = grid.encode(vis_mask)
+    return image[:, :, 0]
 
-        our_fov = get_fov(
-            our_agent[0], our_agent[1],
-            agent_dir,
-            our_key[0], our_key[1],
-            our_door[0], our_door[1],
-            0,  # door_key_state = 0
-            grid_size,
-        )
 
-        assert np.array_equal(mg_obs, our_fov), f"FOV mismatch:\nMiniGrid:\n{mg_obs}\nOurs:\n{our_fov}"
-        env.close()
+def setup_env(grid_size, fov_size, seed):
+    """Create env with ViewSizeWrapper, reset, return (env, state)."""
+    if grid_size not in (5, 6, 8, 16):
+        register_doorkey_env(grid_size)
+    env = gym.make(f"MiniGrid-DoorKey-{grid_size}x{grid_size}-v0")
+    if fov_size != 7:
+        env = ViewSizeWrapper(env, agent_view_size=fov_size)
+        env.unwrapped.agent_view_size = fov_size
+    env.reset(seed=seed)
+    state = extract_gym_state(env)
+    return env, state
 
-    def test_fov_multiple_seeds(self):
-        """Test FOV matches across multiple random seeds."""
-        grid_size = 3
 
-        for seed in [0, 1, 10, 42, 100, 123, 456]:
-            env = gym.make("MiniGrid-DoorKey-5x5-v0")
-            obs, _ = env.reset(seed=seed)
+def compare_fov(env, fov_size, grid_size, last_key_pos=None):
+    """Compare model get_fov() vs gym gen_obs_grid(). Returns (model, gym, match)."""
+    n = grid_size - 2
+    state = extract_gym_state(env)
+    ap = state["agent_pos"]
+    ad = state["agent_dir"]
+    kp = state["key_pos"]
+    dp = state["door_pos"]
+    carrying_key = state["carrying"] is not None and state["carrying"].type == "key"
+    dks = model_door_key_state(
+        state["carrying"], state["door_is_open"], state["door_is_locked"]
+    )
 
-            mg_obs = obs["image"][:, :, 0]
-            agent_pos = env.unwrapped.agent_pos
-            agent_dir = env.unwrapped.agent_dir
+    m_agent = gym_to_model_coords(ap, grid_size)
+    m_door = gym_to_model_coords(dp, grid_size)
 
-            grid = env.unwrapped.grid
-            mg_key, mg_door = None, None
-            for i in range(5):
-                for j in range(5):
-                    cell = grid.get(i, j)
-                    if cell:
-                        if cell.type == "key":
-                            mg_key = (i, j)
-                        elif cell.type == "door":
-                            mg_door = (i, j)
+    if carrying_key:
+        # key_x/key_y unused when dks >= 1; use last known or dummy
+        m_key = gym_to_model_coords(last_key_pos, grid_size) if last_key_pos else (0, 0)
+    else:
+        m_key = gym_to_model_coords(kp, grid_size)
 
-            our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-            our_key = mg_to_our_coords(mg_key[0], mg_key[1], grid_size)
-            our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
+    gym_fov = get_gym_fov(env, fov_size)
+    model_fov = get_fov(
+        m_agent[0], m_agent[1], ad,
+        m_key[0], m_key[1],
+        m_door[0], m_door[1],
+        dks, n, fov_size,
+    )
 
-            our_fov = get_fov(
-                our_agent[0], our_agent[1],
-                agent_dir,
-                our_key[0], our_key[1],
-                our_door[0], our_door[1],
-                0,
-                grid_size,
-            )
+    return model_fov, gym_fov, np.array_equal(model_fov, gym_fov)
 
-            assert np.array_equal(mg_obs, our_fov), f"FOV mismatch for seed {seed}"
-            env.close()
 
-    def test_fov_after_pickup(self):
-        """Test FOV matches after picking up the key."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
+def diff_msg(model_fov, gym_fov, **ctx):
+    """Format an assertion message showing mismatched cells."""
+    positions = list(zip(*np.where(gym_fov != model_fov)))
+    lines = [f"FOV mismatch ({', '.join(f'{k}={v}' for k, v in ctx.items())})"]
+    for i, j in positions[:10]:
+        lines.append(f"  ({i},{j}): gym={int(gym_fov[i,j])} model={int(model_fov[i,j])}")
+    if len(positions) > 10:
+        lines.append(f"  ... and {len(positions) - 10} more")
+    return "\n".join(lines)
 
-        # Navigate to key and pick it up
-        # From seed 42: agent at (1,2), key at (1,3), facing DOWN
-        # Need to go forward to reach key, then pickup
-        actions = [2, 3]  # FORWARD, PICKUP
-        for action in actions:
-            obs, _, term, _, _ = env.step(action)
-            if term:
+
+# ---------------------------------------------------------------------------
+# Navigation helpers
+# ---------------------------------------------------------------------------
+
+
+def turn_actions(current_dir, target_dir):
+    """Minimal turn-action sequence from current_dir to target_dir."""
+    if current_dir == target_dir:
+        return []
+    steps_right = (target_dir - current_dir) % 4
+    steps_left = (current_dir - target_dir) % 4
+    if steps_right <= steps_left:
+        return [int(ActionType.TURN_RIGHT)] * steps_right
+    else:
+        return [int(ActionType.TURN_LEFT)] * steps_left
+
+
+def face_direction(env, target_dir):
+    """Turn agent to face target_dir."""
+    uw = env.unwrapped
+    for a in turn_actions(int(uw.agent_dir), target_dir):
+        env.step(a)
+
+
+def dir_from_to(from_pos, to_pos):
+    """Direction to face from from_pos toward adjacent to_pos."""
+    dx = to_pos[0] - from_pos[0]
+    dy = to_pos[1] - from_pos[1]
+    if dx == 1 and dy == 0:
+        return 0
+    if dx == 0 and dy == 1:
+        return 1
+    if dx == -1 and dy == 0:
+        return 2
+    if dx == 0 and dy == -1:
+        return 3
+    return None
+
+
+def navigate_greedy(env, target_pos, max_steps=50):
+    """Greedy navigation to target_pos. Returns True if reached."""
+    uw = env.unwrapped
+    for _ in range(max_steps):
+        agent_pos = tuple(int(x) for x in uw.agent_pos)
+        if agent_pos == target_pos:
+            return True
+        dx = target_pos[0] - agent_pos[0]
+        dy = target_pos[1] - agent_pos[1]
+        dirs = []
+        if dx > 0:
+            dirs.append(0)
+        if dx < 0:
+            dirs.append(2)
+        if dy > 0:
+            dirs.append(1)
+        if dy < 0:
+            dirs.append(3)
+        moved = False
+        for d in dirs:
+            face_direction(env, d)
+            old_pos = tuple(int(x) for x in uw.agent_pos)
+            env.step(int(ActionType.FORWARD))
+            new_pos = tuple(int(x) for x in uw.agent_pos)
+            if new_pos != old_pos:
+                moved = True
                 break
-
-        if env.unwrapped.carrying is not None:
-            mg_obs = obs["image"][:, :, 0]
-            agent_pos = env.unwrapped.agent_pos
-            agent_dir = env.unwrapped.agent_dir
-
-            grid = env.unwrapped.grid
-            mg_key, mg_door = None, None
-            for i in range(5):
-                for j in range(5):
-                    cell = grid.get(i, j)
-                    if cell:
-                        if cell.type == "key":
-                            mg_key = (i, j)
-                        elif cell.type == "door":
-                            mg_door = (i, j)
-
-            # Key is now carried, use agent position as key position
-            our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-            # When key is carried, we use door_key_state=1
-            # Key position doesn't matter for FOV when carried
-            our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
-
-            our_fov = get_fov(
-                our_agent[0], our_agent[1],
-                agent_dir,
-                our_agent[0], our_agent[1],  # Key at agent pos when carried
-                our_door[0], our_door[1],
-                1,  # door_key_state = 1 (key held)
-                grid_size,
-            )
-
-            # Note: When key is held, it appears at agent's position in FOV
-            # MiniGrid shows the carried object differently
-            # We just verify key appears somewhere reasonable
-            has_key_in_fov = CellType.KEY in our_fov
-            assert has_key_in_fov, "Key should be visible when carried"
-
-        env.close()
-
-    def test_fov_after_door_open(self):
-        """Test FOV matches after opening the door."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
-
-        # Sequence to open door: pickup key, face door, toggle
-        actions = [3, 0, 5]  # PICKUP, LEFT, TOGGLE
-        for action in actions:
-            obs, _, term, _, _ = env.step(action)
-            if term:
-                break
-
-        grid = env.unwrapped.grid
-        door = grid.get(2, 2)
-
-        if door and door.is_open:
-            mg_obs = obs["image"][:, :, 0]
-            agent_pos = env.unwrapped.agent_pos
-            agent_dir = env.unwrapped.agent_dir
-
-            mg_key, mg_door = None, None
-            for i in range(5):
-                for j in range(5):
-                    cell = grid.get(i, j)
-                    if cell:
-                        if cell.type == "key":
-                            mg_key = (i, j)
-                        elif cell.type == "door":
-                            mg_door = (i, j)
-
-            our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-            our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
-
-            our_fov = get_fov(
-                our_agent[0], our_agent[1],
-                agent_dir,
-                our_agent[0], our_agent[1],
-                our_door[0], our_door[1],
-                2,  # door_key_state = 2 (door open)
-                grid_size,
-            )
-
-            # Verify door is visible and goal is visible (door open allows seeing through)
-            has_door = CellType.DOOR in our_fov
-            has_goal = CellType.GOAL in mg_obs  # MiniGrid shows goal
-            assert has_door, "Door should be visible"
-
-        env.close()
+        if not moved:
+            return False
+    return tuple(int(x) for x in uw.agent_pos) == target_pos
 
 
-class TestKeyEncoding:
-    """Test that key position is correctly encoded in observations."""
+def approach_and_face(env, target_pos):
+    """Navigate to a cell adjacent to target, facing it. Returns True on success."""
+    uw = env.unwrapped
+    agent_pos = tuple(int(x) for x in uw.agent_pos)
 
-    def test_key_visible_when_in_fov(self):
-        """Key should be visible in FOV when agent can see it."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
+    candidates = [
+        ((target_pos[0] - 1, target_pos[1]), 0),  # from left, face RIGHT
+        ((target_pos[0], target_pos[1] - 1), 1),  # from above, face DOWN
+        ((target_pos[0] + 1, target_pos[1]), 2),  # from right, face LEFT
+        ((target_pos[0], target_pos[1] + 1), 3),  # from below, face UP
+    ]
+    # Sort by Manhattan distance to current agent position
+    candidates.sort(
+        key=lambda c: abs(c[0][0] - agent_pos[0]) + abs(c[0][1] - agent_pos[1])
+    )
 
-        mg_obs = obs["image"][:, :, 0]
-
-        # Check key (5) is in the observation
-        has_key = CellType.KEY in mg_obs
-        assert has_key, "Key should be visible in initial observation"
-
-        # Verify key position
-        key_positions = np.argwhere(mg_obs == CellType.KEY)
-        assert len(key_positions) == 1, "Should be exactly one key"
-
-        env.close()
-
-    def test_key_at_agent_position_when_carried(self):
-        """Key should appear at agent FOV position when carried."""
-        grid_size = 3
-
-        # Our convention: key at (3, 6) in FOV when held (agent position)
-        for door_key_state in [1, 2]:  # Holding key, door open
-            fov = get_fov(
-                1, 1,  # agent position
-                Orientation.RIGHT,
-                0, 0,  # key position (doesn't matter when held)
-                2, 1,  # door position
-                door_key_state,
-                grid_size,
-            )
-            # Agent is at FOV (3, 6) - key should be there when held
-            assert fov[3, 6] == CellType.KEY, f"Key should be at agent pos when dks={door_key_state}"
+    for approach_pos, face_dir in candidates:
+        if not (
+            1 <= approach_pos[0] < uw.width - 1
+            and 1 <= approach_pos[1] < uw.height - 1
+        ):
+            continue
+        if navigate_greedy(env, approach_pos):
+            face_direction(env, face_dir)
+            return True
+    return False
 
 
-class TestDoorEncoding:
-    """Test that door position is correctly encoded."""
+# ---------------------------------------------------------------------------
+# Scenario setup helpers
+# ---------------------------------------------------------------------------
 
-    def test_door_visible_in_initial_obs(self):
-        """Door should be visible in initial observation."""
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
 
-        mg_obs = obs["image"][:, :, 0]
-        has_door = CellType.DOOR in mg_obs
-        assert has_door, "Door should be visible"
+def pickup_key_sequence(env):
+    """Navigate to key and pick it up. Returns (success, key_gym_pos)."""
+    state = extract_gym_state(env)
+    key_pos = state["key_pos"]
+    if key_pos is None:
+        return False, None
 
-        door_positions = np.argwhere(mg_obs == CellType.DOOR)
-        assert len(door_positions) == 1, "Should be exactly one door"
+    if not approach_and_face(env, key_pos):
+        return False, None
 
-        env.close()
+    env.step(int(ActionType.PICKUP))
 
-    def test_door_position_in_our_fov(self):
-        """Verify door is at correct position in our FOV."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
+    new_state = extract_gym_state(env)
+    carrying = new_state["carrying"] is not None and new_state["carrying"].type == "key"
+    return carrying, key_pos
 
-        agent_pos = env.unwrapped.agent_pos
-        agent_dir = env.unwrapped.agent_dir
 
-        grid = env.unwrapped.grid
-        mg_door = None
-        for i in range(5):
-            for j in range(5):
-                cell = grid.get(i, j)
-                if cell and cell.type == "door":
-                    mg_door = (i, j)
+def open_door_sequence(env):
+    """Navigate to door and toggle it open. Returns success."""
+    state = extract_gym_state(env)
+    door_pos = state["door_pos"]
+    if door_pos is None:
+        return False
 
-        our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-        our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
+    if not approach_and_face(env, door_pos):
+        return False
 
-        our_fov = get_fov(
-            our_agent[0], our_agent[1],
-            agent_dir,
-            0, 0,  # key position
-            our_door[0], our_door[1],
-            0,
-            grid_size,
+    env.step(int(ActionType.TOGGLE))
+
+    new_state = extract_gym_state(env)
+    return new_state["door_is_open"]
+
+
+# ===========================================================================
+# A. Initial state (broad coverage)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 5, 7])
+@pytest.mark.parametrize("seed", range(50))
+def test_fov_initial_state(grid_size, fov_size, seed):
+    """Reset env, compare FOV. Covers all 4 orientations and diverse layouts."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        assert match, diff_msg(
+            model_fov, gym_fov, seed=seed, grid=grid_size, fov=fov_size
         )
-
-        has_door = CellType.DOOR in our_fov
-        assert has_door, "Door should be in our FOV"
-
-        # Find door in both observations
-        mg_obs = obs["image"][:, :, 0]
-        mg_door_pos = np.argwhere(mg_obs == CellType.DOOR)[0]
-        our_door_pos = np.argwhere(our_fov == CellType.DOOR)[0]
-
-        assert np.array_equal(mg_door_pos, our_door_pos), "Door should be at same FOV position"
-
+    finally:
         env.close()
 
 
-class TestGoalEncoding:
-    """Test that goal is correctly encoded when visible."""
-
-    def test_goal_visible_after_door_open(self):
-        """Goal should be visible after opening the door."""
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
-
-        # Open the door
-        actions = [3, 0, 5]  # PICKUP, LEFT, TOGGLE
-        for action in actions:
-            obs, _, _, _, _ = env.step(action)
-
-        mg_obs = obs["image"][:, :, 0]
-        has_goal = CellType.GOAL in mg_obs
-        assert has_goal, "Goal should be visible after door is open"
-
-        env.close()
-
-    def test_goal_position_correct(self):
-        """Verify goal is at expected position."""
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        env.reset(seed=42)
-
-        grid = env.unwrapped.grid
-        mg_goal = None
-        for i in range(5):
-            for j in range(5):
-                cell = grid.get(i, j)
-                if cell and cell.type == "goal":
-                    mg_goal = (i, j)
-
-        assert mg_goal is not None, "Goal should exist in grid"
-        assert mg_goal == (3, 3), f"Goal should be at (3,3), got {mg_goal}"
-
-        # Convert to our coordinates
-        our_goal = mg_to_our_coords(mg_goal[0], mg_goal[1], 3)
-        assert our_goal == (2, 0), f"Our goal should be at (2,0), got {our_goal}"
-
-        env.close()
+# ===========================================================================
+# B. Wall visibility from all angles
+# ===========================================================================
 
 
-class TestWallEncoding:
-    """Test that walls are correctly encoded."""
-
-    def test_walls_visible_in_fov(self):
-        """Walls should be visible in FOV."""
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
-
-        mg_obs = obs["image"][:, :, 0]
-        has_walls = CellType.WALL in mg_obs
-        assert has_walls, "Walls should be visible"
-
-        env.close()
-
-    def test_wall_positions_match(self):
-        """Wall positions should match between MiniGrid and our FOV."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        obs, _ = env.reset(seed=42)
-
-        agent_pos = env.unwrapped.agent_pos
-        agent_dir = env.unwrapped.agent_dir
-
-        grid = env.unwrapped.grid
-        mg_key, mg_door = None, None
-        for i in range(5):
-            for j in range(5):
-                cell = grid.get(i, j)
-                if cell:
-                    if cell.type == "key":
-                        mg_key = (i, j)
-                    elif cell.type == "door":
-                        mg_door = (i, j)
-
-        our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-        our_key = mg_to_our_coords(mg_key[0], mg_key[1], grid_size)
-        our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
-
-        our_fov = get_fov(
-            our_agent[0], our_agent[1],
-            agent_dir,
-            our_key[0], our_key[1],
-            our_door[0], our_door[1],
-            0,
-            grid_size,
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(10))
+@pytest.mark.parametrize("orientation", [0, 1, 2, 3])
+def test_fov_facing_wall(grid_size, fov_size, seed, orientation):
+    """Turn agent to each orientation, compare FOV."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        face_direction(env, orientation)
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        orient_name = ["RIGHT", "DOWN", "LEFT", "UP"][orientation]
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, facing=orient_name,
         )
-
-        mg_obs = obs["image"][:, :, 0]
-
-        # Compare wall positions
-        mg_walls = np.argwhere(mg_obs == CellType.WALL)
-        our_walls = np.argwhere(our_fov == CellType.WALL)
-
-        assert len(mg_walls) == len(our_walls), "Same number of walls"
-        assert np.array_equal(
-            sorted(mg_walls.tolist()), sorted(our_walls.tolist())
-        ), "Wall positions should match"
-
+    finally:
         env.close()
 
 
-class TestOrientationObservation:
-    """Test orientation observation tensor."""
-
-    def test_orientation_matches_minigrid(self):
-        """Orientation observation should match MiniGrid's direction."""
-        grid_size = 3
-        obs_tensor = generate_orientation_observation_tensor(grid_size)
-
-        for seed in [0, 42, 100]:
-            env = gym.make("MiniGrid-DoorKey-5x5-v0")
-            obs, _ = env.reset(seed=seed)
-            mg_dir = obs["direction"]
-
-            # Our orientation tensor: (4, n_states)
-            # For any state with orientation ori, obs_tensor[ori, state] = 1
-            for state in range(obs_tensor.shape[1]):
-                _, ori, _ = unflatten_state_index(
-                    state, grid_size * grid_size, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                )
-                assert obs_tensor[ori, state] == 1.0
-                for other_ori in range(N_ORIENTATIONS):
-                    if other_ori != ori:
-                        assert obs_tensor[other_ori, state] == 0.0
-
-            env.close()
+# ===========================================================================
+# C. Key on ground — visible / not visible
+# ===========================================================================
 
 
-class TestTransitionTensor:
-    """Test transition tensor against MiniGrid dynamics."""
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_key_visible(grid_size, fov_size, seed):
+    """Agent facing key (1 cell ahead). Key should appear in FOV."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        if not approach_and_face(env, state["key_pos"]):
+            pytest.skip("Cannot navigate to face key")
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        assert CellType.KEY in gym_fov, "Key not visible in gym FOV"
+        assert match, diff_msg(
+            model_fov, gym_fov, seed=seed, grid=grid_size, fov=fov_size, test="key_visible"
+        )
+    finally:
+        env.close()
 
-    def test_turn_left_transition(self):
-        """TURN_LEFT should change orientation correctly."""
-        grid_size = 3
-        transition = generate_transition_tensor(grid_size)
 
-        # For any state, TURN_LEFT should only change orientation
-        n_loc = grid_size * grid_size
-        action = ActionType.TURN_LEFT
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_key_behind(grid_size, fov_size, seed):
+    """Agent facing away from key. Key should be UNSEEN or absent."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        if not approach_and_face(env, state["key_pos"]):
+            pytest.skip("Cannot navigate to face key")
+        # Turn 180 degrees
+        uw = env.unwrapped
+        away_dir = (int(uw.agent_dir) + 2) % 4
+        face_direction(env, away_dir)
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        assert match, diff_msg(
+            model_fov, gym_fov, seed=seed, grid=grid_size, fov=fov_size, test="key_behind"
+        )
+    finally:
+        env.close()
 
-        for loc in range(n_loc - 2 * grid_size):  # Valid locations only
-            for ori in range(N_ORIENTATIONS):
-                for dks in range(N_DOOR_KEY_STATES):
-                    old_state = flatten_state_index(
-                        loc, ori, dks, n_loc, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                    )
 
-                    # New orientation after turn left
-                    new_ori = (ori + 3) % 4  # Counter-clockwise
+# ===========================================================================
+# D. Carried key (dks=1)
+# ===========================================================================
 
-                    for static in range(transition.shape[2]):
-                        probs = transition[:, old_state, static, action]
-                        if probs.sum() > 0:  # Valid transition
-                            new_state = flatten_state_index(
-                                loc, new_ori, dks, n_loc, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                            )
-                            assert probs[new_state] == 1.0, f"TURN_LEFT should go to new_ori={new_ori}"
 
-    def test_turn_right_transition(self):
-        """TURN_RIGHT should change orientation correctly."""
-        grid_size = 3
-        transition = generate_transition_tensor(grid_size)
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_carrying_key(grid_size, fov_size, seed):
+    """After pickup, agent in open area. KEY should appear at agent position."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert match, diff_msg(
+            model_fov, gym_fov, seed=seed, grid=grid_size, fov=fov_size, test="carrying_key"
+        )
+    finally:
+        env.close()
 
-        n_loc = grid_size * grid_size
-        action = ActionType.TURN_RIGHT
 
-        for loc in range(min(5, n_loc - 2 * grid_size)):  # Test subset
-            for ori in range(N_ORIENTATIONS):
-                old_state = flatten_state_index(
-                    loc, ori, 0, n_loc, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                )
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_carrying_key_facing_door(grid_size, fov_size, seed):
+    """After pickup, facing locked door. Door visible + KEY at agent pos."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not approach_and_face(env, state["door_pos"]):
+            pytest.skip("Cannot navigate to face door")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert CellType.DOOR in gym_fov, "Door not visible in gym FOV"
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="carrying_key_facing_door",
+        )
+    finally:
+        env.close()
 
-                new_ori = (ori + 1) % 4  # Clockwise
 
-                for static in range(min(3, transition.shape[2])):
-                    probs = transition[:, old_state, static, action]
-                    if probs.sum() > 0:
-                        new_state = flatten_state_index(
-                            loc, new_ori, 0, n_loc, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                        )
-                        assert probs[new_state] == 1.0
+# ===========================================================================
+# E. Door states
+# ===========================================================================
 
-    def test_forward_blocked_by_wall(self):
-        """FORWARD into a wall should not change position."""
-        grid_size = 3
-        env = gym.make("MiniGrid-DoorKey-5x5-v0")
-        env.reset(seed=42)
 
-        # Move agent to position facing a wall
-        # After some steps, try to go forward into wall
-        initial_pos = env.unwrapped.agent_pos
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_facing_locked_door(grid_size, fov_size, seed):
+    """Agent facing locked door (dks=0), no key. Door should block visibility."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        if not approach_and_face(env, state["door_pos"]):
+            pytest.skip("Cannot navigate to face door")
+        new_state = extract_gym_state(env)
+        if new_state["carrying"] is not None:
+            pytest.skip("Accidentally picked up key during navigation")
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        assert CellType.DOOR in gym_fov, "Door not visible"
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="facing_locked_door",
+        )
+    finally:
+        env.close()
 
-        # Turn to face wall and try forward
-        actions = [1, 1, 2]  # RIGHT, RIGHT, FORWARD (into wall)
-        for action in actions:
-            old_pos = env.unwrapped.agent_pos
-            obs, _, term, _, _ = env.step(action)
-            if term:
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_facing_closed_door_with_key(grid_size, fov_size, seed):
+    """Agent facing door (dks=1). Door visible, cells behind UNSEEN."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not approach_and_face(env, state["door_pos"]):
+            pytest.skip("Cannot navigate to face door")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert CellType.DOOR in gym_fov, "Door not visible"
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="closed_door_with_key",
+        )
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_after_toggle(grid_size, fov_size, seed):
+    """Door just opened (dks=2), agent in front. Cells behind door now VISIBLE."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not open_door_sequence(env):
+            pytest.skip("Cannot open door")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="after_toggle",
+        )
+    finally:
+        env.close()
+
+
+# ===========================================================================
+# F. Agent on open door cell
+# ===========================================================================
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_on_open_door(grid_size, fov_size, seed):
+    """Agent standing ON the open door cell (dks=2).
+
+    Gym shows KEY at agent pos (carried object overrides door).
+    Tests the render-order fix.
+    """
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not open_door_sequence(env):
+            pytest.skip("Cannot open door")
+        # Walk forward onto the door cell
+        env.step(int(ActionType.FORWARD))
+        uw = env.unwrapped
+        agent_pos = tuple(int(x) for x in uw.agent_pos)
+        if agent_pos != state["door_pos"]:
+            pytest.skip("Agent not on door cell after forward")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="on_open_door",
+        )
+    finally:
+        env.close()
+
+
+# ===========================================================================
+# G. Goal visibility
+# ===========================================================================
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_goal_visible(grid_size, fov_size, seed):
+    """Agent facing goal at (n-1, n-1). FOV should contain GOAL cell type."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        goal_pos = (grid_size - 2, grid_size - 2)
+        # Must go through door to reach goal
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not open_door_sequence(env):
+            pytest.skip("Cannot open door")
+        if not approach_and_face(env, goal_pos):
+            pytest.skip("Cannot navigate to face goal")
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert CellType.GOAL in gym_fov, "Goal not visible in gym FOV"
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="goal_visible",
+        )
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(10))
+def test_fov_goal_behind_wall(grid_size, fov_size, seed):
+    """Agent on left side, goal on right behind wall. Goal should be UNSEEN."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        # Face RIGHT toward the wall (goal is behind it)
+        face_direction(env, 0)
+        model_fov, gym_fov, match = compare_fov(env, fov_size, grid_size)
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="goal_behind_wall",
+        )
+    finally:
+        env.close()
+
+
+# ===========================================================================
+# H. Through door — right side of grid
+# ===========================================================================
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(20))
+def test_fov_past_door(grid_size, fov_size, seed):
+    """Full sequence: pickup -> toggle -> walk through -> compare from right side."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+        success, key_pos = pickup_key_sequence(env)
+        if not success:
+            pytest.skip("Cannot pick up key")
+        if not open_door_sequence(env):
+            pytest.skip("Cannot open door")
+        # Walk through door
+        env.step(int(ActionType.FORWARD))
+        # One more step to be past it
+        env.step(int(ActionType.FORWARD))
+        model_fov, gym_fov, match = compare_fov(
+            env, fov_size, grid_size, last_key_pos=key_pos
+        )
+        assert match, diff_msg(
+            model_fov, gym_fov,
+            seed=seed, grid=grid_size, fov=fov_size, test="past_door",
+        )
+    finally:
+        env.close()
+
+
+# ===========================================================================
+# I. Full episode rollout
+# ===========================================================================
+
+
+@pytest.mark.parametrize("grid_size", [5, 7])
+@pytest.mark.parametrize("fov_size", [3, 7])
+@pytest.mark.parametrize("seed", range(10))
+def test_fov_full_episode(grid_size, fov_size, seed):
+    """Run 20-step random episode, compare at EVERY step."""
+    env, state = setup_env(grid_size, fov_size, seed)
+    try:
+        if state["key_pos"] is None or state["door_pos"] is None:
+            pytest.skip("Invalid layout")
+
+        rng = np.random.default_rng(seed)
+        last_key_pos = state["key_pos"]
+
+        for step in range(20):
+            model_fov, gym_fov, match = compare_fov(
+                env, fov_size, grid_size, last_key_pos=last_key_pos
+            )
+            assert match, diff_msg(
+                model_fov, gym_fov,
+                seed=seed, grid=grid_size, fov=fov_size, step=step,
+            )
+
+            action = int(rng.integers(0, 7))
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            # Track key position (it disappears from grid when carried)
+            new_state = extract_gym_state(env)
+            if new_state["key_pos"] is not None:
+                last_key_pos = new_state["key_pos"]
+
+            if terminated or truncated:
                 break
-
-        # Position shouldn't change when hitting wall
-        # (This is a basic sanity check, specific wall test depends on layout)
+    finally:
         env.close()
-
-
-class TestObservationTensorConsistency:
-    """Test observation tensor is consistent with MiniGrid across states."""
-
-    def test_tensor_lookup_matches_fov(self):
-        """Observation tensor lookup should match get_fov output."""
-        grid_size = 3
-        obs_tensor = generate_observation_tensor(grid_size)
-
-        n_loc = grid_size * grid_size
-        n_key_pos = n_loc - 2 * grid_size
-        n_door_pos = n_loc - 2 * grid_size
-
-        # Test a few states
-        for loc in [0, 3, 6]:
-            for ori in [0, 1]:
-                for dks in [0, 1]:
-                    state = flatten_state_index(
-                        loc, ori, dks, n_loc, N_ORIENTATIONS, N_DOOR_KEY_STATES
-                    )
-                    x, y = state_to_coords(loc, grid_size)
-
-                    for key_pos_idx in [0, 1]:
-                        for door_pos_idx in [0, 1]:
-                            static = flatten_position_index(
-                                key_pos_idx, door_pos_idx, n_key_pos, n_door_pos
-                            )
-
-                            kx, ky = key_position(key_pos_idx, grid_size)
-                            dx, dy = door_position(door_pos_idx, grid_size)
-
-                            fov = get_fov(x, y, ori, kx, ky, dx, dy, dks, grid_size)
-
-                            # Check tensor matches FOV
-                            for fx in range(7):
-                                for fy in range(7):
-                                    cell_type = fov[fx, fy]
-                                    tensor_val = obs_tensor[fx, fy, cell_type, state, static]
-                                    assert tensor_val == 1.0, (
-                                        f"Tensor mismatch at ({fx},{fy}): "
-                                        f"fov={cell_type}, tensor[{cell_type}]={tensor_val}"
-                                    )
-
-
-class TestFOVSizeAgainstMiniGrid:
-    """Test that our get_fov with fov_size=5 matches MiniGrid ViewSizeWrapper."""
-
-    def test_fov_size5_matches_minigrid(self):
-        """FOV with fov_size=5 should match MiniGrid ViewSizeWrapper(agent_view_size=5)."""
-        from minigrid.wrappers import ViewSizeWrapper
-
-        grid_size = 3
-        fov_size = 5
-
-        for seed in [0, 1, 42, 100]:
-            base_env = gym.make("MiniGrid-DoorKey-5x5-v0")
-            env = ViewSizeWrapper(base_env, agent_view_size=fov_size)
-            obs, _ = env.reset(seed=seed)
-
-            mg_obs = obs["image"][:, :, 0]
-            agent_pos = env.unwrapped.agent_pos
-            agent_dir = env.unwrapped.agent_dir
-
-            grid = env.unwrapped.grid
-            mg_key, mg_door = None, None
-            for i in range(5):
-                for j in range(5):
-                    cell = grid.get(i, j)
-                    if cell:
-                        if cell.type == "key":
-                            mg_key = (i, j)
-                        elif cell.type == "door":
-                            mg_door = (i, j)
-
-            our_agent = mg_to_our_coords(int(agent_pos[0]), int(agent_pos[1]), grid_size)
-            our_key = mg_to_our_coords(mg_key[0], mg_key[1], grid_size)
-            our_door = mg_to_our_coords(mg_door[0], mg_door[1], grid_size)
-
-            our_fov = get_fov(
-                our_agent[0], our_agent[1],
-                agent_dir,
-                our_key[0], our_key[1],
-                our_door[0], our_door[1],
-                0,
-                grid_size,
-                fov_size=fov_size,
-            )
-
-            assert our_fov.shape == (fov_size, fov_size), f"FOV shape mismatch for seed {seed}"
-            assert np.array_equal(mg_obs, our_fov), (
-                f"FOV mismatch for fov_size={fov_size}, seed {seed}:\n"
-                f"MiniGrid:\n{mg_obs}\nOurs:\n{our_fov}"
-            )
-            env.close()

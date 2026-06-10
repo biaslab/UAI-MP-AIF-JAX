@@ -25,8 +25,10 @@ from jax import lax
 from jax.scipy.special import logsumexp
 from functools import partial
 
-from .planning import safe_log
-from .messages import EPSILON
+from .messages import (
+    safe_log, EPSILON,
+    sparse_reduced, sparse_dyn_to_theta, sparse_efe_action_prior,
+)
 from .region_extended_loopy_bp import (
     compute_log_reduced,
     compute_theta_cavities_extended,
@@ -317,6 +319,7 @@ def nuijten_mp_planning(
     horizon,              # int (static)
     n_iterations,         # int (static)
     action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
+    T_idx=None,           # (S, A, θ) int32 sparse transition index
 ):
     """
     Plan actions via Nuijten MP with θ as a variable node.
@@ -333,7 +336,8 @@ def nuijten_mp_planning(
     """
     n_states = q_current_state.shape[0]
     n_static = q_static_state.shape[0]
-    n_actions = transition_tensor.shape[3]
+    use_sparse = T_idx is not None
+    n_actions = T_idx.shape[1] if use_sparse else transition_tensor.shape[3]
     n_fov = observation_tensor.shape[0]
     n_obs_types = observation_tensor.shape[1]
     has_pref = goal.ndim == 2
@@ -343,11 +347,12 @@ def nuijten_mp_planning(
     action_mask = (action_prior > 0).astype(jnp.float32)
 
     # Log once at top
-    log_T = safe_log(transition_tensor)
-    log_T_kernel = log_T.transpose(1, 0, 2, 3)  # (x_old, x_new, θ, u)
-    log_T_kernel_tiled = jnp.broadcast_to(
-        log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
-    )
+    if not use_sparse:
+        log_T = safe_log(transition_tensor)
+        log_T_kernel = log_T.transpose(1, 0, 2, 3)  # (x_old, x_new, θ, u)
+        log_T_kernel_tiled = jnp.broadcast_to(
+            log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
+        )
     log_B_flat = safe_log(observation_tensor)
     log_q0 = safe_log(q_current_state)
     log_prior_theta = safe_log(q_static_state)
@@ -363,10 +368,66 @@ def nuijten_mp_planning(
     log_dyn_to_theta = jnp.zeros((horizon, n_static))
     q_u_init = jnp.zeros((horizon, n_actions))
     action_prior_init = jnp.tile(action_prior, (horizon, 1))
-    log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
+    if not use_sparse:
+        log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
     obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
 
-    if has_pref:
+    if has_pref and use_sparse:
+        log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
+
+        def body_fn(_, carry):
+            log_dyn_to_theta, _, action_prior_per_t, obs_regions, log_pref_to_theta = carry
+
+            log_action_prior_per_t = safe_log(action_prior_per_t)
+
+            log_obs_to_x = compute_obs_efe_to_x(obs_regions)
+            log_obs_to_theta = compute_obs_efe_to_theta(obs_regions)
+
+            log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
+                log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
+            )
+
+            log_reduced_per_t = sparse_reduced(T_idx, log_cavity_dyn, n_states)
+
+            log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_pref)
+            log_local_to_x = log_obs_to_x + log_pref_to_x
+
+            log_fwd_msgs = forward_pass_nuijten(
+                log_reduced_per_t, log_q0, log_action_prior_per_t, log_local_to_x, horizon
+            )
+            log_bwd_msgs, q_u = backward_pass_nuijten(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
+                log_local_to_x, horizon
+            )
+
+            new_log_dyn_to_theta = sparse_dyn_to_theta(
+                T_idx, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_action_prior_per_t, n_states)
+
+            new_log_pref_to_theta = compute_pref_to_theta_msgs(
+                log_C, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
+            )
+
+            obs_regions = compute_obs_region_beliefs_original(
+                log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
+            )
+
+            new_action_prior = sparse_efe_action_prior(
+                T_idx, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_cavity_dyn, log_action_prior_per_t, n_states, action_mask)
+
+            return (new_log_dyn_to_theta, q_u, new_action_prior,
+                    obs_regions, new_log_pref_to_theta)
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_dyn_to_theta, q_u_init, action_prior_init,
+             obs_regions_init, log_pref_to_theta_init)
+        )
+        _, q_u, _, obs_region_beliefs, _ = result
+        log_dyn_region_beliefs = None
+
+    elif has_pref:
         log_pref_to_theta_init = jnp.zeros((horizon + 1, n_static))
 
         def body_fn(_, carry):
@@ -374,45 +435,35 @@ def nuijten_mp_planning(
 
             log_action_prior_per_t = safe_log(action_prior_per_t)
 
-            # Obs EFE messages from carried region beliefs
             log_obs_to_x = compute_obs_efe_to_x(obs_regions)
             log_obs_to_theta = compute_obs_efe_to_theta(obs_regions)
 
-            # Step 1: 3-way theta cavities
             log_cavity_dyn, log_cavity_obs, log_cavity_pref = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta, log_pref_to_theta
             )
 
-            # Step 2: Per-timestep reduced tensors from original factors
             log_reduced_per_t = compute_log_reduced(log_T_kernel_tiled, log_cavity_dyn)
 
-            # Step 3: pref->x messages and combined local messages
             log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_pref)
             log_local_to_x = log_obs_to_x + log_pref_to_x
 
-            # Step 4: Forward pass with per-timestep action prior
             log_fwd_msgs = forward_pass_nuijten(
                 log_reduced_per_t, log_q0, log_action_prior_per_t, log_local_to_x, horizon
             )
-
-            # Step 5: Backward pass + action marginals
             log_bwd_msgs, q_u = backward_pass_nuijten(
                 log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
                 log_local_to_x, horizon
             )
 
-            # Step 6: dyn→θ messages using original factors
             new_log_dyn_to_theta = compute_dyn_to_theta_msgs_nuijten(
                 log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
                 log_action_prior_per_t, horizon
             )
 
-            # Step 7: pref→θ messages (cavity for x excludes pref_to_x)
             new_log_pref_to_theta = compute_pref_to_theta_msgs(
                 log_C, log_fwd_msgs, log_bwd_msgs, log_obs_to_x
             )
 
-            # Step 8: Region beliefs using original factors
             log_dyn_regions = compute_dyn_region_beliefs_nuijten(
                 log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
                 log_cavity_dyn, log_action_prior_per_t
@@ -421,7 +472,6 @@ def nuijten_mp_planning(
                 log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
             )
 
-            # Step 9: EFE-based action prior from region beliefs
             new_action_prior = compute_efe_action_prior(log_dyn_regions, action_mask)
 
             return (new_log_dyn_to_theta, q_u, new_action_prior, log_dyn_regions,
@@ -433,42 +483,79 @@ def nuijten_mp_planning(
              obs_regions_init, log_pref_to_theta_init)
         )
         _, q_u, _, log_dyn_region_beliefs, obs_region_beliefs, _ = result
+
+    elif use_sparse:
+        def body_fn(_, carry):
+            log_dyn_to_theta, _, action_prior_per_t, obs_regions = carry
+
+            log_action_prior_per_t = safe_log(action_prior_per_t)
+
+            log_obs_to_x = compute_obs_efe_to_x(obs_regions)
+            log_obs_to_theta = compute_obs_efe_to_theta(obs_regions)
+
+            log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
+                log_prior_theta, log_dyn_to_theta, log_obs_to_theta
+            )
+
+            log_reduced_per_t = sparse_reduced(T_idx, log_cavity_dyn, n_states)
+
+            log_fwd_msgs = forward_pass_nuijten(
+                log_reduced_per_t, log_q0, log_action_prior_per_t, log_obs_to_x, horizon
+            )
+            log_bwd_msgs, q_u = backward_pass_nuijten(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
+                log_obs_to_x, horizon
+            )
+
+            new_log_dyn_to_theta = sparse_dyn_to_theta(
+                T_idx, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_action_prior_per_t, n_states)
+
+            obs_regions = compute_obs_region_beliefs_original(
+                log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
+            )
+
+            new_action_prior = sparse_efe_action_prior(
+                T_idx, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_cavity_dyn, log_action_prior_per_t, n_states, action_mask)
+
+            return new_log_dyn_to_theta, q_u, new_action_prior, obs_regions
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (log_dyn_to_theta, q_u_init, action_prior_init, obs_regions_init)
+        )
+        _, q_u, _, obs_region_beliefs = result
+        log_dyn_region_beliefs = None
+
     else:
         def body_fn(_, carry):
             log_dyn_to_theta, _, action_prior_per_t, _, obs_regions = carry
 
             log_action_prior_per_t = safe_log(action_prior_per_t)
 
-            # Obs EFE messages from carried region beliefs
             log_obs_to_x = compute_obs_efe_to_x(obs_regions)
             log_obs_to_theta = compute_obs_efe_to_theta(obs_regions)
 
-            # Step 1: theta cavities (total-minus-self)
             log_cavity_dyn, log_cavity_obs = compute_theta_cavities_extended(
                 log_prior_theta, log_dyn_to_theta, log_obs_to_theta
             )
 
-            # Step 2: Per-timestep reduced tensors from original factors
             log_reduced_per_t = compute_log_reduced(log_T_kernel_tiled, log_cavity_dyn)
 
-            # Step 3: Forward pass with per-timestep action prior
             log_fwd_msgs = forward_pass_nuijten(
                 log_reduced_per_t, log_q0, log_action_prior_per_t, log_obs_to_x, horizon
             )
-
-            # Step 4: Backward pass + action marginals
             log_bwd_msgs, q_u = backward_pass_nuijten(
                 log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
                 log_obs_to_x, horizon
             )
 
-            # Step 5: dyn→θ messages using original factors
             new_log_dyn_to_theta = compute_dyn_to_theta_msgs_nuijten(
                 log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
                 log_action_prior_per_t, horizon
             )
 
-            # Step 6: Region beliefs using original factors
             log_dyn_regions = compute_dyn_region_beliefs_nuijten(
                 log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
                 log_cavity_dyn, log_action_prior_per_t
@@ -477,7 +564,6 @@ def nuijten_mp_planning(
                 log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
             )
 
-            # Step 7: EFE-based action prior from region beliefs
             new_action_prior = compute_efe_action_prior(log_dyn_regions, action_mask)
 
             return new_log_dyn_to_theta, q_u, new_action_prior, log_dyn_regions, obs_regions
@@ -487,163 +573,5 @@ def nuijten_mp_planning(
             (log_dyn_to_theta, q_u_init, action_prior_init, log_dyn_regions_init, obs_regions_init)
         )
         _, q_u, _, log_dyn_region_beliefs, obs_region_beliefs = result
-
-    return q_u[0], log_dyn_region_beliefs, obs_region_beliefs
-
-
-# =============================================================================
-# θ-fixed variant
-# =============================================================================
-
-
-@partial(jax.jit, static_argnums=(5, 6))
-def reduced_nuijten_mp_planning(
-    q_current_state,      # (n_states,)
-    q_static_state,       # (n_static,) prior on theta (used as fixed cavity)
-    transition_tensor,    # (n_states, n_states, n_static, n_actions) probability
-    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static) probability
-    goal,                 # (n_states,) or (n_states, n_static) preference
-    horizon,              # int (static)
-    n_iterations,         # int (static)
-    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
-):
-    """
-    Plan actions via reduced Nuijten MP with fixed θ.
-
-    Accepts full probability tensors, logs once at the top.
-
-    When goal is 2D (n_states, n_static), it is treated as a per-config
-    preference factor C(x, θ) applied at every timestep.
-
-    Returns:
-        action_dist: (n_actions,) distribution over first action
-        log_dyn_region_beliefs: (T, x_old, x_new, θ, u)
-        obs_region_beliefs: (T+1, n_channels, n_obs_types, n_states, n_static)
-    """
-    n_states = q_current_state.shape[0]
-    n_static = q_static_state.shape[0]
-    n_actions = transition_tensor.shape[3]
-    n_fov = observation_tensor.shape[0]
-    n_obs_types = observation_tensor.shape[1]
-    has_pref = goal.ndim == 2
-
-    if action_prior is None:
-        action_prior = jnp.ones(n_actions) / n_actions
-    action_mask = (action_prior > 0).astype(jnp.float32)
-
-    # Log once at top
-    log_T = safe_log(transition_tensor)
-    log_T_kernel = log_T.transpose(1, 0, 2, 3)
-    log_T_kernel_tiled = jnp.broadcast_to(
-        log_T_kernel[None], (horizon, n_states, n_states, n_static, n_actions)
-    )
-    log_B_flat = safe_log(observation_tensor)
-    log_q0 = safe_log(q_current_state)
-
-    if has_pref:
-        log_C = safe_log(goal)                            # (n_states, n_static)
-        log_goal = jnp.zeros(n_states)                    # uniform terminal
-    else:
-        log_C = None
-        log_goal = safe_log(goal)
-
-    # Fixed cavities (log-normalized)
-    log_q_static = safe_log(q_static_state)
-    log_q_static_norm = log_q_static - logsumexp(log_q_static)
-    log_cavity_dyn = jnp.tile(log_q_static_norm, (horizon, 1))
-    log_cavity_obs = jnp.tile(log_q_static_norm, (horizon + 1, 1))
-
-    # Compute reduced tensor once (constant across iterations)
-    log_reduced_per_t = compute_log_reduced(log_T_kernel_tiled, log_cavity_dyn)
-
-    # Initialize carry
-    q_u_init = jnp.zeros((horizon, n_actions))
-    action_prior_init = jnp.tile(action_prior, (horizon, 1))
-    log_dyn_regions_init = jnp.zeros((horizon, n_states, n_states, n_static, n_actions))
-    obs_regions_init = jnp.zeros((horizon + 1, n_fov, n_obs_types, n_states, n_static))
-
-    if has_pref:
-        # Precompute pref_to_x with fixed cavity (constant across iterations)
-        log_cavity_pref = jnp.tile(log_q_static_norm, (horizon + 1, 1))
-        log_pref_to_x = compute_pref_to_x_msgs(log_C, log_cavity_pref)
-
-        def body_fn(_, carry):
-            _, action_prior_per_t, _, obs_regions = carry
-
-            log_action_prior_per_t = safe_log(action_prior_per_t)
-
-            # Obs EFE message from carried region beliefs
-            log_obs_to_x = compute_obs_efe_to_x(obs_regions)
-
-            # Combine obs and pref messages to x
-            log_local_to_x = log_obs_to_x + log_pref_to_x
-
-            # Forward pass with per-timestep action prior
-            log_fwd_msgs = forward_pass_nuijten(
-                log_reduced_per_t, log_q0, log_action_prior_per_t, log_local_to_x, horizon
-            )
-
-            # Backward pass + action marginals
-            log_bwd_msgs, q_u = backward_pass_nuijten(
-                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
-                log_local_to_x, horizon
-            )
-
-            # Region beliefs using original factors
-            log_dyn_regions = compute_dyn_region_beliefs_nuijten(
-                log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
-                log_cavity_dyn, log_action_prior_per_t
-            )
-            obs_regions = compute_obs_region_beliefs_original(
-                log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
-            )
-
-            # EFE-based action prior from region beliefs
-            new_action_prior = compute_efe_action_prior(log_dyn_regions, action_mask)
-
-            return q_u, new_action_prior, log_dyn_regions, obs_regions
-
-        q_u, _, log_dyn_region_beliefs, obs_region_beliefs = lax.fori_loop(
-            0, n_iterations, body_fn,
-            (q_u_init, action_prior_init, log_dyn_regions_init, obs_regions_init)
-        )
-    else:
-        def body_fn(_, carry):
-            _, action_prior_per_t, _, obs_regions = carry
-
-            log_action_prior_per_t = safe_log(action_prior_per_t)
-
-            # Obs EFE message from carried region beliefs
-            log_obs_to_x = compute_obs_efe_to_x(obs_regions)
-
-            # Forward pass with per-timestep action prior
-            log_fwd_msgs = forward_pass_nuijten(
-                log_reduced_per_t, log_q0, log_action_prior_per_t, log_obs_to_x, horizon
-            )
-
-            # Backward pass + action marginals
-            log_bwd_msgs, q_u = backward_pass_nuijten(
-                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior_per_t,
-                log_obs_to_x, horizon
-            )
-
-            # Region beliefs using original factors
-            log_dyn_regions = compute_dyn_region_beliefs_nuijten(
-                log_T_kernel_tiled, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
-                log_cavity_dyn, log_action_prior_per_t
-            )
-            obs_regions = compute_obs_region_beliefs_original(
-                log_B_flat, log_fwd_msgs, log_bwd_msgs, log_cavity_obs
-            )
-
-            # EFE-based action prior from region beliefs
-            new_action_prior = compute_efe_action_prior(log_dyn_regions, action_mask)
-
-            return q_u, new_action_prior, log_dyn_regions, obs_regions
-
-        q_u, _, log_dyn_region_beliefs, obs_region_beliefs = lax.fori_loop(
-            0, n_iterations, body_fn,
-            (q_u_init, action_prior_init, log_dyn_regions_init, obs_regions_init)
-        )
 
     return q_u[0], log_dyn_region_beliefs, obs_region_beliefs

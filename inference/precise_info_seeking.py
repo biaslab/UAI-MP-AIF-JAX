@@ -1,0 +1,241 @@
+"""Precise info-seeking planning: VBP action channels + obs channel reparameterization.
+
+Combines two reparameterizations:
+- Obs channel from region_extended: obs kernels use r(y|x,θ) and r(y|x)
+- VBP action channel from vbp_channel: r(u|x) enters dynamics kernel in NUMERATOR
+
+Modified dynamics kernel: κ_t(x_old, x_new, θ, u) = T(x_old, x_new, θ, u) · r_t(u|x_old)
+Obs kernel: B(y|x,θ) · r(y|x,θ) · r(y|x,θ)/r(y|x) (same as region-extended)
+
+All internal computation is in log-space. Accepts probability-space tensors.
+"""
+
+import jax
+import jax.numpy as jnp
+from jax import lax
+from jax.scipy.special import logsumexp
+from functools import partial
+
+from .messages import LOG_ZERO, safe_log
+from .messages import safe_log_div
+from .region_extended_loopy_bp import (
+    compute_log_reduced,
+    forward_pass,
+    backward_pass,
+    compute_obs_to_x_msgs,
+    compute_pref_to_x_msgs,
+    compute_dyn_region_beliefs,
+    compute_obs_region_beliefs,
+    compute_obs_channels,
+    compute_marginal_obs_channels,
+    damp_log_channel,
+)
+from .vbp_channel import (
+    compute_dyn_kernels_vbp,
+    compute_pair_marginal,
+    compute_action_channel,
+)
+
+
+@partial(jax.jit, static_argnums=(5, 6))
+def precise_info_seeking_planning(
+    q_current_state,      # (n_states,)
+    q_static_state,       # (n_static,) prior on theta
+    transition_tensor,    # (n_states, n_states, n_static, n_actions)
+    observation_tensor,   # (n_channels, n_obs_types, n_states, n_static)
+    goal,                 # (n_states,) or (n_states, n_static) preference
+    horizon,              # int (static)
+    n_iterations,         # int (static)
+    damping=1.0,          # float - channel update damping (1.0 = no damping)
+    action_prior=None,    # (n_actions,) prior over actions. If None, uniform.
+) -> tuple:
+    """
+    Plan actions via precise info-seeking: VBP action channels + obs channels.
+
+    Returns:
+        action_dist: (n_actions,)
+        log_action_channels: (T, n_states, n_actions)
+        log_obs_channels: (T+1, n_channels, n_obs_types, n_states, n_static)
+    """
+    n_states = q_current_state.shape[0]
+    n_static = q_static_state.shape[0]
+    n_actions = transition_tensor.shape[3]
+    n_fov = observation_tensor.shape[0]
+    n_obs_types = observation_tensor.shape[1]
+    has_pref = goal.ndim == 2
+
+    if action_prior is None:
+        action_prior = jnp.ones(n_actions) / n_actions
+    log_action_prior = safe_log(action_prior)
+
+    # Log once at top
+    log_T = safe_log(transition_tensor)                   # (x_new, x_old, θ, u)
+    log_T_kernel = log_T.transpose(1, 0, 2, 3)           # (x_old, x_new, θ, u)
+    log_B_flat = safe_log(observation_tensor)
+    log_q0 = safe_log(q_current_state)
+    log_prior_theta = safe_log(q_static_state)
+
+    if has_pref:
+        log_C = safe_log(goal)                            # (n_states, n_static)
+        log_goal = jnp.zeros(n_states)                    # uniform terminal
+    else:
+        log_C = None
+        log_goal = safe_log(goal)
+
+    # Precompute prior broadcasts (replacing theta cavity messages)
+    log_prior_dyn = jnp.broadcast_to(log_prior_theta[None, :], (horizon, n_static))
+    log_prior_obs = jnp.broadcast_to(log_prior_theta[None, :], (horizon + 1, n_static))
+
+    q_u_init = jnp.zeros((horizon, n_actions))
+    log_fwd_prev_init = jnp.zeros((horizon + 1, n_states))
+    log_bwd_prev_init = jnp.zeros((horizon + 1, n_states))
+
+    # Initial action channels: uniform r(u|x) = 1/n_actions (from vbp_channel)
+    log_r_ux_init = jnp.full((horizon, n_states, n_actions), -jnp.log(n_actions))
+
+    # Initial obs channels: uniform
+    log_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states, n_static), -jnp.log(n_obs_types))
+    log_marginal_obs_channels_init = jnp.full((horizon + 1, n_fov, n_obs_types, n_states), -jnp.log(n_obs_types))
+
+    if has_pref:
+        def body_fn(i, carry):
+            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
+             log_fwd_prev, log_bwd_prev) = carry
+
+            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
+            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
+
+            # Step 2: Obs kernels via region-extended
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
+
+            # Step 3: Reduced tensors (use prior instead of cavity)
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_prior_dyn)
+
+            # Step 4: obs->x and pref->x messages (use prior instead of cavity)
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_prior_obs)
+            log_pref_to_x = compute_pref_to_x_msgs(log_C, log_prior_obs)
+            log_local_to_x = log_obs_to_x + log_pref_to_x
+
+            # Step 5: Forward pass (with inertial damping)
+            log_fwd_msgs = forward_pass(
+                log_reduced_per_t, log_q0, log_action_prior, log_local_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
+            )
+
+            # Step 6: Backward pass (with inertial damping)
+            log_bwd_msgs, q_u = backward_pass(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
+                log_local_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
+            )
+
+            # Step 7: Region beliefs (use prior instead of cavity)
+            log_dyn_regions = compute_dyn_region_beliefs(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_prior_dyn, log_action_prior
+            )
+            log_obs_regions = compute_obs_region_beliefs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_local_to_x,
+                log_prior_obs
+            )
+
+            # Step 8: Action channels from dyn region beliefs (VBP style)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
+
+            # Step 9: Obs channels from obs region beliefs (region-extended style)
+            raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
+
+            new_log_obs_channels = damp_log_channel(
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
+
+            return (q_u, new_log_r_ux, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs)
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (q_u_init, log_r_ux_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init)
+        )
+        q_u, log_r_ux, log_obs_channels, _, _, _ = result
+    else:
+        def body_fn(i, carry):
+            (_, log_r_ux, log_obs_channels, log_marginal_obs_channels,
+             log_fwd_prev, log_bwd_prev) = carry
+
+            # Step 1: Dyn kernels via VBP (channel in NUMERATOR)
+            log_dyn_kernels = compute_dyn_kernels_vbp(log_T_kernel, log_r_ux)
+
+            # Step 2: Obs kernels via region-extended
+            log_obs_kernels = (log_B_flat[None] + log_obs_channels
+                               + safe_log_div(log_obs_channels,
+                                              log_marginal_obs_channels[:, :, :, :, None]))
+
+            # Step 3: Reduced tensors (use prior instead of cavity)
+            log_reduced_per_t = compute_log_reduced(log_dyn_kernels, log_prior_dyn)
+
+            # Step 4: obs->x messages (use prior instead of cavity)
+            log_obs_to_x = compute_obs_to_x_msgs(log_obs_kernels, log_prior_obs)
+
+            # Step 5: Forward pass (with inertial damping)
+            log_fwd_msgs = forward_pass(
+                log_reduced_per_t, log_q0, log_action_prior, log_obs_to_x, horizon,
+                log_prev_fwd=log_fwd_prev, msg_damping=damping
+            )
+
+            # Step 6: Backward pass + action marginals (with inertial damping)
+            log_bwd_msgs, q_u = backward_pass(
+                log_reduced_per_t, log_fwd_msgs, log_goal, log_action_prior,
+                log_obs_to_x, horizon,
+                log_prev_bwd=log_bwd_prev, msg_damping=damping
+            )
+
+            # Step 7: Region beliefs (use prior instead of cavity)
+            log_dyn_regions = compute_dyn_region_beliefs(
+                log_dyn_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_prior_dyn, log_action_prior
+            )
+            log_obs_regions = compute_obs_region_beliefs(
+                log_obs_kernels, log_fwd_msgs, log_bwd_msgs, log_obs_to_x,
+                log_prior_obs
+            )
+
+            # Step 8: Action channels from dyn region beliefs (VBP style)
+            log_pair = compute_pair_marginal(log_dyn_regions)
+            raw_log_r_ux = compute_action_channel(log_pair)
+            new_log_r_ux = damp_log_channel(
+                log_r_ux, raw_log_r_ux, damping, cond_axis=2)
+
+            # Step 9: Obs channels from obs region beliefs (region-extended style)
+            raw_log_obs_channels = compute_obs_channels(log_obs_regions)
+            raw_log_marginal_obs_channels = compute_marginal_obs_channels(log_obs_regions)
+
+            new_log_obs_channels = damp_log_channel(
+                log_obs_channels, raw_log_obs_channels, damping, cond_axis=2)
+            new_log_marginal_obs_channels = damp_log_channel(
+                log_marginal_obs_channels, raw_log_marginal_obs_channels, damping, cond_axis=2)
+
+            return (q_u, new_log_r_ux, new_log_obs_channels,
+                    new_log_marginal_obs_channels,
+                    log_fwd_msgs, log_bwd_msgs)
+
+        result = lax.fori_loop(
+            0, n_iterations, body_fn,
+            (q_u_init, log_r_ux_init, log_obs_channels_init,
+             log_marginal_obs_channels_init,
+             log_fwd_prev_init, log_bwd_prev_init)
+        )
+        q_u, log_r_ux, log_obs_channels, _, _, _ = result
+
+    action_dist = q_u[0]
+    action_dist = action_dist / (action_dist.sum() + 1e-10)
+    return action_dist, log_r_ux, log_obs_channels

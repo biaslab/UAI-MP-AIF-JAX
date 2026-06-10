@@ -15,14 +15,15 @@ import jax.numpy as jnp
 from dataclasses import dataclass, replace
 from jax import nn
 
-from inference.planning import planning, safe_log
+from inference.messages import safe_log
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
-from inference.reduced_region_extended import reduced_region_extended_planning
 from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
-from inference.reduced_dyn_channel import reduced_dyn_channel_planning
-from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
+from inference.nuijten_mp import nuijten_mp_planning
 from inference.loopy_vbp import loopy_vbp_planning
+from inference.vbp_channel import vbp_channel_planning
+from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 
 EPSILON = 1e-12
 
@@ -187,25 +188,6 @@ def _create(cls, transition_tensor, observation_tensor, goal,
 
 
 @dataclass(frozen=True)
-class WumpusBPAgent(_WumpusAgentBase):
-    """Standard BP (marginalizes θ once)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               planning_horizon=5, planning_iterations=1, action_prior=None,
-               damping=1.0):
-        return _create(WumpusBPAgent, transition_tensor, observation_tensor,
-                       goal, planning_horizon, planning_iterations, action_prior,
-                       damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        return planning(
-            q_current, q_static, self.transition_tensor, self.goal,
-            horizon=horizon, action_prior=self.action_prior,
-        )
-
-
-@dataclass(frozen=True)
 class WumpusLoopyBPAgent(_WumpusAgentBase):
     """Loopy BP with θ as variable node."""
 
@@ -267,28 +249,6 @@ class WumpusRegionExtendedAgent(_WumpusAgentBase):
 
 
 @dataclass(frozen=True)
-class WumpusReducedRegionExtendedAgent(_WumpusAgentBase):
-    """Reduced region-extended (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
-        return _create(WumpusReducedRegionExtendedAgent, transition_tensor,
-                       observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_region_extended_planning(
-            q_current, q_static, self.transition_tensor,
-            self.observation_tensor, self.goal,
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
 class WumpusDynChannelAgent(_WumpusAgentBase):
     """Dyn-channel loopy BP."""
 
@@ -302,28 +262,6 @@ class WumpusDynChannelAgent(_WumpusAgentBase):
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor,
-            self.observation_tensor, self.goal,
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
-class WumpusReducedDynChannelAgent(_WumpusAgentBase):
-    """Reduced dyn-channel (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0):
-        return _create(WumpusReducedDynChannelAgent, transition_tensor,
-                       observation_tensor, goal, planning_horizon,
-                       planning_iterations, action_prior, damping=damping)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _ = reduced_dyn_channel_planning(
             q_current, q_static, self.transition_tensor,
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
@@ -355,23 +293,67 @@ class WumpusNuijtenMPAgent(_WumpusAgentBase):
 
 
 @dataclass(frozen=True)
-class WumpusReducedNuijtenMPAgent(_WumpusAgentBase):
-    """Reduced Nuijten MP (fixed θ)."""
+class WumpusVBPChannelAgent(_WumpusAgentBase):
+    """VBP channel (action channel reparameterization, θ inferred)."""
 
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                planning_horizon=5, planning_iterations=3, action_prior=None,
                damping=1.0):
-        return _create(WumpusReducedNuijtenMPAgent, transition_tensor,
+        return _create(WumpusVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, planning_horizon,
                        planning_iterations, action_prior, damping=damping)
 
     def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_nuijten_mp_planning(
+        action_dist, _ = vbp_channel_planning(
             q_current, q_static, self.transition_tensor,
             self.observation_tensor, self.goal,
             horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class WumpusPreciseInfoSeekingAgent(_WumpusAgentBase):
+    """Precise info-seeking (VBP action channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0):
+        return _create(WumpusPreciseInfoSeekingAgent, transition_tensor,
+                       observation_tensor, goal, planning_horizon,
+                       planning_iterations, action_prior, damping=damping)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = precise_info_seeking_planning(
+            q_current, q_static, self.transition_tensor,
+            self.observation_tensor, self.goal,
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class WumpusActiveInferenceAgent(_WumpusAgentBase):
+    """Active Inference (VBP action channels + dyn channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0):
+        return _create(WumpusActiveInferenceAgent, transition_tensor,
+                       observation_tensor, goal, planning_horizon,
+                       planning_iterations, action_prior, damping=damping)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = active_inference_planning(
+            q_current, q_static, self.transition_tensor,
+            self.observation_tensor, self.goal,
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
         )
         return action_dist
 
@@ -381,15 +363,14 @@ class WumpusReducedNuijtenMPAgent(_WumpusAgentBase):
 # ---------------------------------------------------------------------------
 
 AGENT_CLASSES = {
-    "bp": WumpusBPAgent,
     "loopy_bp": WumpusLoopyBPAgent,
     "loopy_vbp": WumpusLoopyVBPAgent,
     "region_extended": WumpusRegionExtendedAgent,
-    "reduced_region_extended": WumpusReducedRegionExtendedAgent,
     "dyn_channel": WumpusDynChannelAgent,
-    "reduced_dyn_channel": WumpusReducedDynChannelAgent,
     "nuijten": WumpusNuijtenMPAgent,
-    "reduced_nuijten": WumpusReducedNuijtenMPAgent,
+    "vbp_channel": WumpusVBPChannelAgent,
+    "precise_info_seeking": WumpusPreciseInfoSeekingAgent,
+    "active_inference": WumpusActiveInferenceAgent,
 }
 
 

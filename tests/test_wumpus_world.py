@@ -289,7 +289,7 @@ class TestWumpusAgents:
         from agents.wumpus_agent import create_agent
 
         agent = create_agent(
-            "bp", self.T, self.B, self.goal,
+            "loopy_bp", self.T, self.B, self.goal,
             planning_horizon=3,
         )
         action, agent = agent.step(self._zero_obs(), time_remaining=10)
@@ -355,7 +355,7 @@ class TestWumpusEpisode:
         goal = generate_goal(grid_size, pits, wumpus, gold)
 
         agent = create_agent(
-            "bp", T, B, goal,
+            "loopy_bp", T, B, goal,
             planning_horizon=5, planning_iterations=1,
         )
         env = WumpusWorldEnv(

@@ -7,67 +7,78 @@ frozen_lake:
   noise_range: 0.1
   slip_prob: 0.1
   episodes: 1000
-  max_steps: 15
+  max_steps: 15 
   planning_horizon: 15
   hole_penalty: 2.0
   goal_temperature: 1.0
-  scan_cost: 0.1
+  scan_cost: 0.9
   seed: 0
 
-frozen_lake_damping:
-  n_iterations: 100
-  damping: "0.1 0.25 0.5 0.75 1.0"
-
 frozen_lake_methods:
-  loopy-vbp:
-    planning_iterations: 50
-    damping: 1.0
   loopy:
-    planning_iterations: 50
+    planning_iterations: 400
     damping: 1.0
-  region-extended:
-    planning_iterations: 50
-    damping: 0.25
+
   dyn-channel:
-    planning_iterations: 50
+    planning_iterations: 400
     damping: 0.25
+
   nuijten:
-    planning_iterations: 50
+    planning_iterations: 400
     damping: 1.0
+
+  vbp-channel:
+    planning_iterations: 400
+    damping: 0.75
+
+  active-inference:
+    planning_iterations: 400
+    damping: 0.75
+
 
 wumpus_world:
   grid_size: 5
   n_configs: 25
   n_pits: 4
-  obs_noise: 0.1
+  obs_noise: 0.2
   pos_noise: 0.4
   slip_prob: 0.01
   episodes: 1000
   max_steps: 10
   planning_horizon: 7
-  damping: 0.25
   scan_cost: 0.7
   pit_penalty: 1.0
   wumpus_penalty: 1.0
   goal_temperature: 1.0
   seed: 0
+  record_trajectories: 5
 
 wumpus_world_methods:
-  loopy-vbp:
-    planning_iterations: 50
   loopy:
-    planning_iterations: 50
-  region-extended:
-    planning_iterations: 50
+    planning_iterations: 400
+    damping: 1.0
+
   dyn-channel:
-    planning_iterations: 50
+    planning_iterations: 400
+    damping: 0.25
+
   nuijten:
-    planning_iterations: 50
+    planning_iterations: 400
+    damping: 1.0
+
+  vbp-channel:
+    planning_iterations: 400
+    damping: 0.6
+
+  active-inference:
+    planning_iterations: 400
+    damping: 0.6
+
 
 rocksample:
   grid_size: 5
   n_rocks: 2
-  half_eff_dist: 2.0
+  half_eff_dist: 0.5
   pos_noise: 0.3
   slip_prob: 0.0
   episodes: 1000
@@ -76,25 +87,119 @@ rocksample:
   good_reward: 2.0
   bad_penalty: 3.0
   exit_reward: 1.0
-  goal_temperature: 0.5
+  goal_temperature: 1.0
   scan_cost: 0.5
   sample_cost: 1.0
   terminal_goal_only: true
   seed: 0
 
 rocksample_methods:
-  loopy-vbp:
-    planning_iterations: 50
-    damping: 1.0
   loopy:
     planning_iterations: 50
     damping: 1.0
-  region-extended:
-    planning_iterations: 50
-    damping: 0.25
+
   dyn-channel:
-    planning_iterations: 50
+    planning_iterations: 200
     damping: 0.25
+
   nuijten:
-    planning_iterations: 50
+    planning_iterations: 200
     damping: 1.0
+
+  vbp-channel:
+    planning_iterations: 200
+    damping: 0.25
+
+  active-inference:
+    planning_iterations: 200
+    damping: 0.25
+
+
+minigrid:
+  grid_size: 5
+  fov_size: 3
+  obs_alpha: 0.0
+  episodes: 200
+  max_steps: 40
+  planning_horizon: 20
+  inference_iterations: 10
+  receding_horizon: true
+  record: "first,last"
+  seed: 0
+
+minigrid_methods:
+  loopy:
+    planning_iterations: 200
+    damping: 1.0
+
+  dyn-channel:
+    planning_iterations: 200
+    damping: 0.25
+
+  vbp-channel:
+    planning_iterations: 200
+    damping: 0.75
+
+  active-inference:
+    planning_iterations: 200
+    damping: 0.9
+
+
+convergence_sweep:
+  n_iterations: 1000
+  damping: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
+  seeds: [0,1,2,3,4]
+  methods: [
+    "loopy",
+    "dyn-channel",
+    "vbp-channel",
+    "active-inference",
+  ]
+
+  frozen_lake:
+    grid_size: 4
+    n_configs: 15
+    planning_horizon: 15
+    hole_fraction: 0.2
+    min_hamming: 4
+    base_noise: 0.4
+    noise_range: 0.1
+    slip_prob: 0.1
+    hole_penalty: 2.0
+    goal_temperature: 1.0
+    scan_cost: 0.1
+
+  wumpus_world:
+    grid_size: 5
+    n_configs: 25
+    n_pits: 4
+    planning_horizon: 7
+    obs_noise: 0.2
+    pos_noise: 0.4
+    slip_prob: 0.01
+    pit_penalty: 1.0
+    wumpus_penalty: 1.0
+    goal_temperature: 1.0
+    scan_cost: 0.7
+
+  rocksample:
+    grid_size: 5
+    n_rocks: 2
+    planning_horizon: 15
+    half_eff_dist: 0.5
+    pos_noise: 0.3
+    slip_prob: 0.0
+    good_reward: 2.0
+    bad_penalty: 3.0
+    exit_reward: 1.0
+    goal_temperature: 0.5
+    scan_cost: 0.5
+    sample_cost: 1.0
+    terminal_goal_only: true
+
+  minigrid:
+    grid_size: 3
+    planning_horizon: 15
+    fov_size: 3
+    obs_alpha: 0.0
+    observe_first: true

@@ -6,8 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from environments.minigrid import (
     flatten_state_index,
     unflatten_state_index,
-    flatten_position_index,
-    unflatten_position_index,
+    get_valid_static_configs,
     get_next_orientation,
     get_next_door_key_state,
     get_next_agent_position,
@@ -98,59 +97,11 @@ class TestIndexMappingFunctions:
         )
         assert max_flat == n_states * n_orientations * n_door_key_states - 1
 
-    def test_flatten_unflatten_position_index_roundtrip(self):
-        n_key_positions = 5
-        n_door_positions = 6
-
-        for key_pos in range(n_key_positions):
-            for door_pos in range(n_door_positions):
-                flat_idx = flatten_position_index(
-                    key_pos, door_pos, n_key_positions, n_door_positions
-                )
-                assert flat_idx >= 0
-                assert flat_idx < n_key_positions * n_door_positions
-
-                key_pos_out, door_pos_out = unflatten_position_index(
-                    flat_idx, n_key_positions, n_door_positions
-                )
-                assert key_pos_out == key_pos
-                assert door_pos_out == door_pos
-
-    def test_flatten_position_index_unique(self):
-        n_key_positions = 5
-        n_door_positions = 6
-
-        all_indices = set()
-        for key_pos in range(n_key_positions):
-            for door_pos in range(n_door_positions):
-                flat_idx = flatten_position_index(
-                    key_pos, door_pos, n_key_positions, n_door_positions
-                )
-                assert flat_idx not in all_indices
-                all_indices.add(flat_idx)
-
-        assert len(all_indices) == n_key_positions * n_door_positions
-
-    def test_flatten_position_index_boundary(self):
-        n_key_positions = 5
-        n_door_positions = 6
-
-        assert flatten_position_index(0, 0, n_key_positions, n_door_positions) == 0
-        max_flat = flatten_position_index(
-            n_key_positions - 1,
-            n_door_positions - 1,
-            n_key_positions,
-            n_door_positions,
-        )
-        assert max_flat == n_key_positions * n_door_positions - 1
-
     def test_integration_realistic_grid_sizes(self):
         n = 5
         n_states = n * n  # 25
         n_orientations = 4
         n_door_key_states = 3
-        n_key_positions = n_states - 2 * n  # 15
-        n_door_positions = n_states - 2 * n  # 15
 
         for state in range(n_states):
             for orientation in range(n_orientations):
@@ -172,16 +123,26 @@ class TestIndexMappingFunctions:
                     assert orientation_out == orientation
                     assert door_key_state_out == door_key_state
 
-        for key_pos in range(n_key_positions):
-            for door_pos in range(n_door_positions):
-                flat_idx = flatten_position_index(
-                    key_pos, door_pos, n_key_positions, n_door_positions
-                )
-                key_pos_out, door_pos_out = unflatten_position_index(
-                    flat_idx, n_key_positions, n_door_positions
-                )
-                assert key_pos_out == key_pos
-                assert door_pos_out == door_pos
+
+class TestValidStaticConfigs:
+    def test_all_configs_have_key_before_door(self):
+        n = 5
+        configs = get_valid_static_configs(n)
+        for key_pos, door_pos in configs:
+            key_x, _ = key_position(key_pos, n)
+            door_x, _ = door_position(door_pos, n)
+            assert key_x < door_x, f"key_x={key_x} >= door_x={door_x}"
+
+    def test_fewer_configs_than_full_product(self):
+        n = 5
+        n_positions = n * n - 2 * n
+        configs = get_valid_static_configs(n)
+        assert len(configs) < n_positions * n_positions
+
+    def test_configs_nonempty(self):
+        for n in [3, 4, 5]:
+            configs = get_valid_static_configs(n)
+            assert len(configs) > 0
 
 
 class TestGetNextOrientation:
@@ -238,7 +199,6 @@ class TestGetNextDoorKeyState:
 
     def test_pickup_when_facing_key(self):
         # Agent at (1,1), facing RIGHT, key at (2,1) - key is directly in front
-        # Note: coordinates are 0-indexed now
         assert (
             get_next_door_key_state(
                 1, 1, Orientation.RIGHT, 2, 1, 3, 1, ActionType.PICKUP, 0
@@ -246,18 +206,18 @@ class TestGetNextDoorKeyState:
             == 1
         )
 
-        # Agent at (1,1), facing UP, key at (1,2) - key is directly in front
+        # Agent at (1,1), facing DOWN, key at (1,2) - key is directly in front
         assert (
             get_next_door_key_state(
-                1, 1, Orientation.UP, 1, 2, 3, 1, ActionType.PICKUP, 0
+                1, 1, Orientation.DOWN, 1, 2, 3, 1, ActionType.PICKUP, 0
             )
             == 1
         )
 
-        # Agent at (1,1), facing DOWN, key at (1,0) - key is directly in front
+        # Agent at (1,1), facing UP, key at (1,0) - key is directly in front
         assert (
             get_next_door_key_state(
-                1, 1, Orientation.DOWN, 1, 0, 3, 1, ActionType.PICKUP, 0
+                1, 1, Orientation.UP, 1, 0, 3, 1, ActionType.PICKUP, 0
             )
             == 1
         )
@@ -305,10 +265,10 @@ class TestGetNextDoorKeyState:
             == 2
         )
 
-        # Agent at (2,1), facing UP, door at (2,2), has key (state=1)
+        # Agent at (2,1), facing DOWN, door at (2,2), has key (state=1)
         assert (
             get_next_door_key_state(
-                2, 1, Orientation.UP, 0, 0, 2, 2, ActionType.TOGGLE, 1
+                2, 1, Orientation.DOWN, 0, 0, 2, 2, ActionType.TOGGLE, 1
             )
             == 2
         )
@@ -400,10 +360,15 @@ class TestRelativeCoords:
         # Target at (2,1) should be (1, 0) - to the right
         assert get_relative_coords(2, 2, Orientation.RIGHT, 2, 1) == (1, 0)
 
+    def test_get_relative_coords_facing_down(self):
+        # Agent at (2,2) facing DOWN
+        # Target at (2,3) should be (0, 1) - directly in front
+        assert get_relative_coords(2, 2, Orientation.DOWN, 2, 3) == (0, 1)
+
     def test_get_relative_coords_facing_up(self):
         # Agent at (2,2) facing UP
-        # Target at (2,3) should be (0, 1) - directly in front
-        assert get_relative_coords(2, 2, Orientation.UP, 2, 3) == (0, 1)
+        # Target at (2,1) should be (0, 1) - directly in front
+        assert get_relative_coords(2, 2, Orientation.UP, 2, 1) == (0, 1)
 
     def test_in_fov(self):
         assert in_fov(0, 0) == True
@@ -419,8 +384,8 @@ class TestRelativeCoords:
         # Agent is at (3, 6) in FOV coordinates (0-indexed)
         assert relative_to_fov_coords(0, 0) == (3, 6)  # Agent position
         assert relative_to_fov_coords(0, 1) == (3, 5)  # One step forward
-        assert relative_to_fov_coords(-1, 0) == (2, 6)  # One step left
-        assert relative_to_fov_coords(1, 0) == (4, 6)  # One step right
+        assert relative_to_fov_coords(-1, 0) == (4, 6)  # One step left
+        assert relative_to_fov_coords(1, 0) == (2, 6)  # One step right
 
 
 class TestGetNextAgentPosition:
@@ -480,8 +445,8 @@ class TestFOV:
 
     def test_fov_contains_key_when_visible(self):
         n = 5
-        # Agent at (2,2), facing UP, key at (2,3) - should be visible (one step forward)
-        fov = get_fov(2, 2, Orientation.UP, 2, 3, 3, 2, 0, n)
+        # Agent at (2,2), facing DOWN, key at (2,3) - should be visible (one step forward)
+        fov = get_fov(2, 2, Orientation.DOWN, 2, 3, 3, 2, 0, n)
         # Key should be at relative (0,1), which is FOV (3, 5)
         assert fov[3, 5] == CellType.KEY
 
@@ -491,6 +456,13 @@ class TestFOV:
         fov = get_fov(2, 2, Orientation.RIGHT, 0, 0, 3, 2, 1, n)
         # Agent is at FOV (3, 6)
         assert fov[3, 6] == CellType.KEY
+
+    def test_fov_contains_goal(self):
+        n = 5
+        # Agent at (3,3), facing RIGHT, goal at (4,4) - should be visible
+        fov = get_fov(3, 3, Orientation.RIGHT, 0, 0, 2, 2, 2, n)
+        # Goal at (4,4): dx=1, dy=1; RIGHT: (-1, 1) → FOV (3-(-1), 6-1) = (4, 5)
+        assert fov[4, 5] == CellType.GOAL
 
 
 class TestTensorGeneration:
@@ -503,20 +475,20 @@ class TestTensorGeneration:
         )
 
         n = 5
+        valid_configs = get_valid_static_configs(n)
         n_location_states = n * n  # 25
-        n_key_positions = n_location_states - 2 * n  # 15
-        n_door_positions = n_location_states - 2 * n  # 15
         n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES  # 300
-        n_static_states = n_key_positions * n_door_positions  # 225
+        n_static_states = len(valid_configs)
 
-        B = generate_observation_tensor(n)
+        B = generate_observation_tensor(n, valid_configs)
         assert B.shape == (7, 7, N_CELL_TYPES, n_total_states, n_static_states)
 
     def test_observation_tensor_is_onehot(self):
         from environments.minigrid import generate_observation_tensor
 
         n = 4  # Use smaller grid for speed
-        B = generate_observation_tensor(n)
+        valid_configs = get_valid_static_configs(n)
+        B = generate_observation_tensor(n, valid_configs)
 
         # For each (fov_x, fov_y, state, static_state), exactly one cell type should be 1
         for state_idx in range(B.shape[3]):
@@ -561,20 +533,20 @@ class TestTensorGeneration:
         )
 
         n = 5
+        valid_configs = get_valid_static_configs(n)
         n_location_states = n * n
-        n_key_positions = n_location_states - 2 * n
-        n_door_positions = n_location_states - 2 * n
         n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-        n_static_states = n_key_positions * n_door_positions
+        n_static_states = len(valid_configs)
 
-        T = generate_transition_tensor(n)
+        T = generate_transition_tensor(n, valid_configs)
         assert T.shape == (n_total_states, n_total_states, n_static_states, N_ACTIONS)
 
     def test_transition_tensor_is_stochastic(self):
         from environments.minigrid import generate_transition_tensor
 
         n = 4  # Use smaller grid for speed
-        T = generate_transition_tensor(n)
+        valid_configs = get_valid_static_configs(n)
+        T = generate_transition_tensor(n, valid_configs)
 
         # For each (old_state, static_state, action), probabilities over new_state should sum to 1
         for old_idx in range(T.shape[1]):
@@ -601,8 +573,8 @@ class TestCustomFOVSize:
         # Agent is at (2, 4) in 5x5 FOV
         assert relative_to_fov_coords(0, 0, fov_size=5) == (2, 4)
         assert relative_to_fov_coords(0, 1, fov_size=5) == (2, 3)
-        assert relative_to_fov_coords(-1, 0, fov_size=5) == (1, 4)
-        assert relative_to_fov_coords(1, 0, fov_size=5) == (3, 4)
+        assert relative_to_fov_coords(-1, 0, fov_size=5) == (3, 4)
+        assert relative_to_fov_coords(1, 0, fov_size=5) == (1, 4)
 
     def test_get_fov_shape_size5(self):
         n = 5
@@ -634,13 +606,12 @@ class TestCustomFOVSize:
 
         n = 3
         fov_size = 5
+        valid_configs = get_valid_static_configs(n)
         n_location_states = n * n
-        n_key_positions = n_location_states - 2 * n
-        n_door_positions = n_location_states - 2 * n
         n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-        n_static_states = n_key_positions * n_door_positions
+        n_static_states = len(valid_configs)
 
-        B = generate_observation_tensor(n, fov_size=fov_size)
+        B = generate_observation_tensor(n, valid_configs, fov_size=fov_size)
         assert B.shape == (fov_size, fov_size, N_CELL_TYPES, n_total_states, n_static_states)
 
 
@@ -648,7 +619,8 @@ class TestObservationSoftening:
     def setup_method(self):
         self.n = 3
         self.fov_size = 7
-        self.B_hard = generate_observation_tensor(self.n, fov_size=self.fov_size)
+        self.valid_configs = get_valid_static_configs(self.n)
+        self.B_hard = generate_observation_tensor(self.n, self.valid_configs, fov_size=self.fov_size)
 
     def test_shape_preserved(self):
         B_soft = soften_observation_tensor(self.B_hard, self.fov_size, alpha=0.1)

@@ -14,13 +14,14 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from environments.minigrid import (
+    get_valid_static_configs,
     generate_observation_tensor,
     generate_orientation_observation_tensor,
     generate_transition_tensor,
     soften_observation_tensor,
 )
 from environments.gym_wrapper import MiniGridWrapper, run_experiment
-from agents.flat_tensor_agent import FlatTensorAgent, IndexedTensorAgent, VBPAgent, LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent, ReducedRegionExtendedAgent, DynChannelLoopyBPAgent, ReducedDynChannelAgent, NuijtenMPAgent, ReducedNuijtenMPAgent
+from agents.flat_tensor_agent import LoopyVBPAgent, LoopyBPAgent, RegionExtendedAgent, DynChannelLoopyBPAgent, NuijtenMPAgent, VBPChannelAgent, PreciseInfoSeekingAgent, ActiveInferenceAgent
 from utils.tensors import get_dimensions, flatten_state_index
 
 
@@ -71,10 +72,8 @@ def main():
     parser.add_argument("--record", type=str, default=None,
                         help="Record episodes to video. Comma-separated list: 'first', 'last', or indices like '0,9,99'")
     parser.add_argument("--video-dir", type=str, default="data/videos", help="Directory for video output")
-    parser.add_argument("--planning-method", type=str, default="bp", choices=["bp", "vbp", "loopy-vbp", "loopy", "region-extended", "reduced-aif", "dyn-channel", "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
-                        help="Planning method: 'bp' (standard BP, θ marginalized once), 'vbp' (value BP, ε→0 value iteration), 'loopy-vbp' (loopy VBP with θ as variable), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'reduced-aif' (fixed θ with kernel reparametrization), 'dyn-channel' (obs factors + dyn channels, θ inferred), 'reduced-dyn-channel' (obs factors + dyn channels, θ fixed), 'nuijten' (region beliefs, no kernels, θ inferred), 'reduced-nuijten' (region beliefs, no kernels, θ fixed)")
-    parser.add_argument("--full-tensors", action="store_true",
-                        help="Use full tensor representation for state inference (FlatTensorAgent)")
+    parser.add_argument("--planning-method", type=str, default="loopy", choices=["loopy-vbp", "loopy", "region-extended", "dyn-channel", "nuijten", "vbp-channel", "precise-info-seeking", "active-inference"],
+                        help="Planning method: 'loopy-vbp' (loopy VBP with θ as variable), 'loopy' (loopy BP with θ as variable), 'region-extended' (loopy BP with observation factors), 'dyn-channel' (obs factors + dyn channels, θ inferred), 'nuijten' (region beliefs, no kernels, θ inferred), 'vbp-channel' (VBP with channels)")
     parser.add_argument("--fov-size", type=int, default=7,
                         help="Field-of-view size (must be odd and >= 3, default: 7)")
     parser.add_argument("--no-orientation", action="store_true",
@@ -118,13 +117,16 @@ def main():
         print(f"Orientation observation: DISABLED (uniform)")
     print()
 
+    valid_configs = get_valid_static_configs(grid_size)
+    print(f"Valid static configs: {len(valid_configs)}")
+
     print("Generating tensors (this may take a moment)...")
     t0 = time.time()
 
-    transition_tensor = jnp.array(generate_transition_tensor(grid_size), dtype=jnp.float32)
-    print(f"  Transition tensor: {transition_tensor.shape}")
+    transition_np = generate_transition_tensor(grid_size, valid_configs)
+    print(f"  Transition tensor: {transition_np.shape}")
 
-    obs_np = generate_observation_tensor(grid_size, fov_size=args.fov_size)
+    obs_np = generate_observation_tensor(grid_size, valid_configs, fov_size=args.fov_size)
     if args.obs_alpha > 0.0:
         obs_np = soften_observation_tensor(obs_np, args.fov_size, args.obs_alpha)
     observation_tensor = jnp.array(obs_np, dtype=jnp.float32)
@@ -132,41 +134,31 @@ def main():
     print(f"  Observation tensor: {observation_tensor.shape}")
     print(f"  Orientation tensor: {orientation_tensor.shape}")
 
-    trans_mb = transition_tensor.nbytes / 1024 / 1024
+    trans_mb = transition_np.nbytes / 1024 / 1024
     print(f"  Transition tensor memory: {trans_mb:.1f} MB")
     print(f"  Generated in {time.time() - t0:.2f}s")
     print()
 
     goal_x = grid_size - 1
-    goal_y = 0
+    goal_y = grid_size - 1
     goal = create_goal_distribution(grid_size, goal_x, goal_y)
     print(f"Goal: position ({goal_x}, {goal_y}) with door open")
     print()
 
+    # Derive sparse transition index (stays on GPU, only 49 MB)
+    # T_idx[x_old, action, theta] = x_new (deterministic transitions)
+    T_idx = jnp.array(np.argmax(transition_np, axis=0).transpose(0, 2, 1), dtype=jnp.int32)
+
+    # Only convert dense tensor to JAX for methods that need it (no sparse path)
+    sparse_methods = {"loopy", "dyn-channel", "nuijten", "vbp-channel", "active-inference"}
+    if args.planning_method in sparse_methods:
+        transition_tensor = None
+    else:
+        transition_tensor = jnp.array(transition_np, dtype=jnp.float32)
+    del transition_np
+
     print("Creating agent...")
-    if args.full_tensors:
-        agent = FlatTensorAgent.create(
-            grid_size=grid_size,
-            transition_tensor=transition_tensor,
-            observation_tensors=observation_tensor,
-            orientation_tensor=orientation_tensor,
-            goal=goal,
-            planning_horizon=args.planning_horizon,
-            n_inference_iterations=args.inference_iterations,
-            n_planning_iterations=args.planning_iterations,
-        )
-    elif args.planning_method == "vbp":
-        agent = VBPAgent.create(
-            grid_size=grid_size,
-            transition_tensor=transition_tensor,
-            observation_tensors=observation_tensor,
-            orientation_tensor=orientation_tensor,
-            goal=goal,
-            planning_horizon=args.planning_horizon,
-            n_inference_iterations=args.inference_iterations,
-            n_planning_iterations=args.planning_iterations,
-        )
-    elif args.planning_method == "loopy-vbp":
+    if args.planning_method == "loopy-vbp":
         agent = LoopyVBPAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
@@ -180,13 +172,14 @@ def main():
     elif args.planning_method == "loopy":
         agent = LoopyBPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            T_idx=T_idx,
         )
     elif args.planning_method == "region-extended":
         agent = RegionExtendedAgent.create(
@@ -200,22 +193,10 @@ def main():
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
         )
-    elif args.planning_method == "reduced-aif":
-        agent = ReducedRegionExtendedAgent.create(
-            grid_size=grid_size,
-            transition_tensor=transition_tensor,
-            observation_tensors=observation_tensor,
-            orientation_tensor=orientation_tensor,
-            goal=goal,
-            planning_horizon=args.planning_horizon,
-            n_inference_iterations=args.inference_iterations,
-            n_planning_iterations=args.planning_iterations,
-            damping=args.damping,
-        )
     elif args.planning_method == "dyn-channel":
         agent = DynChannelLoopyBPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
@@ -223,32 +204,35 @@ def main():
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
             damping=args.damping,
-        )
-    elif args.planning_method == "reduced-dyn-channel":
-        agent = ReducedDynChannelAgent.create(
-            grid_size=grid_size,
-            transition_tensor=transition_tensor,
-            observation_tensors=observation_tensor,
-            orientation_tensor=orientation_tensor,
-            goal=goal,
-            planning_horizon=args.planning_horizon,
-            n_inference_iterations=args.inference_iterations,
-            n_planning_iterations=args.planning_iterations,
-            damping=args.damping,
+            T_idx=T_idx,
         )
     elif args.planning_method == "nuijten":
         agent = NuijtenMPAgent.create(
             grid_size=grid_size,
-            transition_tensor=transition_tensor,
+            transition_tensor=None,
             observation_tensors=observation_tensor,
             orientation_tensor=orientation_tensor,
             goal=goal,
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            T_idx=T_idx,
         )
-    elif args.planning_method == "reduced-nuijten":
-        agent = ReducedNuijtenMPAgent.create(
+    elif args.planning_method == "vbp-channel":
+        agent = VBPChannelAgent.create(
+            grid_size=grid_size,
+            transition_tensor=None,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+            T_idx=T_idx,
+        )
+    elif args.planning_method == "precise-info-seeking":
+        agent = PreciseInfoSeekingAgent.create(
             grid_size=grid_size,
             transition_tensor=transition_tensor,
             observation_tensors=observation_tensor,
@@ -257,18 +241,23 @@ def main():
             planning_horizon=args.planning_horizon,
             n_inference_iterations=args.inference_iterations,
             n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+        )
+    elif args.planning_method == "active-inference":
+        agent = ActiveInferenceAgent.create(
+            grid_size=grid_size,
+            transition_tensor=None,
+            observation_tensors=observation_tensor,
+            orientation_tensor=orientation_tensor,
+            goal=goal,
+            planning_horizon=args.planning_horizon,
+            n_inference_iterations=args.inference_iterations,
+            n_planning_iterations=args.planning_iterations,
+            damping=args.damping,
+            T_idx=T_idx,
         )
     else:
-        agent = IndexedTensorAgent.create(
-            grid_size=grid_size,
-            transition_tensor=transition_tensor,
-            observation_tensors=observation_tensor,
-            orientation_tensor=orientation_tensor,
-            goal=goal,
-            planning_horizon=args.planning_horizon,
-            n_inference_iterations=args.inference_iterations,
-            n_planning_iterations=args.planning_iterations,
-        )
+        raise ValueError(f"Unknown planning method: {args.planning_method}")
     print(f"  Planning method: {args.planning_method}")
     print(f"  FOV size: {args.fov_size}")
     print(f"  Max steps: {args.max_steps}")

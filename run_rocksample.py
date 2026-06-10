@@ -94,10 +94,10 @@ def main():
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per episode")
     parser.add_argument("--planning-horizon", type=int, default=10, help="Planning horizon")
     parser.add_argument("--planning-iterations", type=int, default=3, help="Planning iterations")
-    parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy-vbp", "loopy", "region-extended",
-                                 "reduced-region-extended", "dyn-channel",
-                                 "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
+    parser.add_argument("--planning-method", type=str, default="loopy",
+                        choices=["loopy-vbp", "loopy", "region-extended",
+                                 "dyn-channel", "nuijten", "vbp-channel",
+                                 "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
     parser.add_argument("--good-reward", type=float, default=10.0, help="Reward for collecting a good rock")
@@ -164,15 +164,14 @@ def main():
 
     # Map CLI names (hyphens) to agent keys (underscores)
     METHOD_MAP = {
-        "bp": "bp",
         "loopy-vbp": "loopy_vbp",
         "loopy": "loopy_bp",
         "region-extended": "region_extended",
-        "reduced-region-extended": "reduced_region_extended",
         "dyn-channel": "dyn_channel",
-        "reduced-dyn-channel": "reduced_dyn_channel",
         "nuijten": "nuijten",
-        "reduced-nuijten": "reduced_nuijten",
+        "vbp-channel": "vbp_channel",
+        "precise-info-seeking": "precise_info_seeking",
+        "active-inference": "active_inference",
     }
     method_key = METHOD_MAP[args.planning_method]
 

@@ -72,26 +72,25 @@ def unflatten_state_index(
     return (state, orientation, door_key_state)
 
 
-def flatten_position_index(
-    key_pos: int, door_pos: int, n_key_positions: int, n_door_positions: int
-) -> int:
-    return key_pos * n_door_positions + door_pos
-
-
-def unflatten_position_index(
-    flat_idx: int, n_key_positions: int, n_door_positions: int
-) -> tuple[int, int]:
-    door_pos = flat_idx % n_door_positions
-    key_pos = flat_idx // n_door_positions
-    return (key_pos, door_pos)
-
-
 def key_position(key_pos: int, n: int) -> tuple[int, int]:
     return (key_pos // n, key_pos % n)
 
 
 def door_position(door_pos: int, n: int) -> tuple[int, int]:
     return (door_pos // n + 1, door_pos % n)
+
+
+def get_valid_static_configs(n: int) -> list[tuple[int, int]]:
+    """Return list of (key_pos, door_pos) where key_x < door_x."""
+    n_positions = n * n - 2 * n
+    configs = []
+    for key_pos in range(n_positions):
+        key_x, _ = key_position(key_pos, n)
+        for door_pos in range(n_positions):
+            door_x, _ = door_position(door_pos, n)
+            if key_x < door_x:
+                configs.append((key_pos, door_pos))
+    return configs
 
 
 def get_relative_coords(
@@ -103,11 +102,11 @@ def get_relative_coords(
     if orientation == Orientation.RIGHT:
         return (-dy, dx)
     elif orientation == Orientation.DOWN:
-        return (-dx, -dy)
+        return (dx, dy)
     elif orientation == Orientation.LEFT:
         return (dy, -dx)
     else:  # UP
-        return (dx, dy)
+        return (-dx, -dy)
 
 
 def in_fov(rel_x: int, rel_y: int, fov_size: int = 7) -> bool:
@@ -117,7 +116,7 @@ def in_fov(rel_x: int, rel_y: int, fov_size: int = 7) -> bool:
 
 def relative_to_fov_coords(rel_x: int, rel_y: int, fov_size: int = 7) -> tuple[int, int]:
     half = fov_size // 2
-    fov_x = half + rel_x  # Agent at column half (0-indexed)
+    fov_x = half - rel_x  # Agent at column half (0-indexed)
     fov_y = (fov_size - 1) - rel_y  # Agent at last row (0-indexed)
     return (fov_x, fov_y)
 
@@ -129,14 +128,14 @@ def relative_to_absolute_coords(
         dx = rel_y
         dy = -rel_x
     elif orientation == Orientation.DOWN:
-        dx = -rel_x
-        dy = -rel_y
+        dx = rel_x
+        dy = rel_y
     elif orientation == Orientation.LEFT:
         dx = -rel_y
         dy = rel_x
     else:  # UP
-        dx = rel_x
-        dy = rel_y
+        dx = -rel_x
+        dy = -rel_y
 
     return (agent_x + dx, agent_y + dy)
 
@@ -211,18 +210,29 @@ def get_fov(
             fov_x, fov_y = relative_to_fov_coords(*rel_wall, fov_size)
             fov[fov_x, fov_y] = CellType.WALL
 
-    if door_key_state == 0:  # Don't have the key
+    # Place goal
+    goal_x, goal_y = n - 1, n - 1
+    rel_goal = get_relative_coords(agent_x, agent_y, orientation, goal_x, goal_y)
+    if in_fov(*rel_goal, fov_size):
+        fov_x, fov_y = relative_to_fov_coords(*rel_goal, fov_size)
+        fov[fov_x, fov_y] = CellType.GOAL
+
+    # Place key on ground (only when not carrying)
+    if door_key_state == 0:
         rel_key = get_relative_coords(agent_x, agent_y, orientation, key_x, key_y)
         if in_fov(*rel_key, fov_size):
             fov_x, fov_y = relative_to_fov_coords(*rel_key, fov_size)
             fov[fov_x, fov_y] = CellType.KEY
-    else:  # Have the key - it appears at agent position
-        fov[half, fov_size - 1] = CellType.KEY
 
+    # Place door
     rel_door = get_relative_coords(agent_x, agent_y, orientation, door_x, door_y)
     if in_fov(*rel_door, fov_size):
         fov_x, fov_y = relative_to_fov_coords(*rel_door, fov_size)
         fov[fov_x, fov_y] = CellType.DOOR
+
+    # Carried key at agent position — last so it overrides door when agent is on door cell
+    if door_key_state >= 1:
+        fov[half, fov_size - 1] = CellType.KEY
 
     if door_key_state != 2:  # Door not open - blocks visibility
         walls.add((door_x, door_y))
@@ -300,11 +310,11 @@ def get_next_agent_position(
         if orientation == Orientation.RIGHT:
             new_x += 1
         elif orientation == Orientation.DOWN:
-            new_y -= 1
+            new_y += 1
         elif orientation == Orientation.LEFT:
             new_x -= 1
         else:  # UP
-            new_y += 1
+            new_y -= 1
 
         if new_x < 0 or new_x >= n or new_y < 0 or new_y >= n:
             return coords_to_state(agent_x, agent_y, n)
@@ -319,13 +329,11 @@ def get_next_agent_position(
         return coords_to_state(agent_x, agent_y, n)
 
 
-def generate_observation_tensor(n: int, fov_size: int = 7, dtype=np.float16) -> np.ndarray:
+def generate_observation_tensor(n: int, valid_configs: list[tuple[int, int]], fov_size: int = 7, dtype=np.float16) -> np.ndarray:
     """Generate full observation tensor (memory-intensive, for reference/testing)."""
     n_location_states = n * n
-    n_key_positions = n_location_states - 2 * n
-    n_door_positions = n_location_states - 2 * n
     n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-    n_static_states = n_key_positions * n_door_positions
+    n_static_states = len(valid_configs)
 
     B = np.zeros((fov_size, fov_size, N_CELL_TYPES, n_total_states, n_static_states), dtype=dtype)
 
@@ -333,39 +341,34 @@ def generate_observation_tensor(n: int, fov_size: int = 7, dtype=np.float16) -> 
         agent_x, agent_y = state_to_coords(agent_state, n)
 
         for orientation in range(N_ORIENTATIONS):
-            for key_pos in range(n_key_positions):
+            for static_idx, (key_pos, door_pos) in enumerate(valid_configs):
                 key_x, key_y = key_position(key_pos, n)
+                door_x, door_y = door_position(door_pos, n)
 
-                for door_pos in range(n_door_positions):
-                    door_x, door_y = door_position(door_pos, n)
-
-                    for door_key_state in range(N_DOOR_KEY_STATES):
-                        fov = get_fov(
-                            agent_x,
-                            agent_y,
-                            orientation,
-                            key_x,
-                            key_y,
-                            door_x,
-                            door_y,
-                            door_key_state,
-                            n,
-                            fov_size,
-                        )
-                        flat_state = flatten_state_index(
-                            agent_state,
-                            orientation,
-                            door_key_state,
-                            n_location_states,
-                            N_ORIENTATIONS,
-                            N_DOOR_KEY_STATES,
-                        )
-                        flat_static = flatten_position_index(
-                            key_pos, door_pos, n_key_positions, n_door_positions
-                        )
-                        for i in range(fov_size):
-                            for j in range(fov_size):
-                                B[i, j, fov[i, j], flat_state, flat_static] = 1.0
+                for door_key_state in range(N_DOOR_KEY_STATES):
+                    fov = get_fov(
+                        agent_x,
+                        agent_y,
+                        orientation,
+                        key_x,
+                        key_y,
+                        door_x,
+                        door_y,
+                        door_key_state,
+                        n,
+                        fov_size,
+                    )
+                    flat_state = flatten_state_index(
+                        agent_state,
+                        orientation,
+                        door_key_state,
+                        n_location_states,
+                        N_ORIENTATIONS,
+                        N_DOOR_KEY_STATES,
+                    )
+                    for i in range(fov_size):
+                        for j in range(fov_size):
+                            B[i, j, fov[i, j], flat_state, static_idx] = 1.0
 
     return B
 
@@ -425,13 +428,11 @@ def generate_orientation_observation_tensor(n: int, dtype=np.float16) -> np.ndar
 
 
 
-def generate_transition_tensor(n: int, dtype=np.float16) -> np.ndarray:
+def generate_transition_tensor(n: int, valid_configs: list[tuple[int, int]], dtype=np.float16) -> np.ndarray:
     """Generate full transition tensor (memory-intensive, for reference/testing)."""
     n_location_states = n * n
-    n_key_positions = n_location_states - 2 * n
-    n_door_positions = n_location_states - 2 * n
     n_total_states = n_location_states * N_ORIENTATIONS * N_DOOR_KEY_STATES
-    n_static_states = n_key_positions * n_door_positions
+    n_static_states = len(valid_configs)
 
     T = np.zeros(
         (n_total_states, n_total_states, n_static_states, N_ACTIONS), dtype=dtype
@@ -442,64 +443,57 @@ def generate_transition_tensor(n: int, dtype=np.float16) -> np.ndarray:
 
         for orientation in range(N_ORIENTATIONS):
             for door_key_state in range(N_DOOR_KEY_STATES):
-                for door_pos in range(n_door_positions):
+                for static_idx, (key_pos, door_pos) in enumerate(valid_configs):
+                    key_x, key_y = key_position(key_pos, n)
                     door_x, door_y = door_position(door_pos, n)
 
-                    for key_pos in range(n_key_positions):
-                        key_x, key_y = key_position(key_pos, n)
+                    old_idx = flatten_state_index(
+                        old_agent_state,
+                        orientation,
+                        door_key_state,
+                        n_location_states,
+                        N_ORIENTATIONS,
+                        N_DOOR_KEY_STATES,
+                    )
 
-                        static_idx = flatten_position_index(
-                            key_pos, door_pos, n_key_positions, n_door_positions
-                        )
-                        old_idx = flatten_state_index(
-                            old_agent_state,
+                    if agent_x == door_x and agent_y != door_y:
+                        T[old_idx, old_idx, static_idx, :] = 1.0
+                        continue
+
+                    for action in range(N_ACTIONS):
+                        new_agent_state = get_next_agent_position(
+                            agent_x,
+                            agent_y,
                             orientation,
+                            door_x,
+                            door_y,
+                            key_x,
+                            key_y,
                             door_key_state,
+                            action,
+                            n,
+                        )
+                        new_door_key_state = get_next_door_key_state(
+                            agent_x,
+                            agent_y,
+                            orientation,
+                            key_x,
+                            key_y,
+                            door_x,
+                            door_y,
+                            action,
+                            door_key_state,
+                        )
+                        new_orientation = get_next_orientation(orientation, action)
+                        new_idx = flatten_state_index(
+                            new_agent_state,
+                            new_orientation,
+                            new_door_key_state,
                             n_location_states,
                             N_ORIENTATIONS,
                             N_DOOR_KEY_STATES,
                         )
-
-                        if key_x == door_x or (
-                            agent_x == door_x and agent_y != door_y
-                        ):
-                            T[old_idx, old_idx, static_idx, :] = 1.0
-                            continue
-
-                        for action in range(N_ACTIONS):
-                            new_agent_state = get_next_agent_position(
-                                agent_x,
-                                agent_y,
-                                orientation,
-                                door_x,
-                                door_y,
-                                key_x,
-                                key_y,
-                                door_key_state,
-                                action,
-                                n,
-                            )
-                            new_door_key_state = get_next_door_key_state(
-                                agent_x,
-                                agent_y,
-                                orientation,
-                                key_x,
-                                key_y,
-                                door_x,
-                                door_y,
-                                action,
-                                door_key_state,
-                            )
-                            new_orientation = get_next_orientation(orientation, action)
-                            new_idx = flatten_state_index(
-                                new_agent_state,
-                                new_orientation,
-                                new_door_key_state,
-                                n_location_states,
-                                N_ORIENTATIONS,
-                                N_DOOR_KEY_STATES,
-                            )
-                            T[new_idx, old_idx, static_idx, action] = 1.0
+                        T[new_idx, old_idx, static_idx, action] = 1.0
 
     return T
 

@@ -11,14 +11,15 @@ from jax import nn
 from jax.scipy.special import logsumexp
 from dataclasses import dataclass, replace
 
-from inference.planning import planning, safe_log
+from inference.messages import safe_log
 from inference.loopy_bp import loopy_bp_planning
 from inference.region_extended_loopy_bp import region_extended_loopy_bp_planning
-from inference.reduced_region_extended import reduced_region_extended_planning
 from inference.dyn_channel_loopy_bp import dyn_channel_loopy_bp_planning
-from inference.reduced_dyn_channel import reduced_dyn_channel_planning
-from inference.nuijten_mp import nuijten_mp_planning, reduced_nuijten_mp_planning
+from inference.nuijten_mp import nuijten_mp_planning
 from inference.loopy_vbp import loopy_vbp_planning
+from inference.vbp_channel import vbp_channel_planning
+from inference.precise_info_seeking import precise_info_seeking_planning
+from inference.active_inference import active_inference_planning
 
 EPSILON = 1e-12
 
@@ -200,27 +201,6 @@ def _create(cls, transition_tensor, observation_tensor, goal,
 
 
 @dataclass(frozen=True)
-class RockSampleBPAgent(_RockSampleAgentBase):
-    """Standard BP (marginalizes θ once)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               rock_positions, qualities, n_pos, start_state_idx,
-               planning_horizon=5, planning_iterations=1, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
-        return _create(RockSampleBPAgent, transition_tensor, observation_tensor,
-                       goal, rock_positions, qualities, n_pos, start_state_idx,
-                       planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
-
-    def _plan(self, q_current, q_static, horizon):
-        return planning(
-            q_current, q_static, self.transition_tensor, self._planning_goal(q_static),
-            horizon=horizon, action_prior=self.action_prior,
-        )
-
-
-@dataclass(frozen=True)
 class RockSampleLoopyBPAgent(_RockSampleAgentBase):
     """Loopy BP with θ as variable node."""
 
@@ -277,35 +257,11 @@ class RockSampleRegionExtendedAgent(_RockSampleAgentBase):
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _, _ = region_extended_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor,
-            self._rock_obs, self._planning_goal(q_static),
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
-class RockSampleReducedRegionExtendedAgent(_RockSampleAgentBase):
-    """Reduced region-extended (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               rock_positions, qualities, n_pos, start_state_idx,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
-        return _create(RockSampleReducedRegionExtendedAgent, transition_tensor,
-                       observation_tensor, goal, rock_positions, qualities,
-                       n_pos, start_state_idx,
-                       planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_region_extended_planning(
             q_current, q_static, self.transition_tensor,
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
@@ -327,35 +283,11 @@ class RockSampleDynChannelAgent(_RockSampleAgentBase):
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
         action_dist, _ = dyn_channel_loopy_bp_planning(
-            q_current, q_static, self.transition_tensor,
-            self._rock_obs, self._planning_goal(q_static),
-            horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior, damping=self.damping,
-        )
-        return action_dist
-
-
-@dataclass(frozen=True)
-class RockSampleReducedDynChannelAgent(_RockSampleAgentBase):
-    """Reduced dyn-channel (fixed θ)."""
-
-    @staticmethod
-    def create(transition_tensor, observation_tensor, goal,
-               rock_positions, qualities, n_pos, start_state_idx,
-               planning_horizon=5, planning_iterations=3, action_prior=None,
-               damping=1.0, terminal_goal_only=False):
-        return _create(RockSampleReducedDynChannelAgent, transition_tensor,
-                       observation_tensor, goal, rock_positions, qualities,
-                       n_pos, start_state_idx,
-                       planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
-
-    def _plan(self, q_current, q_static, horizon):
-        action_dist, _ = reduced_dyn_channel_planning(
             q_current, q_static, self.transition_tensor,
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
@@ -390,26 +322,79 @@ class RockSampleNuijtenMPAgent(_RockSampleAgentBase):
 
 
 @dataclass(frozen=True)
-class RockSampleReducedNuijtenMPAgent(_RockSampleAgentBase):
-    """Reduced Nuijten MP (fixed θ)."""
+class RockSampleVBPChannelAgent(_RockSampleAgentBase):
+    """VBP channel (action channel reparameterization, θ inferred)."""
 
     @staticmethod
     def create(transition_tensor, observation_tensor, goal,
                rock_positions, qualities, n_pos, start_state_idx,
                planning_horizon=5, planning_iterations=3, action_prior=None,
                damping=1.0, terminal_goal_only=False):
-        return _create(RockSampleReducedNuijtenMPAgent, transition_tensor,
+        return _create(RockSampleVBPChannelAgent, transition_tensor,
                        observation_tensor, goal, rock_positions, qualities,
                        n_pos, start_state_idx,
                        planning_horizon, planning_iterations, action_prior,
-                       damping=damping, terminal_goal_only=terminal_goal_only)
+                       damping=damping,
+                       terminal_goal_only=terminal_goal_only)
 
     def _plan(self, q_current, q_static, horizon):
-        action_dist, _, _ = reduced_nuijten_mp_planning(
+        action_dist, _ = vbp_channel_planning(
             q_current, q_static, self.transition_tensor,
             self._rock_obs, self._planning_goal(q_static),
             horizon=horizon, n_iterations=self.planning_iterations,
-            action_prior=self.action_prior,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class RockSamplePreciseInfoSeekingAgent(_RockSampleAgentBase):
+    """Precise info-seeking (VBP action channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal,
+               rock_positions, qualities, n_pos, start_state_idx,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0, terminal_goal_only=False):
+        return _create(RockSamplePreciseInfoSeekingAgent, transition_tensor,
+                       observation_tensor, goal, rock_positions, qualities,
+                       n_pos, start_state_idx,
+                       planning_horizon, planning_iterations, action_prior,
+                       damping=damping,
+                       terminal_goal_only=terminal_goal_only)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = precise_info_seeking_planning(
+            q_current, q_static, self.transition_tensor,
+            self._rock_obs, self._planning_goal(q_static),
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
+        )
+        return action_dist
+
+
+@dataclass(frozen=True)
+class RockSampleActiveInferenceAgent(_RockSampleAgentBase):
+    """Active Inference (VBP action channels + dyn channels + obs channels)."""
+
+    @staticmethod
+    def create(transition_tensor, observation_tensor, goal,
+               rock_positions, qualities, n_pos, start_state_idx,
+               planning_horizon=5, planning_iterations=3, action_prior=None,
+               damping=1.0, terminal_goal_only=False):
+        return _create(RockSampleActiveInferenceAgent, transition_tensor,
+                       observation_tensor, goal, rock_positions, qualities,
+                       n_pos, start_state_idx,
+                       planning_horizon, planning_iterations, action_prior,
+                       damping=damping,
+                       terminal_goal_only=terminal_goal_only)
+
+    def _plan(self, q_current, q_static, horizon):
+        action_dist, _, _ = active_inference_planning(
+            q_current, q_static, self.transition_tensor,
+            self._rock_obs, self._planning_goal(q_static),
+            horizon=horizon, n_iterations=self.planning_iterations,
+            action_prior=self.action_prior, damping=self.damping,
         )
         return action_dist
 
@@ -419,15 +404,14 @@ class RockSampleReducedNuijtenMPAgent(_RockSampleAgentBase):
 # ---------------------------------------------------------------------------
 
 AGENT_CLASSES = {
-    "bp": RockSampleBPAgent,
     "loopy_bp": RockSampleLoopyBPAgent,
     "loopy_vbp": RockSampleLoopyVBPAgent,
     "region_extended": RockSampleRegionExtendedAgent,
-    "reduced_region_extended": RockSampleReducedRegionExtendedAgent,
     "dyn_channel": RockSampleDynChannelAgent,
-    "reduced_dyn_channel": RockSampleReducedDynChannelAgent,
     "nuijten": RockSampleNuijtenMPAgent,
-    "reduced_nuijten": RockSampleReducedNuijtenMPAgent,
+    "vbp_channel": RockSampleVBPChannelAgent,
+    "precise_info_seeking": RockSamplePreciseInfoSeekingAgent,
+    "active_inference": RockSampleActiveInferenceAgent,
 }
 
 

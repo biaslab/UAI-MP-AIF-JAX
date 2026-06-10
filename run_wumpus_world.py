@@ -29,14 +29,32 @@ def set_seed(seed: int):
     np.random.seed(seed)
 
 
-def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False):
-    """Run a single Wumpus World episode."""
+def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False, record=False):
+    """Run a single Wumpus World episode.
+
+    When ``record`` is True, also returns a trajectory dict with per-step
+    arrays (positions, scanned, actions, observations, rewards) plus the
+    active config index and termination flags. ``positions``/``scanned``/
+    ``observations`` are length T+1 (initial state plus post-step); ``actions``
+    and ``rewards`` are length T.
+    """
     result = env.reset(seed=seed)
     agent = agent.reset()
 
     total_reward = 0.0
     steps = 0
     max_steps = env.max_steps
+
+    if record:
+        positions = [int(env._position)]
+        scanned = [int(env._scanned)]
+        observations = [np.asarray(result.obs, dtype=np.float32)]
+        actions = []
+        rewards = []
+        config_idx = int(env.config_idx)
+    else:
+        positions = scanned = observations = actions = rewards = None
+        config_idx = None
 
     while True:
         if receding_horizon:
@@ -54,16 +72,38 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False):
         total_reward += result.reward
         steps += 1
 
+        if record:
+            actions.append(int(action))
+            rewards.append(float(result.reward))
+            positions.append(int(env._position))
+            scanned.append(int(env._scanned))
+            observations.append(np.asarray(result.obs, dtype=np.float32))
+
         if result.terminated or result.truncated:
             break
 
-    return {
+    summary = {
         "total_reward": total_reward,
         "steps": steps,
         "success": result.reward > 0,
         "terminated": result.terminated,
         "truncated": result.truncated,
     }
+
+    if not record:
+        return summary, None
+
+    trajectory = {
+        "positions": np.asarray(positions, dtype=np.int32),
+        "scanned": np.asarray(scanned, dtype=np.int32),
+        "actions": np.asarray(actions, dtype=np.int32),
+        "observations": np.stack(observations, axis=0),
+        "rewards": np.asarray(rewards, dtype=np.float32),
+        "terminated": bool(result.terminated),
+        "truncated": bool(result.truncated),
+        "config_idx": config_idx,
+    }
+    return summary, trajectory
 
 
 def main():
@@ -82,16 +122,20 @@ def main():
     parser.add_argument("--max-steps", type=int, default=50, help="Maximum steps per episode")
     parser.add_argument("--planning-horizon", type=int, default=10, help="Planning horizon")
     parser.add_argument("--planning-iterations", type=int, default=3, help="Planning iterations")
-    parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy-vbp", "loopy", "region-extended",
-                                 "reduced-region-extended", "dyn-channel",
-                                 "reduced-dyn-channel", "nuijten", "reduced-nuijten"],
+    parser.add_argument("--planning-method", type=str, default="loopy",
+                        choices=["loopy-vbp", "loopy", "region-extended",
+                                 "dyn-channel", "nuijten", "vbp-channel",
+                                 "precise-info-seeking", "active-inference"],
                         help="Planning method")
     parser.add_argument("--damping", type=float, default=1.0, help="Channel update damping (0-1)")
     parser.add_argument("--receding-horizon", action="store_true", help="Use receding horizon")
     parser.add_argument("--seed", type=int, default=0, help="Starting seed")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file")
+    parser.add_argument("--record-trajectories", type=int, default=0,
+                        help="Number of leading episodes to dump as per-step NPZ trajectories")
+    parser.add_argument("--trajectory-dir", type=str, default=None,
+                        help="Directory for per-episode trajectory NPZ files")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -128,15 +172,14 @@ def main():
 
     # Map CLI names (hyphens) to agent keys (underscores)
     METHOD_MAP = {
-        "bp": "bp",
         "loopy-vbp": "loopy_vbp",
         "loopy": "loopy_bp",
         "region-extended": "region_extended",
-        "reduced-region-extended": "reduced_region_extended",
         "dyn-channel": "dyn_channel",
-        "reduced-dyn-channel": "reduced_dyn_channel",
         "nuijten": "nuijten",
-        "reduced-nuijten": "reduced_nuijten",
+        "vbp-channel": "vbp_channel",
+        "precise-info-seeking": "precise_info_seeking",
+        "active-inference": "active_inference",
     }
     method_key = METHOD_MAP[args.planning_method]
 
@@ -165,6 +208,13 @@ def main():
     print(f"Running {args.episodes} episodes...")
     print("-" * 50)
 
+    record_n = max(0, int(args.record_trajectories))
+    trajectory_dir = None
+    if record_n > 0 and args.trajectory_dir:
+        trajectory_dir = Path(args.trajectory_dir)
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Recording trajectories for first {record_n} episodes -> {trajectory_dir}")
+
     results = []
     successes = 0
     t0 = time.time()
@@ -172,13 +222,35 @@ def main():
     pbar = tqdm(range(args.episodes), desc="Episodes")
     for i in pbar:
         seed = args.seed + i
-        episode_result = run_episode(
+        record_this = trajectory_dir is not None and i < record_n
+        episode_result, trajectory = run_episode(
             agent, env, seed=seed, receding_horizon=args.receding_horizon,
-            verbose=args.verbose,
+            verbose=args.verbose, record=record_this,
         )
         results.append(episode_result)
         if episode_result["success"]:
             successes += 1
+
+        if trajectory is not None:
+            theta = trajectory["config_idx"]
+            np.savez_compressed(
+                trajectory_dir / f"episode_{i:03d}.npz",
+                positions=trajectory["positions"],
+                scanned=trajectory["scanned"],
+                actions=trajectory["actions"],
+                observations=trajectory["observations"],
+                rewards=trajectory["rewards"],
+                terminated=np.bool_(trajectory["terminated"]),
+                truncated=np.bool_(trajectory["truncated"]),
+                config_idx=np.int32(theta),
+                pits=np.asarray(pits[theta], dtype=np.float32),
+                wumpus=np.asarray(wumpus_arr[theta], dtype=np.float32),
+                gold=np.asarray(gold[theta], dtype=np.float32),
+                grid_size=np.int32(args.grid_size),
+                seed=np.int32(seed),
+                method=np.str_(args.planning_method),
+            )
+
         pbar.set_postfix({
             "success": f"{successes / (i + 1):.1%}",
             "steps": episode_result["steps"],

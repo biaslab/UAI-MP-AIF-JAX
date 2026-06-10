@@ -1,4 +1,130 @@
 stages:
+  convergence_sweep_frozen_lake:
+    cmd: >-
+      uv run python run_convergence_sweep.py
+      --environment frozen-lake
+      --grid-size ${convergence_sweep.frozen_lake.grid_size}
+      --n-configs ${convergence_sweep.frozen_lake.n_configs}
+      --planning-horizon ${convergence_sweep.frozen_lake.planning_horizon}
+      --hole-fraction ${convergence_sweep.frozen_lake.hole_fraction}
+      --min-hamming ${convergence_sweep.frozen_lake.min_hamming}
+      --base-noise ${convergence_sweep.frozen_lake.base_noise}
+      --noise-range ${convergence_sweep.frozen_lake.noise_range}
+      --slip-prob ${convergence_sweep.frozen_lake.slip_prob}
+      --hole-penalty ${convergence_sweep.frozen_lake.hole_penalty}
+      --goal-temperature ${convergence_sweep.frozen_lake.goal_temperature}
+      --scan-cost ${convergence_sweep.frozen_lake.scan_cost}
+      --n-iterations ${convergence_sweep.n_iterations}
+      --output-dir data/convergence_sweep
+    deps:
+      - run_convergence_sweep.py
+      - environments/frozen_lake.py
+      - inference/
+    params:
+      - convergence_sweep
+      - convergence_sweep.frozen_lake
+    plots:
+      - data/convergence_sweep/frozen-lake/summary.csv:
+          cache: false
+
+  convergence_sweep_wumpus_world:
+    cmd: >-
+      uv run python run_convergence_sweep.py
+      --environment wumpus-world
+      --grid-size ${convergence_sweep.wumpus_world.grid_size}
+      --n-configs ${convergence_sweep.wumpus_world.n_configs}
+      --n-pits ${convergence_sweep.wumpus_world.n_pits}
+      --planning-horizon ${convergence_sweep.wumpus_world.planning_horizon}
+      --obs-noise ${convergence_sweep.wumpus_world.obs_noise}
+      --pos-noise ${convergence_sweep.wumpus_world.pos_noise}
+      --slip-prob ${convergence_sweep.wumpus_world.slip_prob}
+      --pit-penalty ${convergence_sweep.wumpus_world.pit_penalty}
+      --wumpus-penalty ${convergence_sweep.wumpus_world.wumpus_penalty}
+      --goal-temperature ${convergence_sweep.wumpus_world.goal_temperature}
+      --scan-cost ${convergence_sweep.wumpus_world.scan_cost}
+      --n-iterations ${convergence_sweep.n_iterations}
+      --output-dir data/convergence_sweep
+    deps:
+      - run_convergence_sweep.py
+      - environments/wumpus_world.py
+      - inference/
+    params:
+      - convergence_sweep
+      - convergence_sweep.wumpus_world
+    plots:
+      - data/convergence_sweep/wumpus-world/summary.csv:
+          cache: false
+
+  convergence_sweep_rocksample:
+    cmd: >-
+      uv run python run_convergence_sweep.py
+      --environment rocksample
+      --grid-size ${convergence_sweep.rocksample.grid_size}
+      --n-rocks ${convergence_sweep.rocksample.n_rocks}
+      --planning-horizon ${convergence_sweep.rocksample.planning_horizon}
+      --half-eff-dist ${convergence_sweep.rocksample.half_eff_dist}
+      --pos-noise ${convergence_sweep.rocksample.pos_noise}
+      --slip-prob ${convergence_sweep.rocksample.slip_prob}
+      --good-reward ${convergence_sweep.rocksample.good_reward}
+      --bad-penalty ${convergence_sweep.rocksample.bad_penalty}
+      --exit-reward ${convergence_sweep.rocksample.exit_reward}
+      --goal-temperature ${convergence_sweep.rocksample.goal_temperature}
+      --scan-cost ${convergence_sweep.rocksample.scan_cost}
+      --sample-cost ${convergence_sweep.rocksample.sample_cost}
+      --terminal-goal-only
+      --n-iterations ${convergence_sweep.n_iterations}
+      --output-dir data/convergence_sweep
+    deps:
+      - run_convergence_sweep.py
+      - environments/rocksample.py
+      - inference/
+    params:
+      - convergence_sweep
+      - convergence_sweep.rocksample
+    plots:
+      - data/convergence_sweep/rocksample/summary.csv:
+          cache: false
+
+  convergence_sweep_minigrid:
+    cmd: >-
+      uv run python run_convergence_sweep.py
+      --environment minigrid
+      --grid-size ${convergence_sweep.minigrid.grid_size}
+      --planning-horizon ${convergence_sweep.minigrid.planning_horizon}
+      --fov-size ${convergence_sweep.minigrid.fov_size}
+      --obs-alpha ${convergence_sweep.minigrid.obs_alpha}
+      --observe-first
+      --n-iterations ${convergence_sweep.n_iterations}
+      --output-dir data/convergence_sweep
+    deps:
+      - run_convergence_sweep.py
+      - environments/minigrid.py
+      - inference/
+    params:
+      - convergence_sweep
+      - convergence_sweep.minigrid
+    plots:
+      - data/convergence_sweep/minigrid/summary.csv:
+          cache: false
+
+  convergence_sweep_plots:
+    cmd: >-
+      uv run python plot_convergence_sweep.py
+      --environment all
+      --input-dir data/convergence_sweep
+      --output-dir data/convergence_sweep/plots
+      --format both
+      --tex
+    deps:
+      - plot_convergence_sweep.py
+      - data/convergence_sweep/frozen-lake/summary.csv
+      - data/convergence_sweep/wumpus-world/summary.csv
+      - data/convergence_sweep/rocksample/summary.csv
+      - data/convergence_sweep/minigrid/summary.csv
+    plots:
+      - data/convergence_sweep/plots/:
+          cache: false
+
   frozen_lake:
     foreach: ${frozen_lake_methods}
     do:
@@ -21,6 +147,7 @@ stages:
         --goal-temperature ${frozen_lake.goal_temperature}
         --scan-cost ${frozen_lake.scan_cost}
         --seed ${frozen_lake.seed}
+        --receding-horizon
         --output data/results/frozen_lake/${key}.json
       deps:
         - run_frozen_lake.py
@@ -33,36 +160,6 @@ stages:
       metrics:
         - data/results/frozen_lake/${key}.json:
             cache: false
-
-  frozen_lake_damping:
-    cmd: >-
-      uv run python run_frozen_lake_damping.py
-      --grid-size ${frozen_lake.grid_size}
-      --n-configs ${frozen_lake.n_configs}
-      --hole-fraction ${frozen_lake.hole_fraction}
-      --min-hamming ${frozen_lake.min_hamming}
-      --base-noise ${frozen_lake.base_noise}
-      --noise-range ${frozen_lake.noise_range}
-      --slip-prob ${frozen_lake.slip_prob}
-      --planning-horizon ${frozen_lake.planning_horizon}
-      --hole-penalty ${frozen_lake.hole_penalty}
-      --goal-temperature ${frozen_lake.goal_temperature}
-      --scan-cost ${frozen_lake.scan_cost}
-      --seed ${frozen_lake.seed}
-      --n-iterations ${frozen_lake_damping.n_iterations}
-      --damping ${frozen_lake_damping.damping}
-      --output-dir data/frozen_lake_damping
-    deps:
-      - run_frozen_lake_damping.py
-      - environments/frozen_lake.py
-      - inference/
-    params:
-      - frozen_lake
-      - frozen_lake_damping
-    plots:
-      - data/frozen_lake_damping/vfe_traces.csv:
-          x: iteration
-          y_label: VFE
 
   wumpus_world:
     foreach: ${wumpus_world_methods}
@@ -80,13 +177,16 @@ stages:
         --max-steps ${wumpus_world.max_steps}
         --planning-horizon ${wumpus_world.planning_horizon}
         --planning-iterations ${item.planning_iterations}
-        --damping ${wumpus_world.damping}
+        --damping ${item.damping}
         --scan-cost ${wumpus_world.scan_cost}
         --pit-penalty ${wumpus_world.pit_penalty}
         --wumpus-penalty ${wumpus_world.wumpus_penalty}
         --goal-temperature ${wumpus_world.goal_temperature}
         --seed ${wumpus_world.seed}
         --output data/results/wumpus_world/${key}.json
+        --receding-horizon
+        --record-trajectories ${wumpus_world.record_trajectories}
+        --trajectory-dir data/trajectories/wumpus_world/${key}
       deps:
         - run_wumpus_world.py
         - agents/wumpus_agent.py
@@ -97,6 +197,9 @@ stages:
         - wumpus_world_methods.${key}
       metrics:
         - data/results/wumpus_world/${key}.json:
+            cache: false
+      outs:
+        - data/trajectories/wumpus_world/${key}:
             cache: false
 
   rocksample:
@@ -123,6 +226,7 @@ stages:
         --sample-cost ${rocksample.sample_cost}
         --terminal-goal-only
         --seed ${rocksample.seed}
+        --receding-horizon
         --output data/results/rocksample/${key}.json
       deps:
         - run_rocksample.py
@@ -136,3 +240,34 @@ stages:
         - data/results/rocksample/${key}.json:
             cache: false
 
+  minigrid:
+    foreach: ${minigrid_methods}
+    do:
+      cmd: >-
+        uv run python run_minigrid.py
+        --planning-method ${key}
+        --grid-size ${minigrid.grid_size}
+        --fov-size ${minigrid.fov_size}
+        --obs-alpha ${minigrid.obs_alpha}
+        --episodes ${minigrid.episodes}
+        --max-steps ${minigrid.max_steps}
+        --planning-horizon ${minigrid.planning_horizon}
+        --inference-iterations ${minigrid.inference_iterations}
+        --planning-iterations ${item.planning_iterations}
+        --damping ${item.damping}
+        --seed ${minigrid.seed}
+        --receding-horizon
+        --output data/results/minigrid/${key}.json
+        --record ${minigrid.record}
+      deps:
+        - run_minigrid.py
+        - agents/flat_tensor_agent.py
+        - environments/minigrid.py
+        - environments/gym_wrapper.py
+        - inference/
+      params:
+        - minigrid
+        - minigrid_methods.${key}
+      metrics:
+        - data/results/minigrid/${key}.json:
+            cache: false

@@ -16,7 +16,7 @@ from jax import nn, lax
 from jax.scipy.special import logsumexp
 from functools import partial
 
-from .planning import LOG_ZERO, safe_log
+from .messages import LOG_ZERO, safe_log
 from .loopy_bp import compute_reduced_per_t, compute_theta_cavities
 
 

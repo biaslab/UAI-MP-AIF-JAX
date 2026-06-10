@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 def run_minigrid_tests():
     from tests.test_minigrid import (
         TestIndexMappingFunctions,
+        TestValidStaticConfigs,
         TestGetNextOrientation,
         TestGetNextDoorKeyState,
         TestCoordinateFunctions,
@@ -29,11 +30,15 @@ def run_minigrid_tests():
     t.test_flatten_unflatten_state_index_roundtrip()
     t.test_flatten_state_index_unique()
     t.test_flatten_state_index_boundary()
-    t.test_flatten_unflatten_position_index_roundtrip()
-    t.test_flatten_position_index_unique()
-    t.test_flatten_position_index_boundary()
     t.test_integration_realistic_grid_sizes()
     print("  Index mapping: PASSED")
+
+    print("Running valid static configs tests...")
+    t = TestValidStaticConfigs()
+    t.test_all_configs_have_key_before_door()
+    t.test_fewer_configs_than_full_product()
+    t.test_configs_nonempty()
+    print("  Valid static configs: PASSED")
 
     print("Running orientation tests...")
     t = TestGetNextOrientation()
@@ -65,6 +70,7 @@ def run_minigrid_tests():
     print("Running relative coords tests...")
     t = TestRelativeCoords()
     t.test_get_relative_coords_facing_right()
+    t.test_get_relative_coords_facing_down()
     t.test_get_relative_coords_facing_up()
     t.test_in_fov()
     t.test_relative_to_fov_coords()
@@ -85,6 +91,7 @@ def run_minigrid_tests():
     t.test_fov_contains_door_when_visible()
     t.test_fov_contains_key_when_visible()
     t.test_fov_key_at_agent_when_held()
+    t.test_fov_contains_goal()
     print("  FOV: PASSED")
 
     print("Running tensor generation tests (may take a moment)...")
@@ -124,12 +131,15 @@ def run_inference_tests():
     from tests.test_inference import (
         TestMessages,
         TestStateInference,
-        TestPlanning,
         TestLoopyBPPlanning,
         TestRegionExtendedLoopyBP,
         TestNumericalStability,
-        TestReducedRegionExtended,
         TestNuijtenMP,
+        TestVBPChannel,
+        TestPreciseInfoSeeking,
+        TestActiveInference,
+        TestActiveInferenceOptimizations,
+        TestSparseTransitionOps,
         TestAgentIntegration,
         TestCustomFOVSizeInference,
         TestPerformanceRefactorEquivalence,
@@ -159,20 +169,10 @@ def run_inference_tests():
     t.test_state_inference_converges()
     print("  State inference: PASSED")
 
-    print("Running planning tests...")
-    t = TestPlanning()
-    t.setup_method()
-    t.test_planning_output_shape()
-    t.test_planning_respects_action_mask()
-    t.test_marginalize_static_shape()
-    t.test_marginalize_static_is_stochastic()
-    print("  Planning: PASSED")
-
     print("Running loopy BP planning tests...")
     t = TestLoopyBPPlanning()
     t.setup_method()
     t.test_output_shape()
-    t.test_single_iter_matches_standard_bp()
     t.test_respects_action_mask()
     t.test_theta_cavities_shape_and_normalization()
     t.test_forward_backward_messages_shape()
@@ -198,16 +198,7 @@ def run_inference_tests():
     t.test_safe_log_on_float16_tensor()
     t.test_safe_log_on_float32_tensor()
     t.test_region_extended_multi_iteration_no_nan()
-    t.test_reduced_region_extended_multi_iteration_no_nan()
     print("  Numerical stability: PASSED")
-
-    print("Running reduced region-extended tests...")
-    t = TestReducedRegionExtended()
-    t.setup_method()
-    t.test_output_shape()
-    t.test_respects_action_mask()
-    t.test_single_iter_matches_region_extended()
-    print("  Reduced Region-Extended: PASSED")
 
     print("Running Nuijten MP tests...")
     t = TestNuijtenMP()
@@ -224,10 +215,65 @@ def run_inference_tests():
     t.test_nuijten_respects_action_mask()
     t.test_nuijten_multi_iteration_no_nan()
     t.test_nuijten_region_beliefs_shapes()
-    t.test_reduced_nuijten_output_shape()
-    t.test_reduced_nuijten_respects_action_mask()
-    t.test_reduced_nuijten_multi_iteration_no_nan()
     print("  Nuijten MP: PASSED")
+
+    print("Running VBP channel tests...")
+    t = TestVBPChannel()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_action_dist_normalized()
+    t.test_respects_action_mask()
+    t.test_action_channel_is_conditional()
+    t.test_multi_iteration_changes_result()
+    print("  VBP Channel: PASSED")
+
+    print("Running precise info-seeking tests...")
+    t = TestPreciseInfoSeeking()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_respects_action_mask()
+    t.test_multi_iteration_changes_result()
+    t.test_obs_channels_shape()
+    t.test_action_channels_shape()
+    print("  Precise Info-Seeking: PASSED")
+
+    print("Running active inference tests...")
+    t = TestActiveInference()
+    t.setup_method()
+    t.test_output_shape()
+    t.test_respects_action_mask()
+    t.test_multi_iteration_changes_result()
+    t.test_obs_channels_shape()
+    t.test_dyn_channels_conditional()
+    print("  Active Inference: PASSED")
+
+    print("Running active inference optimization tests...")
+    t = TestActiveInferenceOptimizations()
+    t.setup_method()
+    t.test_sparse_log_base_moved_to_messages()
+    t.test_sparse_log_base_matches_dense()
+    t.test_obs_channel_single_step()
+    t.test_precompute_pref_to_x()
+    t.test_obs_to_x_from_precomputed_channels()
+    print("  Active Inference Optimizations: PASSED")
+
+    print("Running sparse transition ops tests...")
+    t = TestSparseTransitionOps()
+    t.setup_method()
+    t.test_sparse_reduced_matches_compute_log_reduced()
+    t.test_sparse_reduced_weighted_matches_dense()
+    t.test_sparse_dyn_to_theta_matches_dense()
+    t.test_sparse_dyn_to_theta_no_obs_matches_loopy()
+    t.test_sparse_dyn_to_theta_per_t_action_matches_nuijten()
+    t.test_sparse_dyn_to_theta_weighted_matches_dense()
+    t.test_sparse_dyn_channels_matches_dense()
+    t.test_sparse_pair_marginal_matches_dense()
+    t.test_sparse_efe_matches_dense()
+    t.test_loopy_bp_sparse_matches_dense()
+    t.test_vbp_channel_sparse_matches_dense()
+    t.test_dyn_channel_sparse_matches_dense()
+    t.test_nuijten_sparse_matches_dense()
+    print("  Sparse Transition Ops: PASSED")
 
     print("Running agent integration tests...")
     t = TestAgentIntegration()
@@ -243,7 +289,6 @@ def run_inference_tests():
     t.test_obs_tensor_shape()
     t.test_state_inference_with_fov5()
     t.test_region_extended_with_fov5()
-    t.test_reduced_region_extended_with_fov5()
     t.test_agent_step_with_fov5()
     print("  Custom FOV size inference: PASSED")
 
@@ -251,24 +296,39 @@ def run_inference_tests():
     t = TestPerformanceRefactorEquivalence()
     t.setup_method()
     t.test_region_extended_equivalence()
-    t.test_reduced_region_extended_equivalence()
     t.test_loopy_bp_equivalence()
     t.test_loopy_vbp_equivalence()
     print("  Performance refactor equivalence: PASSED")
 
 
 def run_groundtruth_tests():
-    from tests.test_minigrid_groundtruth import TestFOVSizeAgainstMiniGrid
+    try:
+        import pytest
+    except ImportError:
+        print()
+        print("=" * 60)
+        print("GROUNDTRUTH FOV TESTS (SKIPPED — pytest not installed)")
+        print("=" * 60)
+        return
+
+    from tests.test_minigrid_groundtruth import (
+        test_fov_initial_state,
+        test_fov_full_episode,
+    )
 
     print()
     print("=" * 60)
-    print("GROUNDTRUTH FOV SIZE TESTS")
+    print("GROUNDTRUTH FOV TESTS")
     print("=" * 60)
 
-    print("Running FOV size=5 ground truth tests...")
-    t = TestFOVSizeAgainstMiniGrid()
-    t.test_fov_size5_matches_minigrid()
-    print("  FOV size=5 ground truth: PASSED")
+    print("Running FOV ground truth tests (grid=5, fov=3, seeds 0-4)...")
+    for seed in range(5):
+        test_fov_initial_state(grid_size=5, fov_size=3, seed=seed)
+    print("  Initial state FOV: PASSED")
+
+    print("Running FOV full episode ground truth (grid=5, fov=3, seed=0)...")
+    test_fov_full_episode(grid_size=5, fov_size=3, seed=0)
+    print("  Full episode FOV: PASSED")
 
 
 def run_rocksample_tests():

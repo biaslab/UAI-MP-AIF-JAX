@@ -423,18 +423,16 @@ def main():
     parser.add_argument("--max-steps", type=int, default=30)
     parser.add_argument("--planning-horizon", type=int, default=15)
     parser.add_argument("--planning-iterations", type=int, default=3)
-    parser.add_argument("--planning-method", type=str, default="bp",
-                        choices=["bp", "loopy-vbp", "loopy", "region-extended",
-                                 "reduced-region-extended", "dyn-channel",
-                                 "reduced-dyn-channel", "nuijten", "reduced-nuijten"])
+    parser.add_argument("--planning-method", type=str, default="loopy",
+                        choices=["loopy-vbp", "loopy", "region-extended",
+                                 "dyn-channel", "nuijten", "vbp-channel",
+                                 "precise-info-seeking", "active-inference"])
     parser.add_argument("--damping", type=float, default=1.0)
     parser.add_argument("--hole-penalty", type=float, default=1.0)
     parser.add_argument("--goal-temperature", type=float, default=1.0)
     parser.add_argument("--scan-cost", type=float, default=0.5,
                         help="SCAN action prior weight (lower = more costly)")
     parser.add_argument("--receding-horizon", action="store_true")
-    parser.add_argument("--compare-bp", action="store_true",
-                        help="Also run basic BP planner and compare action distributions")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -461,8 +459,6 @@ def main():
     print(f"  Scan cost: {args.scan_cost}")
     print(f"  Seed: {args.seed}")
     print(f"  State space: {n_states} states ({n_pos} positions x 2 scan modes)")
-    if args.compare_bp:
-        print(f"  Compare BP: enabled")
     print()
 
     print("Generating tensors...")
@@ -487,15 +483,14 @@ def main():
     print_goal_diagnostic(goal, grid_size, holes)
 
     METHOD_MAP = {
-        "bp": "bp",
         "loopy-vbp": "loopy_vbp",
         "loopy": "loopy_bp",
         "region-extended": "region_extended",
-        "reduced-region-extended": "reduced_region_extended",
         "dyn-channel": "dyn_channel",
-        "reduced-dyn-channel": "reduced_dyn_channel",
         "nuijten": "nuijten",
-        "reduced-nuijten": "reduced_nuijten",
+        "vbp-channel": "vbp_channel",
+        "precise-info-seeking": "precise_info_seeking",
+        "active-inference": "active_inference",
     }
     method_key = METHOD_MAP[args.planning_method]
 
@@ -511,18 +506,7 @@ def main():
         damping=args.damping,
     )
 
-    # Create BP comparison agent if requested
     compare_bp_agent = None
-    if args.compare_bp:
-        print("Creating BP comparison agent...")
-        compare_bp_agent = create_agent(
-            "bp", T, B, goal, holes,
-            planning_horizon=args.planning_horizon,
-            planning_iterations=1,
-            action_prior=action_prior,
-            damping=1.0,
-        )
-        print()
 
     env = FrozenLakeEnv(
         grid_size=grid_size, holes=holes, obs_tensor=B,
