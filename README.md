@@ -38,36 +38,36 @@ Available via `--planning-method`:
 
 ### Frozen Lake
 
-Slippery gridworld where the agent must reach a goal while avoiding holes. Hole layouts are randomized across configurations; observations are noisy and distance-dependent.
+Slippery gridworld where the agent must reach a goal while avoiding holes. Hole layouts are randomized across configurations; the agent observes its own position plus a noisy breeze-style sensor reporting whether each adjacent cell contains a hole.
 
 ```bash
 uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --episodes 1000 \
     --planning-method region-extended --planning-horizon 15 --damping 0.25
 ```
 
-Environment-specific arguments: `--n-configs`, `--hole-fraction`, `--min-hamming`, `--base-noise`, `--noise-range`, `--slip-prob`, `--hole-penalty`, `--goal-temperature`, `--scan-cost`.
+Environment-specific arguments: `--n-configs`, `--hole-fraction`, `--min-hamming`, `--obs-noise`, `--slip-prob`, `--hole-penalty`, `--goal-temperature`.
 
 ### Wumpus World
 
-Gridworld with pits and a wumpus. The agent receives indirect observations (stench, breeze) about neighboring cells. Multiple static configurations vary pit and wumpus placement.
+Gridworld with pits and a wumpus. Feature observations are event-gated: moving yields no information, while an explicit SENSE action emits noisy indirect readings (breeze, stench, glitter) for the current cell. Multiple static configurations vary pit and wumpus placement.
 
 ```bash
 uv run python run_wumpus_world.py --grid-size 4 --n-configs 50 --episodes 1000 \
     --planning-method dyn-channel --planning-horizon 7 --damping 0.25
 ```
 
-Environment-specific arguments: `--n-configs`, `--n-pits`, `--obs-noise`, `--pos-noise`, `--slip-prob`, `--pit-penalty`, `--wumpus-penalty`, `--goal-temperature`, `--scan-cost`.
+Environment-specific arguments: `--n-configs`, `--n-pits`, `--obs-noise`, `--pos-noise`, `--slip-prob`, `--pit-penalty`, `--wumpus-penalty`, `--goal-temperature`, `--sense-cost`.
 
 ### RockSample
 
-Gridworld with rocks of unknown quality. The agent can check rocks (distance-dependent observation accuracy), sample them, or move to the exit. Static configurations vary rock placement and quality.
+Canonical RockSample gridworld with rocks of unknown quality. The agent has a per-rock SENSE action (noisy reading whose accuracy decays with Chebyshev distance), a SAMPLE action that collects and reveals the rock at its cell, and movement toward an east-edge exit. Observations are event-gated: rock channels read NO_INFO except on the step after the matching SENSE or SAMPLE.
 
 ```bash
-uv run python run_rocksample.py --grid-size 5 --n-rocks 3 --n-configs 8 --episodes 100 \
-    --planning-method bp --planning-horizon 10
+uv run python run_rocksample.py --grid-size 4 --n-rocks 3 --episodes 100 \
+    --planning-method active-inference --planning-horizon 12
 ```
 
-Environment-specific arguments: `--n-rocks`, `--n-configs`, `--half-eff-dist`, `--pos-noise`, `--slip-prob`, `--good-reward`, `--bad-penalty`, `--exit-reward`, `--goal-temperature`, `--scan-cost`, `--sample-cost`, `--terminal-goal-only`.
+Environment-specific arguments: `--n-rocks`, `--half-eff-dist`, `--pos-noise`, `--slip-prob`, `--good-reward`, `--bad-penalty`, `--exit-reward`, `--good-logit`, `--bad-logit`, `--exit-logit`, `--goal-temperature`, `--sense-cost`, `--sample-cost`, `--terminal-goal-only`.
 
 ### MiniGrid DoorKey
 

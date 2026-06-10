@@ -44,12 +44,10 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --planning-horizon "$(read_param "['convergence_sweep']['frozen_lake']['planning_horizon']")" \
                     --hole-fraction "$(read_param "['convergence_sweep']['frozen_lake']['hole_fraction']")" \
                     --min-hamming "$(read_param "['convergence_sweep']['frozen_lake']['min_hamming']")" \
-                    --base-noise "$(read_param "['convergence_sweep']['frozen_lake']['base_noise']")" \
-                    --noise-range "$(read_param "['convergence_sweep']['frozen_lake']['noise_range']")" \
+                    --obs-noise "$(read_param "['convergence_sweep']['frozen_lake']['obs_noise']")" \
                     --slip-prob "$(read_param "['convergence_sweep']['frozen_lake']['slip_prob']")" \
                     --hole-penalty "$(read_param "['convergence_sweep']['frozen_lake']['hole_penalty']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['frozen_lake']['goal_temperature']")" \
-                    --scan-cost "$(read_param "['convergence_sweep']['frozen_lake']['scan_cost']")" \
                     --n-iterations "$N_ITERATIONS" \
                     --output-dir data/convergence_sweep
                 ;;
@@ -66,7 +64,7 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --pit-penalty "$(read_param "['convergence_sweep']['wumpus_world']['pit_penalty']")" \
                     --wumpus-penalty "$(read_param "['convergence_sweep']['wumpus_world']['wumpus_penalty']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['wumpus_world']['goal_temperature']")" \
-                    --scan-cost "$(read_param "['convergence_sweep']['wumpus_world']['scan_cost']")" \
+                    --sense-cost "$(read_param "['convergence_sweep']['wumpus_world']['sense_cost']")" \
                     --n-iterations "$N_ITERATIONS" \
                     --output-dir data/convergence_sweep
                 ;;
@@ -79,11 +77,11 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --half-eff-dist "$(read_param "['convergence_sweep']['rocksample']['half_eff_dist']")" \
                     --pos-noise "$(read_param "['convergence_sweep']['rocksample']['pos_noise']")" \
                     --slip-prob "$(read_param "['convergence_sweep']['rocksample']['slip_prob']")" \
-                    --good-reward "$(read_param "['convergence_sweep']['rocksample']['good_reward']")" \
-                    --bad-penalty "$(read_param "['convergence_sweep']['rocksample']['bad_penalty']")" \
-                    --exit-reward "$(read_param "['convergence_sweep']['rocksample']['exit_reward']")" \
+                    --good-logit "$(read_param "['convergence_sweep']['rocksample']['good_logit']")" \
+                    --bad-logit "$(read_param "['convergence_sweep']['rocksample']['bad_logit']")" \
+                    --exit-logit "$(read_param "['convergence_sweep']['rocksample']['exit_logit']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['rocksample']['goal_temperature']")" \
-                    --scan-cost "$(read_param "['convergence_sweep']['rocksample']['scan_cost']")" \
+                    --sense-cost "$(read_param "['convergence_sweep']['rocksample']['sense_cost']")" \
                     --sample-cost "$(read_param "['convergence_sweep']['rocksample']['sample_cost']")" \
                     --terminal-goal-only \
                     --n-iterations "$N_ITERATIONS" \

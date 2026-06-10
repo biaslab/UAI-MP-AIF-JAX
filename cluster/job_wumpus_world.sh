@@ -43,7 +43,7 @@ python run_wumpus_world.py \
     --planning-horizon "$(read_param "['wumpus_world']['planning_horizon']")" \
     --planning-iterations "$(read_param "['wumpus_world_methods']['$METHOD']['planning_iterations']")" \
     --damping "$(read_param "['wumpus_world_methods']['$METHOD']['damping']")" \
-    --scan-cost "$(read_param "['wumpus_world']['scan_cost']")" \
+    --sense-cost "$(read_param "['wumpus_world']['sense_cost']")" \
     --pit-penalty "$(read_param "['wumpus_world']['pit_penalty']")" \
     --wumpus-penalty "$(read_param "['wumpus_world']['wumpus_penalty']")" \
     --goal-temperature "$(read_param "['wumpus_world']['goal_temperature']")" \

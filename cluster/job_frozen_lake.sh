@@ -36,8 +36,7 @@ python run_frozen_lake.py \
     --n-configs "$(read_param "['frozen_lake']['n_configs']")" \
     --hole-fraction "$(read_param "['frozen_lake']['hole_fraction']")" \
     --min-hamming "$(read_param "['frozen_lake']['min_hamming']")" \
-    --base-noise "$(read_param "['frozen_lake']['base_noise']")" \
-    --noise-range "$(read_param "['frozen_lake']['noise_range']")" \
+    --obs-noise "$(read_param "['frozen_lake']['obs_noise']")" \
     --slip-prob "$(read_param "['frozen_lake']['slip_prob']")" \
     --episodes "$(read_param "['frozen_lake']['episodes']")" \
     --max-steps "$(read_param "['frozen_lake']['max_steps']")" \
@@ -46,7 +45,6 @@ python run_frozen_lake.py \
     --damping "$(read_param "['frozen_lake_methods']['$METHOD']['damping']")" \
     --hole-penalty "$(read_param "['frozen_lake']['hole_penalty']")" \
     --goal-temperature "$(read_param "['frozen_lake']['goal_temperature']")" \
-    --scan-cost "$(read_param "['frozen_lake']['scan_cost']")" \
     --seed "$(read_param "['frozen_lake']['seed']")" \
     --receding-horizon \
     --output "data/results/frozen_lake/${METHOD}.json"
