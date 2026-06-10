@@ -79,7 +79,7 @@ rocksample:
   half_eff_dist: 2.0
   pos_noise: 0.1
   slip_prob: 0.0
-  episodes: 500
+  episodes: 1000
   max_steps: 25
   planning_horizon: 12
   good_reward: 2.0
@@ -96,7 +96,7 @@ rocksample:
 
 rocksample_methods:
   loopy:
-    planning_iterations: 50
+    planning_iterations: 200
     damping: 1.0
 
   dyn-channel:
