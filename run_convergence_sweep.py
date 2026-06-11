@@ -147,7 +147,7 @@ def setup_wumpus_world(args, seed):
 
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = 2 * n_pos  # doubled for scan mode
+    n_states = 2 * n_pos  # doubled for the transient sense bit
 
     pits, wumpus_arr, gold = sample_configs(
         grid_size, args.n_configs, n_pits=args.n_pits, seed=seed,
@@ -172,14 +172,14 @@ def setup_wumpus_world(args, seed):
         dtype=jnp.float32,
     )
 
-    # Initial beliefs: uniform over doubled state space
+    # Initial beliefs: known start at state 0 (pos 0, sensed=0)
     n_static = pits.shape[0]
-    q_current = jnp.ones(n_states, dtype=jnp.float32) / n_states
+    q_current = jnp.zeros(n_states, dtype=jnp.float32).at[0].set(1.0)
     q_static = jnp.ones(n_static, dtype=jnp.float32) / n_static
 
-    # Action prior with scan cost
+    # Action prior with sense cost
     action_prior = np.array(
-        [1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32,
+        [1.0, 1.0, 1.0, 1.0, args.sense_cost], dtype=np.float32,
     )
     action_prior = action_prior / action_prior.sum()
     action_prior = jnp.array(action_prior)
@@ -197,17 +197,19 @@ def setup_rocksample(args, seed):
         generate_goal,
         rc_to_pos,
         state_index,
+        n_events_for,
+        EVENT_OTHER,
     )
 
     grid_size = args.grid_size
     n_rocks = args.n_rocks
     n_pos = grid_size * grid_size
-    n_collect = 2 ** n_rocks
-    n_scan = 2 ** n_rocks
-    n_states = n_pos * n_collect * n_scan
+    n_mask = 2 ** n_rocks
+    n_events = n_events_for(n_rocks)
+    n_states = n_pos * n_mask * n_events
 
     start_pos = rc_to_pos(grid_size // 2, 0, grid_size)
-    start_state_idx = state_index(start_pos, 0, 0, n_pos, n_collect, n_scan)
+    start_state_idx = state_index(start_pos, 0, EVENT_OTHER, n_pos, n_mask, n_events)
 
     rock_positions = sample_rock_positions(grid_size, n_rocks, seed=seed)
     qualities = all_quality_configs(n_rocks)
@@ -226,8 +228,8 @@ def setup_rocksample(args, seed):
     goal = jnp.array(
         generate_goal(
             grid_size, rock_positions, qualities, n_rocks,
-            exit_reward=args.exit_reward, good_reward=args.good_reward,
-            bad_penalty=args.bad_penalty, temperature=args.goal_temperature,
+            good_logit=args.good_logit, bad_logit=args.bad_logit,
+            exit_logit=args.exit_logit, temperature=args.goal_temperature,
         ),
         dtype=jnp.float32,
     )
@@ -237,12 +239,12 @@ def setup_rocksample(args, seed):
 
     # Initial beliefs: known start state
     q_current = jnp.zeros(n_states, dtype=jnp.float32).at[start_state_idx].set(1.0)
-    n_static = n_collect  # 2^n_rocks quality configs
+    n_static = n_mask  # 2^n_rocks quality configs
     q_static = jnp.ones(n_static, dtype=jnp.float32) / n_static
 
-    # Action prior: [left, down, right, up, scan, sample]
+    # Action prior: [left, down, right, up] + k senses + [sample]
     action_prior = np.array(
-        [1.0, 1.0, 1.0, 1.0, args.scan_cost, args.sample_cost],
+        [1.0] * 4 + [args.sense_cost] * n_rocks + [args.sample_cost],
         dtype=np.float32,
     )
     action_prior = action_prior / action_prior.sum()
@@ -475,15 +477,15 @@ ENV_DEFAULTS = {
     ),
     "wumpus-world": dict(
         grid_size=5, n_configs=25, n_pits=4,
-        obs_noise=0.1, pos_noise=0.4, slip_prob=0.01,
-        planning_horizon=7, pit_penalty=1.0, wumpus_penalty=1.0,
-        goal_temperature=1.0, scan_cost=0.7,
+        obs_noise=0.1, pos_noise=0.05, slip_prob=0.01,
+        planning_horizon=8, pit_penalty=1.0, wumpus_penalty=1.0,
+        goal_temperature=1.0, sense_cost=0.7,
     ),
     "rocksample": dict(
-        grid_size=5, n_rocks=2, half_eff_dist=2.0, pos_noise=0.3,
-        slip_prob=0.0, planning_horizon=15,
-        good_reward=2.0, bad_penalty=3.0, exit_reward=1.0,
-        goal_temperature=0.5, scan_cost=0.5, sample_cost=1.0,
+        grid_size=4, n_rocks=3, half_eff_dist=2.0, pos_noise=0.1,
+        slip_prob=0.0, planning_horizon=12,
+        good_logit=2.0, bad_logit=4.0, exit_logit=2.0,
+        goal_temperature=1.0, sense_cost=0.7, sample_cost=0.8,
         terminal_goal_only=True,
     ),
     "minigrid": dict(
@@ -550,13 +552,14 @@ def main():
     parser.add_argument("--pos-noise", type=float, default=None)
     parser.add_argument("--pit-penalty", type=float, default=None)
     parser.add_argument("--wumpus-penalty", type=float, default=None)
+    parser.add_argument("--sense-cost", type=float, default=None)
 
     # RockSample specific
     parser.add_argument("--n-rocks", type=int, default=None)
     parser.add_argument("--half-eff-dist", type=float, default=None)
-    parser.add_argument("--good-reward", type=float, default=None)
-    parser.add_argument("--bad-penalty", type=float, default=None)
-    parser.add_argument("--exit-reward", type=float, default=None)
+    parser.add_argument("--good-logit", type=float, default=None)
+    parser.add_argument("--bad-logit", type=float, default=None)
+    parser.add_argument("--exit-logit", type=float, default=None)
     parser.add_argument("--sample-cost", type=float, default=None)
     parser.add_argument("--terminal-goal-only", action="store_true", default=None)
 
@@ -579,10 +582,10 @@ def main():
     for attr in ["n_configs", "hole_fraction", "min_hamming", "base_noise",
                  "noise_range", "hole_penalty", "n_pits", "obs_noise",
                  "pos_noise", "pit_penalty", "wumpus_penalty", "n_rocks",
-                 "half_eff_dist", "good_reward", "bad_penalty", "exit_reward",
+                 "half_eff_dist", "good_logit", "bad_logit", "exit_logit",
                  "sample_cost", "terminal_goal_only", "fov_size", "obs_alpha",
-                 "observe_first", "scan_cost", "slip_prob", "goal_temperature",
-                 "grid_size", "planning_horizon"]:
+                 "observe_first", "scan_cost", "sense_cost", "slip_prob",
+                 "goal_temperature", "grid_size", "planning_horizon"]:
         if not hasattr(args, attr) or getattr(args, attr) is None:
             setattr(args, attr, None)
 

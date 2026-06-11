@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Submit all convergence sweep DVC stages as individual SLURM jobs.
-# 4 environment sweeps run in parallel, then plots depend on all 4.
+# 3 environment sweeps run in parallel, then plots depend on all 3.
+# MiniGrid excluded for now (not in the paper); submit it manually if needed:
+#   sbatch --job-name=conv-minigrid --export=ALL,STAGE_TYPE=sweep,CONV_ENV=minigrid cluster/job_convergence.sh
 # Stages whose output files already exist are skipped.
 set -euo pipefail
 
@@ -26,7 +28,7 @@ echo "=== Convergence sweep stages ==="
 
 DEP_JOBS=""
 
-for env in frozen-lake wumpus-world rocksample minigrid; do
+for env in frozen-lake wumpus-world rocksample; do
     OUTPUT="data/convergence_sweep/${env}/summary.csv"
     if [ -f "$OUTPUT" ]; then
         echo "  ${env}: skipped (${OUTPUT} exists)"

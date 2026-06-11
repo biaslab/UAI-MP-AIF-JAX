@@ -33,8 +33,8 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False, re
     """Run a single Wumpus World episode.
 
     When ``record`` is True, also returns a trajectory dict with per-step
-    arrays (positions, scanned, actions, observations, rewards) plus the
-    active config index and termination flags. ``positions``/``scanned``/
+    arrays (positions, sensed, actions, observations, rewards) plus the
+    active config index and termination flags. ``positions``/``sensed``/
     ``observations`` are length T+1 (initial state plus post-step); ``actions``
     and ``rewards`` are length T.
     """
@@ -47,13 +47,13 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False, re
 
     if record:
         positions = [int(env._position)]
-        scanned = [int(env._scanned)]
+        sensed = [int(env._sensed)]
         observations = [np.asarray(result.obs, dtype=np.float32)]
         actions = []
         rewards = []
         config_idx = int(env.config_idx)
     else:
-        positions = scanned = observations = actions = rewards = None
+        positions = sensed = observations = actions = rewards = None
         config_idx = None
 
     while True:
@@ -76,7 +76,7 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False, re
             actions.append(int(action))
             rewards.append(float(result.reward))
             positions.append(int(env._position))
-            scanned.append(int(env._scanned))
+            sensed.append(int(env._sensed))
             observations.append(np.asarray(result.obs, dtype=np.float32))
 
         if result.terminated or result.truncated:
@@ -95,7 +95,7 @@ def run_episode(agent, env, seed=None, receding_horizon=False, verbose=False, re
 
     trajectory = {
         "positions": np.asarray(positions, dtype=np.int32),
-        "scanned": np.asarray(scanned, dtype=np.int32),
+        "sensed": np.asarray(sensed, dtype=np.int32),
         "actions": np.asarray(actions, dtype=np.int32),
         "observations": np.stack(observations, axis=0),
         "rewards": np.asarray(rewards, dtype=np.float32),
@@ -114,7 +114,7 @@ def main():
     parser.add_argument("--obs-noise", type=float, default=0.1, help="Observation noise level")
     parser.add_argument("--pos-noise", type=float, default=0.1, help="Position channel noise level")
     parser.add_argument("--slip-prob", type=float, default=0.0, help="Movement slip probability")
-    parser.add_argument("--scan-cost", type=float, default=0.5, help="SCAN action prior weight (lower = more costly)")
+    parser.add_argument("--sense-cost", type=float, default=0.5, help="SENSE action prior weight (lower = more costly)")
     parser.add_argument("--pit-penalty", type=float, default=2.0, help="Pit penalty magnitude for goal")
     parser.add_argument("--wumpus-penalty", type=float, default=2.0, help="Wumpus penalty magnitude for goal")
     parser.add_argument("--goal-temperature", type=float, default=1.0, help="Softmax temperature for goal")
@@ -145,7 +145,7 @@ def main():
     print(f"\nWumpus World {args.grid_size}x{args.grid_size}")
     print(f"  Configs: {args.n_configs}, pits: {args.n_pits}")
     print(f"  Obs noise: {args.obs_noise}, pos noise: {args.pos_noise}, slip prob: {args.slip_prob}")
-    print(f"  Scan cost: {args.scan_cost}")
+    print(f"  Sense cost: {args.sense_cost}")
     print()
 
     print("Generating tensors...")
@@ -183,8 +183,8 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
-    # Construct action prior: [1, 1, 1, 1, scan_cost] normalized
-    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    # Construct action prior: [1, 1, 1, 1, sense_cost] normalized
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.sense_cost], dtype=np.float32)
     action_prior = action_prior / action_prior.sum()
 
     print("Creating agent...")
@@ -236,7 +236,7 @@ def main():
             np.savez_compressed(
                 trajectory_dir / f"episode_{i:03d}.npz",
                 positions=trajectory["positions"],
-                scanned=trajectory["scanned"],
+                sensed=trajectory["sensed"],
                 actions=trajectory["actions"],
                 observations=trajectory["observations"],
                 rewards=trajectory["rewards"],
@@ -281,7 +281,7 @@ def main():
                 "obs_noise": args.obs_noise,
                 "pos_noise": args.pos_noise,
                 "slip_prob": args.slip_prob,
-                "scan_cost": args.scan_cost,
+                "sense_cost": args.sense_cost,
                 "planning_method": args.planning_method,
                 "n_episodes": args.episodes,
                 "max_steps": args.max_steps,

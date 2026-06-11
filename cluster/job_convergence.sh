@@ -4,7 +4,7 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=18
 #SBATCH --mem=32G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=logs/convergence_%x_%j.out
 #SBATCH --error=logs/convergence_%x_%j.err
 
@@ -66,7 +66,7 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --pit-penalty "$(read_param "['convergence_sweep']['wumpus_world']['pit_penalty']")" \
                     --wumpus-penalty "$(read_param "['convergence_sweep']['wumpus_world']['wumpus_penalty']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['wumpus_world']['goal_temperature']")" \
-                    --scan-cost "$(read_param "['convergence_sweep']['wumpus_world']['scan_cost']")" \
+                    --sense-cost "$(read_param "['convergence_sweep']['wumpus_world']['sense_cost']")" \
                     --n-iterations "$N_ITERATIONS" \
                     --output-dir data/convergence_sweep
                 ;;
@@ -79,11 +79,11 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --half-eff-dist "$(read_param "['convergence_sweep']['rocksample']['half_eff_dist']")" \
                     --pos-noise "$(read_param "['convergence_sweep']['rocksample']['pos_noise']")" \
                     --slip-prob "$(read_param "['convergence_sweep']['rocksample']['slip_prob']")" \
-                    --good-reward "$(read_param "['convergence_sweep']['rocksample']['good_reward']")" \
-                    --bad-penalty "$(read_param "['convergence_sweep']['rocksample']['bad_penalty']")" \
-                    --exit-reward "$(read_param "['convergence_sweep']['rocksample']['exit_reward']")" \
+                    --good-logit "$(read_param "['convergence_sweep']['rocksample']['good_logit']")" \
+                    --bad-logit "$(read_param "['convergence_sweep']['rocksample']['bad_logit']")" \
+                    --exit-logit "$(read_param "['convergence_sweep']['rocksample']['exit_logit']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['rocksample']['goal_temperature']")" \
-                    --scan-cost "$(read_param "['convergence_sweep']['rocksample']['scan_cost']")" \
+                    --sense-cost "$(read_param "['convergence_sweep']['rocksample']['sense_cost']")" \
                     --sample-cost "$(read_param "['convergence_sweep']['rocksample']['sample_cost']")" \
                     --terminal-goal-only \
                     --n-iterations "$N_ITERATIONS" \

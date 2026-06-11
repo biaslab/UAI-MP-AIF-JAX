@@ -4,7 +4,7 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=18
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/rocksample_%x_%j.out
 #SBATCH --error=logs/rocksample_%x_%j.err
 
@@ -45,8 +45,11 @@ python run_rocksample.py \
     --good-reward "$(read_param "['rocksample']['good_reward']")" \
     --bad-penalty "$(read_param "['rocksample']['bad_penalty']")" \
     --exit-reward "$(read_param "['rocksample']['exit_reward']")" \
+    --good-logit "$(read_param "['rocksample']['good_logit']")" \
+    --bad-logit "$(read_param "['rocksample']['bad_logit']")" \
+    --exit-logit "$(read_param "['rocksample']['exit_logit']")" \
     --goal-temperature "$(read_param "['rocksample']['goal_temperature']")" \
-    --scan-cost "$(read_param "['rocksample']['scan_cost']")" \
+    --sense-cost "$(read_param "['rocksample']['sense_cost']")" \
     --sample-cost "$(read_param "['rocksample']['sample_cost']")" \
     --terminal-goal-only \
     --seed "$(read_param "['rocksample']['seed']")" \

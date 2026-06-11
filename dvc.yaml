@@ -41,7 +41,7 @@ stages:
       --pit-penalty ${convergence_sweep.wumpus_world.pit_penalty}
       --wumpus-penalty ${convergence_sweep.wumpus_world.wumpus_penalty}
       --goal-temperature ${convergence_sweep.wumpus_world.goal_temperature}
-      --scan-cost ${convergence_sweep.wumpus_world.scan_cost}
+      --sense-cost ${convergence_sweep.wumpus_world.sense_cost}
       --n-iterations ${convergence_sweep.n_iterations}
       --output-dir data/convergence_sweep
     deps:
@@ -65,11 +65,11 @@ stages:
       --half-eff-dist ${convergence_sweep.rocksample.half_eff_dist}
       --pos-noise ${convergence_sweep.rocksample.pos_noise}
       --slip-prob ${convergence_sweep.rocksample.slip_prob}
-      --good-reward ${convergence_sweep.rocksample.good_reward}
-      --bad-penalty ${convergence_sweep.rocksample.bad_penalty}
-      --exit-reward ${convergence_sweep.rocksample.exit_reward}
+      --good-logit ${convergence_sweep.rocksample.good_logit}
+      --bad-logit ${convergence_sweep.rocksample.bad_logit}
+      --exit-logit ${convergence_sweep.rocksample.exit_logit}
       --goal-temperature ${convergence_sweep.rocksample.goal_temperature}
-      --scan-cost ${convergence_sweep.rocksample.scan_cost}
+      --sense-cost ${convergence_sweep.rocksample.sense_cost}
       --sample-cost ${convergence_sweep.rocksample.sample_cost}
       --terminal-goal-only
       --n-iterations ${convergence_sweep.n_iterations}
@@ -178,7 +178,7 @@ stages:
         --planning-horizon ${wumpus_world.planning_horizon}
         --planning-iterations ${item.planning_iterations}
         --damping ${item.damping}
-        --scan-cost ${wumpus_world.scan_cost}
+        --sense-cost ${wumpus_world.sense_cost}
         --pit-penalty ${wumpus_world.pit_penalty}
         --wumpus-penalty ${wumpus_world.wumpus_penalty}
         --goal-temperature ${wumpus_world.goal_temperature}
@@ -221,8 +221,11 @@ stages:
         --good-reward ${rocksample.good_reward}
         --bad-penalty ${rocksample.bad_penalty}
         --exit-reward ${rocksample.exit_reward}
+        --good-logit ${rocksample.good_logit}
+        --bad-logit ${rocksample.bad_logit}
+        --exit-logit ${rocksample.exit_logit}
         --goal-temperature ${rocksample.goal_temperature}
-        --scan-cost ${rocksample.scan_cost}
+        --sense-cost ${rocksample.sense_cost}
         --sample-cost ${rocksample.sample_cost}
         --terminal-goal-only
         --seed ${rocksample.seed}
