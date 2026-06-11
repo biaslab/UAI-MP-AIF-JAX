@@ -24,6 +24,8 @@ case "$ENV" in
         bash "$SCRIPT_DIR/submit_minigrid.sh"
         ;;
     all)
+        # MiniGrid excluded for now (not in the paper);
+        # run it explicitly with: bash cluster/submit_all.sh minigrid
         bash "$SCRIPT_DIR/submit_convergence.sh"
         echo ""
         bash "$SCRIPT_DIR/submit_frozen_lake.sh"
@@ -31,8 +33,6 @@ case "$ENV" in
         bash "$SCRIPT_DIR/submit_wumpus_world.sh"
         echo ""
         bash "$SCRIPT_DIR/submit_rocksample.sh"
-        echo ""
-        bash "$SCRIPT_DIR/submit_minigrid.sh"
         ;;
     *)
         echo "Usage: $0 [convergence|frozen-lake|wumpus-world|rocksample|minigrid|all]"

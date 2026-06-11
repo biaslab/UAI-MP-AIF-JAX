@@ -55,23 +55,23 @@ wumpus_world:
 
 wumpus_world_methods:
   loopy:
-    planning_iterations: 400
+    planning_iterations: 150
     damping: 1.0
 
   dyn-channel:
-    planning_iterations: 400
+    planning_iterations: 150
     damping: 0.25
 
   nuijten:
-    planning_iterations: 400
+    planning_iterations: 150
     damping: 1.0
 
   vbp-channel:
-    planning_iterations: 400
+    planning_iterations: 150
     damping: 0.6
 
   active-inference:
-    planning_iterations: 400
+    planning_iterations: 150
     damping: 0.6
 
 
@@ -98,23 +98,23 @@ rocksample:
 
 rocksample_methods:
   loopy:
-    planning_iterations: 200
+    planning_iterations: 100
     damping: 1.0
 
   dyn-channel:
-    planning_iterations: 200
+    planning_iterations: 100
     damping: 0.25
 
   nuijten:
-    planning_iterations: 200
+    planning_iterations: 100
     damping: 1.0
 
   vbp-channel:
-    planning_iterations: 200
+    planning_iterations: 100
     damping: 0.25
 
   active-inference:
-    planning_iterations: 200
+    planning_iterations: 100
     damping: 0.25
 
 
