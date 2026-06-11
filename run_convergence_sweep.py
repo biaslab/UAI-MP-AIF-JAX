@@ -91,7 +91,7 @@ def setup_frozen_lake(args, seed):
 
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = n_pos
+    n_states = 2 * n_pos  # doubled for scan mode
 
     holes = sample_configs(
         grid_size, args.n_configs,
@@ -103,7 +103,10 @@ def setup_frozen_lake(args, seed):
         dtype=jnp.float32,
     )
     B = jnp.array(
-        generate_observation_tensor(grid_size, holes, obs_noise=args.obs_noise),
+        generate_observation_tensor(
+            grid_size, holes,
+            base_noise=args.base_noise, noise_range=args.noise_range,
+        ),
         dtype=jnp.float32,
     )
     goal = jnp.array(
@@ -115,7 +118,7 @@ def setup_frozen_lake(args, seed):
         dtype=jnp.float32,
     )
 
-    # Neighbor-sensor channels only (last 4 of B)
+    # Directional channels only (last n_pos of B)
     B_dir = B[n_states:]
 
     # Initial beliefs: known start at position 0
@@ -123,8 +126,12 @@ def setup_frozen_lake(args, seed):
     n_static = holes.shape[0]
     q_static = jnp.ones(n_static, dtype=jnp.float32) / n_static
 
-    # Uniform prior over the 4 movement actions
-    action_prior = None
+    # Action prior with scan cost
+    action_prior = np.array(
+        [1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32,
+    )
+    action_prior = action_prior / action_prior.sum()
+    action_prior = jnp.array(action_prior)
 
     return ConvergenceSetup(T, B_dir, goal, q_current, q_static, action_prior)
 
@@ -464,8 +471,9 @@ def write_summary_csv(output_dir, env_name, all_results):
 ENV_DEFAULTS = {
     "frozen-lake": dict(
         grid_size=4, n_configs=15, hole_fraction=0.2, min_hamming=4,
-        obs_noise=0.15, slip_prob=0.1,
+        base_noise=0.4, noise_range=0.1, slip_prob=0.1,
         planning_horizon=15, hole_penalty=2.0, goal_temperature=1.0,
+        scan_cost=0.1,
     ),
     "wumpus-world": dict(
         grid_size=5, n_configs=25, n_pits=4,
@@ -531,9 +539,12 @@ def main():
     parser.add_argument("--n-configs", type=int, default=None)
     parser.add_argument("--hole-fraction", type=float, default=None)
     parser.add_argument("--min-hamming", type=int, default=None)
+    parser.add_argument("--base-noise", type=float, default=None)
+    parser.add_argument("--noise-range", type=float, default=None)
     parser.add_argument("--slip-prob", type=float, default=None)
     parser.add_argument("--hole-penalty", type=float, default=None)
     parser.add_argument("--goal-temperature", type=float, default=None)
+    parser.add_argument("--scan-cost", type=float, default=None)
 
     # Wumpus World specific
     parser.add_argument("--n-pits", type=int, default=None)
@@ -568,13 +579,13 @@ def main():
             setattr(args, arg_key, val)
 
     # Ensure all needed attributes exist (avoid AttributeError for other envs)
-    for attr in ["n_configs", "hole_fraction", "min_hamming",
-                 "hole_penalty", "n_pits", "obs_noise",
+    for attr in ["n_configs", "hole_fraction", "min_hamming", "base_noise",
+                 "noise_range", "hole_penalty", "n_pits", "obs_noise",
                  "pos_noise", "pit_penalty", "wumpus_penalty", "n_rocks",
                  "half_eff_dist", "good_logit", "bad_logit", "exit_logit",
                  "sample_cost", "terminal_goal_only", "fov_size", "obs_alpha",
-                 "observe_first", "sense_cost", "slip_prob", "goal_temperature",
-                 "grid_size", "planning_horizon"]:
+                 "observe_first", "scan_cost", "sense_cost", "slip_prob",
+                 "goal_temperature", "grid_size", "planning_horizon"]:
         if not hasattr(args, attr) or getattr(args, attr) is None:
             setattr(args, attr, None)
 

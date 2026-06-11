@@ -38,14 +38,14 @@ Available via `--planning-method`:
 
 ### Frozen Lake
 
-Slippery gridworld where the agent must reach a goal while avoiding holes. Hole layouts are randomized across configurations; the agent observes its own position plus a noisy breeze-style sensor reporting whether each adjacent cell contains a hole.
+Slippery gridworld where the agent must reach a goal while avoiding holes. Hole layouts are randomized across configurations; observations are noisy and distance-dependent.
 
 ```bash
 uv run python run_frozen_lake.py --grid-size 5 --n-configs 10 --episodes 1000 \
     --planning-method region-extended --planning-horizon 15 --damping 0.25
 ```
 
-Environment-specific arguments: `--n-configs`, `--hole-fraction`, `--min-hamming`, `--obs-noise`, `--slip-prob`, `--hole-penalty`, `--goal-temperature`.
+Environment-specific arguments: `--n-configs`, `--hole-fraction`, `--min-hamming`, `--base-noise`, `--noise-range`, `--slip-prob`, `--hole-penalty`, `--goal-temperature`, `--scan-cost`.
 
 ### Wumpus World
 

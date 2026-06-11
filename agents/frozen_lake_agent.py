@@ -94,7 +94,7 @@ def _infer_state(
 @dataclass(frozen=True)
 class _FrozenLakeAgentBase:
     transition_tensor: jnp.ndarray   # (n_states, n_states, n_static, n_actions)
-    observation_tensor: jnp.ndarray  # (n_pos + 4, 2, n_states, n_static) position + neighbor sensors
+    observation_tensor: jnp.ndarray  # (n_states + n_pos, 2, n_states, n_static) position + grid cell sensors
     goal: jnp.ndarray               # (n_states,) or (n_states, n_static)
     holes: jnp.ndarray              # (n_static, n_states)
     q_current_state: jnp.ndarray    # (n_states,)
@@ -107,10 +107,10 @@ class _FrozenLakeAgentBase:
 
     @property
     def _directional_obs(self) -> jnp.ndarray:
-        """Neighbor-sensor observation tensor (last 4 channels) for planning.
+        """Directional-only observation tensor (last 4 channels) for planning.
 
         Planners with observation factors only need the θ-dependent
-        neighbor-sensor channels, not the θ-independent position channels.
+        directional channels, not the θ-independent position channels.
         """
         n_states = self.transition_tensor.shape[0]
         return self.observation_tensor[n_states:]
@@ -133,7 +133,7 @@ class _FrozenLakeAgentBase:
         """Take a step given binary sensor observations.
 
         Args:
-            obs: (n_pos + 4,) binary sensor readings
+            obs: (n_states,) binary sensor readings
             time_remaining: steps left (used for receding horizon)
 
         Returns:

@@ -19,12 +19,13 @@ from environments.frozen_lake import (
     generate_goal,
     FrozenLakeEnv,
     pos_to_rc,
+    state_index,
+    unpack_state,
     N_ACTIONS,
-    N_SENSOR_CHANNELS,
 )
 from agents.frozen_lake_agent import create_agent
 
-ACTION_NAMES = ["left", "down", "right", "up"]
+ACTION_NAMES = ["left", "down", "right", "up", "scan"]
 
 
 # ---------------------------------------------------------------------------
@@ -39,8 +40,10 @@ def entropy(p):
 
 
 def print_position_grid(belief, grid_size, label="Position belief"):
-    """Print a 2D grid of position probabilities."""
-    pos_marginal = np.array(belief)
+    """Print a 2D grid of position probabilities (marginalised over scan mode)."""
+    n_pos = grid_size * grid_size
+    # Sum over scan modes: belief has 2*n_pos states
+    pos_marginal = np.array(belief[:n_pos]) + np.array(belief[n_pos:])
     print(f"    {label} (row\\col):")
     header = "        " + "  ".join(f"c={c:>2}" for c in range(grid_size))
     print(header)
@@ -69,22 +72,33 @@ def print_action_distribution(action_dist):
 
 
 def print_obs(obs, grid_size):
-    """Print position + neighbor sensor readings."""
+    """Print position + grid cell sensor readings."""
     n_pos = grid_size * grid_size
+    n_states = 2 * n_pos
 
-    # Position modality: first n_pos channels
-    pos_obs = obs[:n_pos]
-    observed_pos = int(jnp.argmax(pos_obs))
-    r, c = pos_to_rc(observed_pos, grid_size)
-    print(f"    Position: ({r},{c})")
+    # Position modality: first 2*n_pos channels
+    pos_obs = obs[:n_states]
+    observed_state = int(jnp.argmax(pos_obs))
+    pos, scanned = unpack_state(observed_state, n_pos)
+    r, c = pos_to_rc(pos, grid_size)
+    mode_str = "SCANNED" if scanned else "UNSCANNED"
+    print(f"    Position: ({r},{c})  mode={mode_str}")
 
-    # Neighbor sensor modality: last 4 channels (LEFT, DOWN, RIGHT, UP)
-    sensor_obs = obs[n_pos:]
-    readings = "  ".join(
-        f"{name}={float(sensor_obs[d]):.0f}"
-        for d, name in enumerate(["left", "down", "right", "up"])
-    )
-    print(f"    Neighbor hole sensors (1=hole detected): {readings}")
+    # Grid cell modality: last n_pos channels (hole sensors)
+    cell_obs = obs[n_states:]
+    print(f"    Grid cell sensors (1=hole detected, row\\col):")
+    header = "        " + "  ".join(f"c={c:>2}" for c in range(grid_size))
+    print(header)
+    for rr in range(grid_size):
+        row_str = f"  r={rr:>2}  "
+        for cc in range(grid_size):
+            idx = rr * grid_size + cc
+            if idx < len(cell_obs):
+                val = float(cell_obs[idx])
+                row_str += f"  {val:.0f}   "
+            else:
+                row_str += "   ?  "
+        print(row_str)
 
 
 def print_hole_heatmap(q_static, holes, grid_size):
@@ -146,11 +160,14 @@ def print_goal_diagnostic(goal, grid_size, holes):
 
     print("  [GOAL VECTOR DIAGNOSTIC]")
 
+    # Show goal values for key states (unscanned mode)
     goal_r, goal_c = pos_to_rc(goal_pos, grid_size)
-    print(f"    Goal position ({goal_r},{goal_c}): avg={float(goal_avg[goal_pos]):.6f}")
+    goal_val_unscanned = float(goal_avg[state_index(goal_pos, 0, n_pos)])
+    goal_val_scanned = float(goal_avg[state_index(goal_pos, 1, n_pos)])
+    print(f"    Goal position ({goal_r},{goal_c}): avg unscanned={goal_val_unscanned:.6f}, avg scanned={goal_val_scanned:.6f}")
 
     # Show per-config variation at goal position
-    goal_vals = np.array(goal[goal_pos, :])
+    goal_vals = np.array(goal[state_index(goal_pos, 0, n_pos), :])
     print(f"    Goal pos per-config: min={goal_vals.min():.6f}, max={goal_vals.max():.6f}, std={goal_vals.std():.6f}")
 
     # Find positions that are holes in most configs
@@ -168,24 +185,24 @@ def print_goal_diagnostic(goal, grid_size, holes):
         print(f"    Likely hole positions (P(hole) > 0.3):")
         for pos in hole_positions[:5]:
             r, c = pos_to_rc(pos, grid_size)
-            val = float(goal_avg[pos])
+            val = float(goal_avg[state_index(pos, 0, n_pos)])
             print(f"      ({r},{c}): avg_goal={val:.6f}  P(hole)={hole_marginal[pos]:.3f}")
 
     if normal_positions:
         print(f"    Safe positions (P(hole) < 0.1):")
         for pos in normal_positions[:5]:
             r, c = pos_to_rc(pos, grid_size)
-            val = float(goal_avg[pos])
+            val = float(goal_avg[state_index(pos, 0, n_pos)])
             print(f"      ({r},{c}): avg_goal={val:.6f}  P(hole)={hole_marginal[pos]:.3f}")
 
     # Summary: ratio between goal, safe, and hole values
-    goal_val = float(goal_avg[goal_pos])
+    goal_val = float(goal_avg[state_index(goal_pos, 0, n_pos)])
     if hole_positions:
-        avg_hole = np.mean([float(goal_avg[p]) for p in hole_positions])
+        avg_hole = np.mean([float(goal_avg[state_index(p, 0, n_pos)]) for p in hole_positions])
     else:
         avg_hole = 0.0
     if normal_positions:
-        avg_safe = np.mean([float(goal_avg[p]) for p in normal_positions])
+        avg_safe = np.mean([float(goal_avg[state_index(p, 0, n_pos)]) for p in normal_positions])
     else:
         avg_safe = 0.0
 
@@ -193,6 +210,14 @@ def print_goal_diagnostic(goal, grid_size, holes):
     if avg_safe > 0:
         print(f"    Ratios: goal/safe={goal_val/avg_safe:.2f}x, safe/hole={avg_safe/max(avg_hole, 1e-12):.2f}x")
     print()
+
+
+def print_scan_mode_belief(belief, grid_size):
+    """Print belief mass in unscanned vs scanned mode."""
+    n_pos = grid_size * grid_size
+    unscanned_mass = float(jnp.sum(belief[:n_pos]))
+    scanned_mass = float(jnp.sum(belief[n_pos:]))
+    print(f"    Scan mode: unscanned={unscanned_mass:.4f}, scanned={scanned_mass:.4f}")
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +228,7 @@ def print_goal_diagnostic(goal, grid_size, holes):
 def run_diagnostic_episode(agent, env, args, holes, compare_bp_agent=None):
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = n_pos
+    n_states = 2 * n_pos
     n_static = holes.shape[0]
     max_steps = env.max_steps
 
@@ -240,7 +265,7 @@ def run_diagnostic_episode(agent, env, args, holes, compare_bp_agent=None):
 
         # --- TRUE STATE ---
         true_r, true_c = pos_to_rc(env._position, grid_size)
-        print(f"  [TRUE STATE] position=({true_r},{true_c})  config={theta}")
+        print(f"  [TRUE STATE] position=({true_r},{true_c})  scanned={env._scanned}  config={theta}")
         print(f"  True world:")
         for line in env.render_ascii().split("\n"):
             print(f"    {line}")
@@ -265,13 +290,18 @@ def run_diagnostic_episode(agent, env, args, holes, compare_bp_agent=None):
         print(f"    Step time: {elapsed_ms:.1f}ms")
         print()
 
+        # --- SCAN MODE BELIEF ---
+        print("  [SCAN MODE BELIEF]")
+        print_scan_mode_belief(agent.q_current_state, grid_size)
+        print()
+
         # --- POSITION BELIEF ---
         print("  [POSITION BELIEF]")
         q_pos = agent.q_current_state
         print_position_grid(q_pos, grid_size)
 
-        # MAP position
-        pos_marginal = np.array(q_pos)
+        # MAP over position marginal (sum over scan modes)
+        pos_marginal = np.array(q_pos[:n_pos]) + np.array(q_pos[n_pos:])
         map_pos = int(np.argmax(pos_marginal))
         map_r, map_c = pos_to_rc(map_pos, grid_size)
         map_p = float(pos_marginal[map_pos])
@@ -305,10 +335,16 @@ def run_diagnostic_episode(agent, env, args, holes, compare_bp_agent=None):
 
         # Goal values at current position, goal, and hole positions
         # goal is (n_states, n_static) — show values for true config theta
+        true_state_unscanned = state_index(env._position, 0, n_pos)
+        true_state_scanned = state_index(env._position, 1, n_pos)
+        goal_state_unscanned = state_index(n_pos - 1, 0, n_pos)
+        goal_state_scanned = state_index(n_pos - 1, 1, n_pos)
         print(f"    Goal value at current pos ({true_r},{true_c}) [config {theta}]: "
-              f"{float(agent.goal[env._position, theta]):.6f}")
+              f"unscanned={float(agent.goal[true_state_unscanned, theta]):.6f}, "
+              f"scanned={float(agent.goal[true_state_scanned, theta]):.6f}")
         print(f"    Goal value at goal pos [config {theta}]: "
-              f"{float(agent.goal[n_pos - 1, theta]):.6f}")
+              f"unscanned={float(agent.goal[goal_state_unscanned, theta]):.6f}, "
+              f"scanned={float(agent.goal[goal_state_scanned, theta]):.6f}")
 
         # Show goal values at known hole positions
         hole_config = holes[theta]
@@ -316,7 +352,7 @@ def run_diagnostic_episode(agent, env, args, holes, compare_bp_agent=None):
         if hole_positions:
             for hp in hole_positions[:4]:
                 hr, hc = pos_to_rc(hp, grid_size)
-                hval = float(agent.goal[hp, theta])
+                hval = float(agent.goal[state_index(hp, 0, n_pos), theta])
                 print(f"    Goal value at hole ({hr},{hc}) [config {theta}]: {hval:.6f}")
         print()
 
@@ -381,7 +417,8 @@ def main():
     parser.add_argument("--n-configs", type=int, default=50)
     parser.add_argument("--hole-fraction", type=float, default=0.2)
     parser.add_argument("--min-hamming", type=int, default=0)
-    parser.add_argument("--obs-noise", type=float, default=0.15)
+    parser.add_argument("--base-noise", type=float, default=0.05)
+    parser.add_argument("--noise-range", type=float, default=0.15)
     parser.add_argument("--slip-prob", type=float, default=0.0)
     parser.add_argument("--max-steps", type=int, default=30)
     parser.add_argument("--planning-horizon", type=int, default=15)
@@ -393,6 +430,8 @@ def main():
     parser.add_argument("--damping", type=float, default=1.0)
     parser.add_argument("--hole-penalty", type=float, default=1.0)
     parser.add_argument("--goal-temperature", type=float, default=1.0)
+    parser.add_argument("--scan-cost", type=float, default=0.5,
+                        help="SCAN action prior weight (lower = more costly)")
     parser.add_argument("--receding-horizon", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -402,14 +441,14 @@ def main():
 
     grid_size = args.grid_size
     n_pos = grid_size * grid_size
-    n_states = n_pos
+    n_states = 2 * n_pos
 
     print(f"JAX devices: {jax.devices()}")
     print(f"JAX backend: {jax.default_backend()}")
     print()
     print(f"Frozen Lake {grid_size}x{grid_size}")
     print(f"  Configs: {args.n_configs}, hole fraction: {args.hole_fraction}")
-    print(f"  Obs noise: {args.obs_noise}")
+    print(f"  Base noise: {args.base_noise}, noise range: {args.noise_range}")
     print(f"  Slip prob: {args.slip_prob}")
     print(f"  Method: {args.planning_method}")
     print(f"  Horizon: {args.planning_horizon} ({'receding' if args.receding_horizon else 'fixed'})")
@@ -417,8 +456,9 @@ def main():
     if args.damping < 1.0:
         print(f"  Damping: {args.damping}")
     print(f"  Hole penalty: {args.hole_penalty}, goal temperature: {args.goal_temperature}")
+    print(f"  Scan cost: {args.scan_cost}")
     print(f"  Seed: {args.seed}")
-    print(f"  State space: {n_states} states ({n_pos} positions)")
+    print(f"  State space: {n_states} states ({n_pos} positions x 2 scan modes)")
     print()
 
     print("Generating tensors...")
@@ -430,7 +470,8 @@ def main():
         min_hamming=args.min_hamming,
     )
     T = generate_transition_tensor(grid_size, holes, slip_prob=args.slip_prob)
-    B = generate_observation_tensor(grid_size, holes, obs_noise=args.obs_noise)
+    B = generate_observation_tensor(grid_size, holes, base_noise=args.base_noise,
+                                    noise_range=args.noise_range)
     goal = generate_goal(grid_size, holes, hole_penalty=args.hole_penalty,
                          temperature=args.goal_temperature)
 
@@ -453,8 +494,9 @@ def main():
     }
     method_key = METHOD_MAP[args.planning_method]
 
-    # Uniform prior over the 4 movement actions
-    action_prior = None
+    # Construct action prior: [1, 1, 1, 1, scan_cost] normalized
+    action_prior = np.array([1.0, 1.0, 1.0, 1.0, args.scan_cost], dtype=np.float32)
+    action_prior = action_prior / action_prior.sum()
 
     agent = create_agent(
         method_key, T, B, goal, holes,

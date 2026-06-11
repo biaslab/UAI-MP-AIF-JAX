@@ -44,10 +44,12 @@ case "${STAGE_TYPE:?STAGE_TYPE not set}" in
                     --planning-horizon "$(read_param "['convergence_sweep']['frozen_lake']['planning_horizon']")" \
                     --hole-fraction "$(read_param "['convergence_sweep']['frozen_lake']['hole_fraction']")" \
                     --min-hamming "$(read_param "['convergence_sweep']['frozen_lake']['min_hamming']")" \
-                    --obs-noise "$(read_param "['convergence_sweep']['frozen_lake']['obs_noise']")" \
+                    --base-noise "$(read_param "['convergence_sweep']['frozen_lake']['base_noise']")" \
+                    --noise-range "$(read_param "['convergence_sweep']['frozen_lake']['noise_range']")" \
                     --slip-prob "$(read_param "['convergence_sweep']['frozen_lake']['slip_prob']")" \
                     --hole-penalty "$(read_param "['convergence_sweep']['frozen_lake']['hole_penalty']")" \
                     --goal-temperature "$(read_param "['convergence_sweep']['frozen_lake']['goal_temperature']")" \
+                    --scan-cost "$(read_param "['convergence_sweep']['frozen_lake']['scan_cost']")" \
                     --n-iterations "$N_ITERATIONS" \
                     --output-dir data/convergence_sweep
                 ;;

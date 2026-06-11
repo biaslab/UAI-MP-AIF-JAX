@@ -17,7 +17,7 @@ tests/              # Unit & integration tests
 | Environment | Entry point | Config key | Description |
 |---|---|---|---|
 | MiniGrid DoorKey | `run_minigrid.py` | `experiment` | Partially observable gridworld with key-door puzzle |
-| Frozen Lake | `run_frozen_lake.py` | `frozen_lake` | Slippery gridworld with holes; passive noisy adjacent-cell hole sensor |
+| Frozen Lake | `run_frozen_lake.py` | `frozen_lake` | Slippery gridworld with holes; configurable layouts |
 | Wumpus World | `run_wumpus_world.py` | `wumpus_world` | Gridworld with pits and wumpus; event-gated SENSE action for breeze/stench/glitter |
 | RockSample | `run_rocksample.py` | `rocksample` | Canonical RockSample; per-rock SENSE actions, event-gated distance-dependent observations |
 

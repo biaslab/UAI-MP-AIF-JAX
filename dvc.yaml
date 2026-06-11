@@ -8,10 +8,12 @@ stages:
       --planning-horizon ${convergence_sweep.frozen_lake.planning_horizon}
       --hole-fraction ${convergence_sweep.frozen_lake.hole_fraction}
       --min-hamming ${convergence_sweep.frozen_lake.min_hamming}
-      --obs-noise ${convergence_sweep.frozen_lake.obs_noise}
+      --base-noise ${convergence_sweep.frozen_lake.base_noise}
+      --noise-range ${convergence_sweep.frozen_lake.noise_range}
       --slip-prob ${convergence_sweep.frozen_lake.slip_prob}
       --hole-penalty ${convergence_sweep.frozen_lake.hole_penalty}
       --goal-temperature ${convergence_sweep.frozen_lake.goal_temperature}
+      --scan-cost ${convergence_sweep.frozen_lake.scan_cost}
       --n-iterations ${convergence_sweep.n_iterations}
       --output-dir data/convergence_sweep
     deps:
@@ -133,7 +135,8 @@ stages:
         --n-configs ${frozen_lake.n_configs}
         --hole-fraction ${frozen_lake.hole_fraction}
         --min-hamming ${frozen_lake.min_hamming}
-        --obs-noise ${frozen_lake.obs_noise}
+        --base-noise ${frozen_lake.base_noise}
+        --noise-range ${frozen_lake.noise_range}
         --slip-prob ${frozen_lake.slip_prob}
         --episodes ${frozen_lake.episodes}
         --max-steps ${frozen_lake.max_steps}
@@ -142,6 +145,7 @@ stages:
         --damping ${item.damping}
         --hole-penalty ${frozen_lake.hole_penalty}
         --goal-temperature ${frozen_lake.goal_temperature}
+        --scan-cost ${frozen_lake.scan_cost}
         --seed ${frozen_lake.seed}
         --receding-horizon
         --output data/results/frozen_lake/${key}.json
